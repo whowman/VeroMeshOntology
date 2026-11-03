@@ -104,7 +104,10 @@ class DataHubSdkPort:
         import requests
 
         try:
-            raw = self._graph.get_entity_raw(urn, aspects=[BINDINGS_ASPECT])
+            # No aspect filter: on DataHub v1.8.0, entitiesV2 with ?aspects=List(...)
+            # naming a plugin aspect returns only the key aspect, so the bindings
+            # would silently read as empty and the next write would drop them.
+            raw = self._graph.get_entity_raw(urn)
         except requests.HTTPError as exc:
             if exc.response is not None and exc.response.status_code == 404:
                 return []
