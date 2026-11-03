@@ -7,20 +7,12 @@
 # Requires Docker Compose >= 2.20 and ~8 GB RAM for Docker.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../deploy/versions.env
-source "$ROOT/deploy/versions.env"
-export DATAHUB_VERSION OXIGRAPH_VERSION
+# shellcheck source=_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
-PROFILES_DIR="$ROOT/.build/datahub-profiles-$DATAHUB_VERSION"
-
-# 1. Fetch DataHub's official compose profiles for the pinned release (unmodified).
-if [[ ! -d "$PROFILES_DIR/docker/profiles" ]]; then
-  echo ">> Fetching DataHub $DATAHUB_VERSION compose profiles"
-  git clone --depth 1 --branch "$DATAHUB_VERSION" --filter=blob:none --sparse \
-    https://github.com/datahub-project/datahub.git "$PROFILES_DIR"
-  git -C "$PROFILES_DIR" sparse-checkout set docker/profiles
-fi
+# 1. Fetch DataHub's official docker configuration for the pinned release.
+fetch_datahub_profiles
+load_datahub_secrets
 
 # 2. Build + deploy the Veromesh custom aspect into ~/.datahub/plugins (mounted into GMS).
 if [[ -z "${SKIP_MODEL:-}" ]]; then
@@ -29,13 +21,13 @@ fi
 
 # 3. Start DataHub.
 echo ">> Starting DataHub ($DATAHUB_PROFILE)"
-(cd "$PROFILES_DIR/docker/profiles" && docker compose --profile "$DATAHUB_PROFILE" up -d)
+(cd "$PROFILES_COMPOSE_DIR" && docker compose --profile "$DATAHUB_PROFILE" up -d)
 
 # wait_for <name> <url> <seconds>
 wait_for() {
   local name="$1" url="$2" limit="$3" waited=0
   printf ">> Waiting for %s" "$name"
-  until curl -fsS -o /dev/null "$url"; do
+  until curl -fs -o /dev/null "$url"; do
     if (( waited >= limit )); then
       echo; echo "!! $name not healthy after ${limit}s. Check: docker ps -a ; docker logs <container>" >&2
       exit 1
