@@ -42,24 +42,44 @@ wait_for "DataHub GMS" "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/health
 wait_for "DataHub UI" "http://localhost:9002/admin" 300
 
 # 4. DataHub requires a token for API calls. Create a personal access token for
-#    the local dev user once and reuse it (stored in .build/, not committed).
+#    the local dev user and reuse it while it stays valid (kept in .build/, not committed).
+GMS="http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}"
 TOKEN_FILE="$ROOT/.build/datahub-token"
+
+token_valid() {
+  [[ -s "$TOKEN_FILE" ]] && curl -fs -o /dev/null -X POST "$GMS/api/graphql" \
+    -H "Authorization: Bearer $(cat "$TOKEN_FILE")" -H 'Content-Type: application/json' \
+    -d '{"query":"{ me { corpUser { urn } } }"}'
+}
+
+create_token() {
+  local cookies response
+  cookies="$(mktemp)"
+  curl -fsS -c "$cookies" -o /dev/null -X POST http://localhost:9002/logIn \
+    -H 'Content-Type: application/json' -d '{"username":"datahub","password":"datahub"}' || return 1
+  response="$(curl -fsS -b "$cookies" -X POST http://localhost:9002/api/v2/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"mutation { createAccessToken(input: {type: PERSONAL, actorUrn: \"urn:li:corpuser:datahub\", duration: ONE_MONTH, name: \"veromesh-dev\"}) { accessToken } }"}')"
+  rm -f "$cookies"
+  TOKEN="$(printf '%s' "$response" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
+  LAST_RESPONSE="$response"
+  [[ -n "$TOKEN" ]]
+}
+
 if [[ -z "${VEROMESH_DATAHUB_TOKEN:-}" ]]; then
-  if [[ ! -s "$TOKEN_FILE" ]] || ! curl -fs -o /dev/null -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
-      "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/config"; then
+  if ! token_valid; then
     echo ">> Creating DataHub access token for local dev user 'datahub'"
-    COOKIES="$(mktemp)"
-    curl -fsS -c "$COOKIES" -o /dev/null -X POST http://localhost:9002/logIn \
-      -H 'Content-Type: application/json' -d '{"username":"datahub","password":"datahub"}'
-    RESPONSE="$(curl -fsS -b "$COOKIES" -X POST http://localhost:9002/api/v2/graphql \
-      -H 'Content-Type: application/json' \
-      -d '{"query":"mutation { createAccessToken(input: {type: PERSONAL, actorUrn: \"urn:li:corpuser:datahub\", duration: NO_EXPIRY, name: \"veromesh-dev\"}) { accessToken } }"}')"
-    rm -f "$COOKIES"
-    TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
-    if [[ -z "$TOKEN" ]]; then
-      echo "!! Could not create a DataHub token. Response: $RESPONSE" >&2
-      exit 1
-    fi
+    # DataHub loads its default access policies into a cache that refreshes on a
+    # timer, so right after startup token creation can be refused for a while.
+    attempts=0
+    until create_token; do
+      attempts=$((attempts + 1))
+      if (( attempts >= 36 )); then
+        echo "!! Could not create a DataHub token. Last response: ${LAST_RESPONSE:-none}" >&2
+        exit 1
+      fi
+      sleep 5
+    done
     (umask 077 && printf '%s' "$TOKEN" > "$TOKEN_FILE")
   fi
   VEROMESH_DATAHUB_TOKEN="$(cat "$TOKEN_FILE")"
