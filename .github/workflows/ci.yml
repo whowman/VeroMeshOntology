@@ -72,3 +72,37 @@ jobs:
         with:
           name: veromesh-ontology-model
           path: datahub-model/dist/*.zip
+
+  stack:
+    # End-to-end: start the full local stack exactly as a developer would
+    # (Docker-only plugin build), load the example ontology and bind a dataset.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space for DataHub images
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
+      - name: Load example ontology and publish glossary
+        run: scripts/load-examples.sh
+      - name: Bind a dataset and verify in both stores
+        run: |
+          set -euo pipefail
+          URN='urn:li:dataset:(urn:li:dataPlatform:snowflake,crm.public.customers,PROD)'
+          curl -fsS -X POST localhost:8700/bindings -H 'Content-Type: application/json' \
+            -d "{\"datahub_urn\": \"$URN\", \"class_iri\": \"https://example.com/ontology/retail#Customer\"}"
+          echo
+          curl -fsS 'localhost:8700/classes/assets?class_iri=https://example.com/ontology/retail%23Party' | tee assets.json
+          echo
+          grep -q 'crm.public.customers' assets.json
+          ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$URN")
+          curl -fsS "localhost:8080/entitiesV2/$ENC?aspects=List(veromeshOntologyBindings,glossaryTerms)" | tee entity.json
+          echo
+          grep -q 'retail#Customer' entity.json
+          grep -q 'urn:li:glossaryTerm:veromesh.' entity.json
+      - name: Diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for c in $(docker ps -a --format '{{.Names}}'); do echo "=== $c"; docker logs --tail 80 "$c" 2>&1; done

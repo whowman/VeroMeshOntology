@@ -29,11 +29,29 @@ fi
 
 # 3. Start DataHub.
 echo ">> Starting DataHub ($DATAHUB_PROFILE)"
-(cd "$PROFILES_DIR/docker/profiles" && docker compose --profile "$DATAHUB_PROFILE" up -d --wait)
+(cd "$PROFILES_DIR/docker/profiles" && docker compose --profile "$DATAHUB_PROFILE" up -d)
+
+# wait_for <name> <url> <seconds>
+wait_for() {
+  local name="$1" url="$2" limit="$3" waited=0
+  printf ">> Waiting for %s" "$name"
+  until curl -fsS -o /dev/null "$url"; do
+    if (( waited >= limit )); then
+      echo; echo "!! $name not healthy after ${limit}s. Check: docker ps -a ; docker logs <container>" >&2
+      exit 1
+    fi
+    printf "."; sleep 5; waited=$((waited + 5))
+  done
+  echo " up"
+}
+
+# First start pulls images and runs DataHub's one-time setup; allow 15 minutes.
+wait_for "DataHub GMS" "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/health" 900
 
 # 4. Start Veromesh services on DataHub's network.
 echo ">> Starting Veromesh services"
 docker compose -f "$ROOT/deploy/docker-compose.veromesh.yml" up -d --build
+wait_for "Veromesh API" "http://localhost:${VEROMESH_SERVICE_PORT:-8700}/health" 120
 
 cat <<EOF
 

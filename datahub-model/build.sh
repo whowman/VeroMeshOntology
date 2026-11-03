@@ -10,7 +10,8 @@
 #   datahub-model/build.sh            # build zip into datahub-model/dist/
 #   datahub-model/build.sh --deploy   # also unpack into ~/.datahub/plugins/models/
 #
-# Requires: git, JDK 25 (DataHub v1.8.0 compiles some modules for Java 25).
+# Requires: git, and either JDK 25 or Docker (DataHub v1.8.0 targets Java 25;
+# without a local JDK 25 the build runs in an eclipse-temurin:25-jdk container).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,8 +35,25 @@ mkdir -p "$MODULE/src/main"
 cp -R "$HERE/src/main/pegasus" "$MODULE/src/main/pegasus"
 cp -R "$HERE/registry" "$MODULE/registry"
 
+GRADLE_ARGS=(--no-daemon "-PprojVersion=$MODEL_VERSION" :metadata-models-custom:build -x test)
+
+java_major() { java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1; }
+
 echo ">> Building $REGISTRY_ID $MODEL_VERSION"
-(cd "$WORK" && ./gradlew --no-daemon -PprojVersion="$MODEL_VERSION" :metadata-models-custom:build -x test)
+if [[ -z "${BUILD_IN_DOCKER:-}" ]] && command -v java >/dev/null && [[ "$(java_major)" -ge 25 ]]; then
+  (cd "$WORK" && ./gradlew "${GRADLE_ARGS[@]}")
+else
+  # No local JDK 25: build inside a JDK 25 container. The Gradle cache lives in a
+  # named volume so rebuilds are fast; files are handed back to the host user.
+  echo ">> Using Docker (eclipse-temurin:25-jdk) for the build"
+  docker run --rm \
+    -v "$WORK":/work -w /work \
+    -v veromesh-gradle-cache:/root/.gradle \
+    eclipse-temurin:25-jdk \
+    bash -c "(command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git >/dev/null)) \
+      && git config --global --add safe.directory /work \
+      && ./gradlew ${GRADLE_ARGS[*]}; rc=\$?; chown -R $(id -u):$(id -g) /work; exit \$rc"
+fi
 
 mkdir -p "$HERE/dist"
 ZIP="$MODULE/build/dist/metadata-models-custom-$MODEL_VERSION.zip"
