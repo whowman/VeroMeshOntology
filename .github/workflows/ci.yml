@@ -102,11 +102,22 @@ jobs:
           echo
           grep -q 'crm.public.customers' assets.json
           ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$URN")
-          curl -fsS -H "Authorization: Bearer $(cat .build/datahub-token)" \
-            "localhost:8080/entitiesV2/$ENC?aspects=List(veromeshOntologyBindings,glossaryTerms)" | tee entity.json
-          echo
-          grep -q 'retail#Customer' entity.json
-          grep -q 'urn:li:glossaryTerm:veromesh.' entity.json
+          AUTH="Authorization: Bearer $(cat .build/datahub-token)"
+          ok=
+          for i in 1 2 3 4 5 6; do
+            curl -fsS -H "$AUTH" "localhost:8080/entitiesV2/$ENC" > entity.json
+            if grep -q 'retail#Customer' entity.json && grep -q 'urn:li:glossaryTerm:veromesh.' entity.json; then ok=1; break; fi
+            sleep 5
+          done
+          python3 -m json.tool entity.json | head -80
+          if [ -z "$ok" ]; then
+            echo "--- openapi v3 view"
+            curl -sS -H "$AUTH" "localhost:8080/openapi/v3/entity/dataset/$ENC" | head -c 4000; echo
+            echo "--- GMS lines mentioning the aspects"
+            docker logs "$(docker ps --format '{{.Names}}' | grep -m1 datahub-gms)" 2>&1 \
+              | grep -E 'veromeshOntologyBindings|glossaryTerms|ingestProposal|crm.public.customers' | grep -v '^\s*at ' | tail -40
+            exit 1
+          fi
       - name: Diagnostics
         if: failure()
         run: |
