@@ -97,7 +97,8 @@ jobs:
           echo
           grep -q 'crm.public.customers' assets.json
           ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$URN")
-          curl -fsS "localhost:8080/entitiesV2/$ENC?aspects=List(veromeshOntologyBindings,glossaryTerms)" | tee entity.json
+          curl -fsS -H "Authorization: Bearer $(cat .build/datahub-token)" \
+            "localhost:8080/entitiesV2/$ENC?aspects=List(veromeshOntologyBindings,glossaryTerms)" | tee entity.json
           echo
           grep -q 'retail#Customer' entity.json
           grep -q 'urn:li:glossaryTerm:veromesh.' entity.json

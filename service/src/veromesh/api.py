@@ -5,6 +5,7 @@
 
 from typing import Annotated
 
+from datahub.configuration.common import OperationalError
 from fastapi import Depends, FastAPI, Query, Request
 from pydantic import BaseModel
 
@@ -69,6 +70,12 @@ def create_app(service: VeromeshService | None = None) -> FastAPI:
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(OperationalError)
+    async def _datahub_error(_: Request, exc: OperationalError):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=502, content={"detail": f"DataHub request failed: {exc}"})
 
     @app.get("/health")
     def health() -> dict:

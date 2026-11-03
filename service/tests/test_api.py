@@ -86,3 +86,15 @@ def test_publish_glossary(service, fake_datahub):
     r = client_for(service).post("/glossary/publish", json={"graph": RETAIL_GRAPH, "name": "Retail"})
     assert r.status_code == 200
     assert len(r.json()["term_urns"]) == 5
+
+
+def test_datahub_errors_are_502(service, fake_datahub, monkeypatch):
+    from datahub.configuration.common import OperationalError
+
+    def boom(*args, **kwargs):
+        raise OperationalError("Unable to emit metadata to DataHub GMS", {"status": 401})
+
+    monkeypatch.setattr(fake_datahub, "upsert_glossary_node", boom)
+    r = client_for(service).post("/glossary/publish", json={"graph": RETAIL_GRAPH})
+    assert r.status_code == 502
+    assert "DataHub request failed" in r.json()["detail"]

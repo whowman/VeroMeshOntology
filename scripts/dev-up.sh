@@ -39,8 +39,34 @@ wait_for() {
 
 # First start pulls images and runs DataHub's one-time setup; allow 15 minutes.
 wait_for "DataHub GMS" "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/health" 900
+wait_for "DataHub UI" "http://localhost:9002/admin" 300
 
-# 4. Start Veromesh services on DataHub's network.
+# 4. DataHub requires a token for API calls. Create a personal access token for
+#    the local dev user once and reuse it (stored in .build/, not committed).
+TOKEN_FILE="$ROOT/.build/datahub-token"
+if [[ -z "${VEROMESH_DATAHUB_TOKEN:-}" ]]; then
+  if [[ ! -s "$TOKEN_FILE" ]] || ! curl -fs -o /dev/null -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
+      "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/config"; then
+    echo ">> Creating DataHub access token for local dev user 'datahub'"
+    COOKIES="$(mktemp)"
+    curl -fsS -c "$COOKIES" -o /dev/null -X POST http://localhost:9002/logIn \
+      -H 'Content-Type: application/json' -d '{"username":"datahub","password":"datahub"}'
+    RESPONSE="$(curl -fsS -b "$COOKIES" -X POST http://localhost:9002/api/v2/graphql \
+      -H 'Content-Type: application/json' \
+      -d '{"query":"mutation { createAccessToken(input: {type: PERSONAL, actorUrn: \"urn:li:corpuser:datahub\", duration: NO_EXPIRY, name: \"veromesh-dev\"}) { accessToken } }"}')"
+    rm -f "$COOKIES"
+    TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
+    if [[ -z "$TOKEN" ]]; then
+      echo "!! Could not create a DataHub token. Response: $RESPONSE" >&2
+      exit 1
+    fi
+    (umask 077 && printf '%s' "$TOKEN" > "$TOKEN_FILE")
+  fi
+  VEROMESH_DATAHUB_TOKEN="$(cat "$TOKEN_FILE")"
+fi
+export VEROMESH_DATAHUB_TOKEN
+
+# 5. Start Veromesh services on DataHub's network.
 echo ">> Starting Veromesh services"
 docker compose -f "$ROOT/deploy/docker-compose.veromesh.yml" up -d --build
 wait_for "Veromesh API" "http://localhost:${VEROMESH_SERVICE_PORT:-8700}/health" 120
