@@ -22,7 +22,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 
 ## Quick start (local)
 
-Requires Docker with Compose ≥ 2.20 and ~8 GB RAM, git, and JDK 17+ (to build the DataHub model plugin).
+Requires Docker with Compose ≥ 2.20 and ~8 GB RAM, git, and JDK 25 (to build the DataHub model plugin; DataHub v1.8.0 targets Java 25).
 
 ```bash
 scripts/dev-up.sh          # DataHub (Postgres + OpenSearch) + Oxigraph + Veromesh API

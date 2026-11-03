@@ -10,7 +10,7 @@
 #   datahub-model/build.sh            # build zip into datahub-model/dist/
 #   datahub-model/build.sh --deploy   # also unpack into ~/.datahub/plugins/models/
 #
-# Requires: git, JDK 17.
+# Requires: git, JDK 25 (DataHub v1.8.0 compiles some modules for Java 25).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
