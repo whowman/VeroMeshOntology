@@ -1,0 +1,18 @@
+namespace ai.veromesh.ontology
+
+/**
+ * Ontology classes (business concepts) that a data asset represents, as
+ * maintained by Veromesh. Each entry points at an OWL class IRI.
+ */
+@Aspect = {
+  "name": "veromeshOntologyBindings",
+  "autoRender": true,
+  "renderSpec": {
+    "displayType": "tabular",
+    "key": "bindings",
+    "displayName": "Ontology"
+  }
+}
+record OntologyBindings {
+  bindings: array[OntologyBinding]
+}

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check . && ruff format --check .
+      - run: pytest -q
+
+      - name: License report
+        run: |
+          pip-licenses --format=markdown --with-urls --order=license \
+            --ignore-packages veromesh pip-licenses > ../service-licenses.md
+          # Fail on licenses we don't ship (see docs/licensing.md).
+          pip-licenses --ignore-packages veromesh pip-licenses \
+            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: service-licenses
+          path: service-licenses.md
+
+  ontology:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyoxigraph
+      - name: Parse all Turtle files
+        run: |
+          python - <<'EOF'
+          import pathlib, pyoxigraph as ox
+          for p in pathlib.Path("ontology").rglob("*.ttl"):
+              ox.Store().load(p.read_bytes(), format=ox.RdfFormat.TURTLE)
+              print("ok", p)
+          EOF
+
+  deploy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f deploy/docker-compose.veromesh.yml config -q
+      - run: for f in scripts/*.sh datahub-model/build.sh; do bash -n "$f"; done

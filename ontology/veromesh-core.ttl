@@ -1,0 +1,36 @@
+@prefix vm:   <https://veromesh.ai/ontology/core#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# Veromesh core vocabulary: the minimal terms Veromesh needs to connect
+# domain ontologies to data assets catalogued in DataHub.
+
+<https://veromesh.ai/ontology/core>
+    a owl:Ontology ;
+    rdfs:label "Veromesh Core" ;
+    dcterms:description "Vocabulary linking domain ontologies to DataHub data assets." ;
+    owl:versionInfo "0.1.0" .
+
+vm:DataAsset
+    a owl:Class ;
+    rdfs:label "Data Asset" ;
+    skos:definition "Anything catalogued in DataHub (dataset, dashboard, chart, schema field, etc.), identified by its DataHub URN." .
+
+vm:datahubUrn
+    a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:label "DataHub URN" ;
+    rdfs:domain vm:DataAsset ;
+    rdfs:range xsd:string ;
+    skos:definition "The DataHub URN of the asset, e.g. urn:li:dataset:(urn:li:dataPlatform:snowflake,db.schema.table,PROD)." .
+
+# vm:represents points at a class IRI (OWL 2 punning: the class is used as an
+# individual here), so it is declared as an annotation property to stay in OWL 2 DL.
+vm:represents
+    a owl:AnnotationProperty ;
+    rdfs:label "represents" ;
+    rdfs:domain vm:DataAsset ;
+    skos:definition "The business concept (ontology class) whose instances are recorded in this data asset." .

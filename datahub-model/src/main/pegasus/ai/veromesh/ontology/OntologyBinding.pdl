@@ -1,0 +1,24 @@
+namespace ai.veromesh.ontology
+
+/**
+ * A single link between a data asset and an ontology class.
+ */
+record OntologyBinding {
+  /** IRI of the OWL class, e.g. https://example.com/ontology/retail#Customer */
+  classIri: string
+
+  /** Human-readable class label, copied from rdfs:label for display. */
+  label: optional string
+
+  /** IRI of the ontology (named graph) that defines the class. */
+  ontologyIri: string
+
+  /** owl:versionInfo of the ontology when the binding was made. */
+  ontologyVersion: optional string
+
+  /** Kind of link. "represents" = the asset records instances of the class. */
+  relation: string = "represents"
+
+  /** Who or what created the binding (user, rule, model). */
+  source: optional string
+}

@@ -1,0 +1,57 @@
+@prefix ret:  <https://example.com/ontology/retail#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# Small example domain ontology used in tests and the README walkthrough.
+
+<https://example.com/ontology/retail>
+    a owl:Ontology ;
+    rdfs:label "Retail (example)" ;
+    owl:versionInfo "0.1.0" .
+
+ret:Party
+    a owl:Class ;
+    rdfs:label "Party" ;
+    skos:definition "A person or organization that takes part in a transaction." .
+
+ret:Customer
+    a owl:Class ;
+    rdfs:subClassOf ret:Party ;
+    rdfs:label "Customer" ;
+    skos:definition "A party that has purchased, or may purchase, goods or services." .
+
+ret:LoyaltyMember
+    a owl:Class ;
+    rdfs:subClassOf ret:Customer ;
+    rdfs:label "Loyalty Member" ;
+    skos:definition "A customer enrolled in the loyalty program." .
+
+ret:Product
+    a owl:Class ;
+    rdfs:label "Product" ;
+    skos:definition "A good or service offered for sale." .
+
+ret:Order
+    a owl:Class ;
+    rdfs:label "Order" ;
+    skos:definition "A customer's request to purchase one or more products." .
+
+ret:placedBy
+    a owl:ObjectProperty ;
+    rdfs:label "placed by" ;
+    rdfs:domain ret:Order ;
+    rdfs:range ret:Customer .
+
+ret:contains
+    a owl:ObjectProperty ;
+    rdfs:label "contains" ;
+    rdfs:domain ret:Order ;
+    rdfs:range ret:Product .
+
+ret:orderTotal
+    a owl:DatatypeProperty ;
+    rdfs:label "order total" ;
+    rdfs:domain ret:Order ;
+    rdfs:range xsd:decimal .

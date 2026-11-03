@@ -1,0 +1,17 @@
+id: veromesh-ontology-model
+entities:
+  - name: dataset
+    aspects:
+      - veromeshOntologyBindings
+  - name: schemaField
+    aspects:
+      - veromeshOntologyBindings
+  - name: dashboard
+    aspects:
+      - veromeshOntologyBindings
+  - name: chart
+    aspects:
+      - veromeshOntologyBindings
+  - name: container
+    aspects:
+      - veromeshOntologyBindings

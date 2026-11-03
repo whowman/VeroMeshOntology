@@ -1,0 +1,35 @@
+# Veromesh services. Runs alongside DataHub's own compose stack (started by
+# scripts/dev-up.sh) and joins its network so it can reach datahub-gms.
+name: veromesh
+
+services:
+  oxigraph:
+    image: ghcr.io/oxigraph/oxigraph:${OXIGRAPH_VERSION:-0.5.13}
+    command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+    ports:
+      - "${VEROMESH_OXIGRAPH_PORT:-7878}:7878"
+    volumes:
+      - oxigraph-data:/data
+    restart: unless-stopped
+
+  veromesh-service:
+    build:
+      context: ..
+      dockerfile: service/Dockerfile
+    environment:
+      VEROMESH_DATAHUB_GMS_URL: http://datahub-gms:8080
+      VEROMESH_DATAHUB_TOKEN: ${VEROMESH_DATAHUB_TOKEN:-}
+      VEROMESH_RDF_STORE: http://oxigraph:7878
+    ports:
+      - "${VEROMESH_SERVICE_PORT:-8700}:8700"
+    depends_on:
+      - oxigraph
+    restart: unless-stopped
+
+volumes:
+  oxigraph-data:
+
+networks:
+  default:
+    name: datahub_network
+    external: true
