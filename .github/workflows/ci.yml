@@ -111,6 +111,12 @@ jobs:
         if: failure()
         run: |
           docker ps -a
+          set +e
           for c in $(docker ps -a --format '{{.Names}}'); do echo "=== $c"; docker logs --tail 80 "$c" 2>&1 | grep -v '^\s*at '; done
+          GMS=$(docker ps -a --format '{{.Names}}' | grep -m1 datahub-gms)
+          echo "=== GMS plugin/registry lines"
+          docker logs "$GMS" 2>&1 | grep -i -E 'registry|plugin' | grep -v '^\s*at ' | tail -60
           echo "=== GMS errors"
-          docker logs "$(docker ps -a --format '{{.Names}}' | grep gms)" 2>&1 | grep -E 'ERROR|WARN|Exception|Caused by' | grep -v SsoManager | tail -60
+          docker logs "$GMS" 2>&1 | grep -E 'ERROR|Exception|Caused by' | grep -v SsoManager | tail -60
+          echo "=== plugin files"
+          find ~/.datahub/plugins -maxdepth 5 -ls

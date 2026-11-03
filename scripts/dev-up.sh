@@ -41,6 +41,26 @@ wait_for() {
 wait_for "DataHub GMS" "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/health" 900
 wait_for "DataHub UI" "http://localhost:9002/admin" 300
 
+# GMS scans ~/.datahub/plugins/models on a timer (every 60s by default), so the
+# Veromesh aspect can appear a little after GMS reports healthy.
+if [[ -z "${SKIP_MODEL:-}" ]]; then
+  printf ">> Waiting for DataHub to load the veromesh-ontology-model plugin"
+  waited=0
+  until curl -fs "http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}/config" | grep -q '"veromesh-ontology-model"'; do
+    if (( waited >= 240 )); then
+      echo
+      echo "!! DataHub did not load the plugin. Plugin files on this machine:" >&2
+      find "$HOME/.datahub/plugins/models" -maxdepth 4 >&2 || true
+      echo "!! GMS plugin loader log:" >&2
+      docker logs "$(docker ps --format '{{.Names}}' | grep -m1 datahub-gms)" 2>&1 \
+        | grep -i -E 'registry|plugin' | grep -v '^\s*at ' | tail -30 >&2 || true
+      exit 1
+    fi
+    printf "."; sleep 5; waited=$((waited + 5))
+  done
+  echo " loaded"
+fi
+
 # 4. DataHub requires a token for API calls. Create a personal access token for
 #    the local dev user and reuse it while it stays valid (kept in .build/, not committed).
 GMS="http://localhost:${DATAHUB_MAPPED_GMS_PORT:-8080}"
