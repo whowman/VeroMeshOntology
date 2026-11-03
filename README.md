@@ -22,7 +22,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 
 ## Quick start (local)
 
-Requires Docker with Compose ≥ 2.20 and ~8 GB RAM, git, and JDK 25 (to build the DataHub model plugin; DataHub v1.8.0 targets Java 25).
+Requires git and Docker (Docker Desktop on macOS) with Compose ≥ 2.20 and **at least 8 GB of memory assigned to Docker**. No Java or Python install is needed; the DataHub plugin is built in a JDK 25 container. The first start downloads several GB of images and takes roughly 15–20 minutes; later starts take a few minutes. Ports used: 8080, 9002, 9200, 5432, 7878, 8700.
 
 ```bash
 scripts/dev-up.sh          # DataHub (Postgres + OpenSearch) + Oxigraph + Veromesh API
@@ -38,7 +38,9 @@ curl -X POST localhost:8700/bindings -H 'Content-Type: application/json' -d '{
 curl 'localhost:8700/classes/assets?class_iri=https://example.com/ontology/retail%23Party'
 ```
 
-DataHub UI: http://localhost:9002 · Veromesh API docs: http://localhost:8700/docs · `scripts/dev-down.sh` to stop.
+DataHub UI: http://localhost:9002 (login `datahub` / `datahub`) · Veromesh API docs: http://localhost:8700/docs
+
+Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data). The CI `stack` job runs this same flow on every push.
 
 Service-only development (no Docker): see [service/README.md](service/README.md).
 
