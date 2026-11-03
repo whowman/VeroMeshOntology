@@ -27,12 +27,16 @@ load_datahub_secrets() {
   local secrets="$ROOT/.build/local-secrets.env"
   if [[ ! -f "$secrets" ]]; then
     mkdir -p "$ROOT/.build"
-    umask 077
-    {
-      echo "# Auto-generated local dev secrets - do not commit"
-      echo "DATAHUB_TOKEN_SERVICE_SIGNING_KEY=$(openssl rand -base64 32)"
-      echo "DATAHUB_TOKEN_SERVICE_SALT=$(openssl rand -base64 32)"
-    } > "$secrets"
+    # Subshell so the restrictive umask applies only to this file, not to
+    # anything the calling script creates later (e.g. the plugin folders).
+    (
+      umask 077
+      {
+        echo "# Auto-generated local dev secrets - do not commit"
+        echo "DATAHUB_TOKEN_SERVICE_SIGNING_KEY=$(openssl rand -base64 32)"
+        echo "DATAHUB_TOKEN_SERVICE_SALT=$(openssl rand -base64 32)"
+      } > "$secrets"
+    )
   fi
   set -a
   # shellcheck disable=SC1090

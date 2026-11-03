@@ -64,5 +64,9 @@ if [[ "${1:-}" == "--deploy" ]]; then
   TARGET="$HOME/.datahub/plugins/models/$REGISTRY_ID/$MODEL_VERSION"
   rm -rf "$TARGET" && mkdir -p "$TARGET"
   unzip -q "$HERE/dist/$REGISTRY_ID-$MODEL_VERSION.zip" -d "$TARGET"
+  # GMS runs as a non-root user inside its container and must be able to read these.
+  chmod a+rx "$HOME/.datahub" "$HOME/.datahub/plugins" "$HOME/.datahub/plugins/models" \
+    "$HOME/.datahub/plugins/models/$REGISTRY_ID"
+  chmod -R a+rX "$TARGET"
   echo ">> Deployed to $TARGET (restart datahub-gms to load it)"
 fi
