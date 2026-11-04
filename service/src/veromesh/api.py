@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from . import __version__
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
-from .rdf_store import make_store
+from .rdf_store import StoreRequestError, make_store
 from .service import NotFound, VeromeshService
 
 
@@ -70,6 +70,14 @@ def create_app(service: VeromeshService | None = None) -> FastAPI:
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(StoreRequestError)
+    async def _store_error(_: Request, exc: StoreRequestError):
+        from fastapi.responses import JSONResponse
+
+        # 400 from the store = the caller sent invalid Turtle or SPARQL; anything else is ours.
+        status = 400 if exc.status == 400 else 502
+        return JSONResponse(status_code=status, content={"detail": str(exc)})
 
     @app.exception_handler(OperationalError)
     async def _datahub_error(_: Request, exc: OperationalError):

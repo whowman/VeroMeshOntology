@@ -2,7 +2,7 @@
 
 Formal ontologies (OWL/RDF) and a business semantic layer on top of the open source [DataHub](https://github.com/datahub-project/datahub) metadata platform.
 
-- Load OWL ontologies into a SPARQL store (Oxigraph)
+- Load OWL ontologies into a SPARQL store (Apache Jena Fuseki)
 - Publish ontology classes to DataHub as glossary terms
 - Bind DataHub assets (datasets, columns, dashboards…) to ontology classes, visible in DataHub and queryable with SPARQL
 
@@ -22,10 +22,10 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 
 ## Quick start (local)
 
-Requires git and Docker (Docker Desktop on macOS) with Compose ≥ 2.20 and **at least 8 GB of memory assigned to Docker**. No Java or Python install is needed; the DataHub plugin is built in a JDK 25 container. The first start downloads several GB of images and takes roughly 15–20 minutes; later starts take a few minutes. Ports used: 8080, 9002, 9200, 5432, 7878, 8700.
+Requires git and Docker (Docker Desktop on macOS) with Compose ≥ 2.20 and **at least 8 GB of memory assigned to Docker**. No Java or Python install is needed; the DataHub plugin is built in a JDK 25 container. The first start downloads several GB of images and takes roughly 15–20 minutes; later starts take a few minutes. Ports used: 8080, 9002, 9200, 5432, 3030, 8700.
 
 ```bash
-scripts/dev-up.sh          # DataHub (Postgres + OpenSearch) + Oxigraph + Veromesh API
+scripts/dev-up.sh          # DataHub (Postgres + OpenSearch) + Jena Fuseki + Veromesh API
 scripts/load-examples.sh   # load example ontology, publish it to the DataHub glossary
 
 # bind a dataset to a class

@@ -4,7 +4,7 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../deploy/versions.env
 source "$ROOT/deploy/versions.env"
-export DATAHUB_VERSION OXIGRAPH_VERSION
+export DATAHUB_VERSION JENA_VERSION
 
 # One shallow checkout of the pinned DataHub release, shared with
 # datahub-model/build.sh (which needs the full source tree anyway).

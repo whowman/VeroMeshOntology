@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a local stack: DataHub (Postgres + OpenSearch profile) + Oxigraph + Veromesh service.
+# Start a local stack: DataHub (Postgres + OpenSearch profile) + Apache Jena Fuseki + Veromesh service.
 #
 #   scripts/dev-up.sh            # start everything
 #   SKIP_MODEL=1 scripts/dev-up.sh   # skip building the custom DataHub model
@@ -115,6 +115,6 @@ cat <<EOF
 
 DataHub UI:        http://localhost:9002   (datahub / datahub)
 DataHub GMS:       http://localhost:8080
-Oxigraph SPARQL:   http://localhost:${VEROMESH_OXIGRAPH_PORT:-7878}
+Fuseki (SPARQL):   http://localhost:${VEROMESH_FUSEKI_PORT:-3030}  (dataset: /veromesh)
 Veromesh API:      http://localhost:${VEROMESH_SERVICE_PORT:-8700}/docs
 EOF

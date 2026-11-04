@@ -98,3 +98,21 @@ def test_datahub_errors_are_502(service, fake_datahub, monkeypatch):
     r = client_for(service).post("/glossary/publish", json={"graph": RETAIL_GRAPH})
     assert r.status_code == 502
     assert "DataHub request failed" in r.json()["detail"]
+
+
+def test_store_errors_map_to_http_status(service, monkeypatch):
+    from veromesh.rdf_store import StoreRequestError
+
+    def bad(*args, **kwargs):
+        raise StoreRequestError(400, "Parse error")
+
+    monkeypatch.setattr(service.store, "load_turtle", bad)
+    r = client_for(service).put("/ontologies", params={"graph": "https://example.com/x"}, content="x")
+    assert r.status_code == 400
+
+    def down(*args, **kwargs):
+        raise StoreRequestError(404, "Not Found")
+
+    monkeypatch.setattr(service.store, "load_turtle", down)
+    r = client_for(service).put("/ontologies", params={"graph": "https://example.com/x"}, content="x")
+    assert r.status_code == 502

@@ -9,7 +9,8 @@ Components Veromesh ships or runs, and their licenses. Keep this file current: C
 | DataHub (GMS, frontend, actions, upgrade) | v1.8.0 | Apache-2.0 | Unmodified upstream images. LICENSE + NOTICE in `third_party/datahub/` |
 | OpenSearch | per DataHub profile (2.x) | Apache-2.0 | Search, graph and timeseries index for DataHub |
 | PostgreSQL | per DataHub profile | PostgreSQL License | DataHub primary store (`quickstart-postgres` profile) |
-| Oxigraph server | 0.5.13 | MIT OR Apache-2.0 | RDF / SPARQL store |
+| Apache Jena Fuseki | 6.2.0 | Apache-2.0 | RDF / SPARQL store; image built from the official jar (`deploy/fuseki/`), Jena LICENSE and NOTICE shipped in `/opt/fuseki/licenses` |
+| Eclipse Temurin JRE 21 (Fuseki base image) | 21 | GPL-2.0 with Classpath Exception | Unmodified runtime; the Classpath Exception permits running Apache-licensed code on it without affecting its license |
 
 Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticsearch (SSPL / Elastic License / AGPL), Neo4j Community (GPL-3.0). DataHub's `quickstart-postgres` profile uses pgQueue instead of Kafka. If Kafka is added later, it is Apache-2.0 and fine to ship.
 
@@ -18,7 +19,7 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | Package | License |
 | --- | --- |
 | acryl-datahub | Apache-2.0 |
-| pyoxigraph | MIT OR Apache-2.0 |
+| pyoxigraph (embedded store for tests and the `memory` mode) | MIT OR Apache-2.0 |
 | fastapi | MIT |
 | uvicorn | BSD-3-Clause |
 | httpx | BSD-3-Clause |

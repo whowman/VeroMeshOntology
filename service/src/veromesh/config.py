@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     datahub_gms_url: str = "http://localhost:8080"
     datahub_token: str | None = None
 
-    # RDF store. "memory" uses an embedded Oxigraph store (dev/tests);
-    # any http(s) URL is treated as an Oxigraph server base URL.
+    # RDF store: "memory" (embedded, not persisted; dev/tests),
+    # "fuseki:<dataset URL>" (production default, e.g. fuseki:http://fuseki:3030/veromesh)
+    # or "oxigraph:<server URL>".
     rdf_store: str = "memory"
 
     # Named graph that holds asset-to-class bindings.

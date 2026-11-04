@@ -1,6 +1,6 @@
 # veromesh service
 
-FastAPI service that stores OWL/RDF ontologies in a SPARQL store (Oxigraph) and binds their classes to DataHub assets.
+FastAPI service that stores OWL/RDF ontologies in a SPARQL store (Apache Jena Fuseki in deployments; embedded Oxigraph for tests) and binds their classes to DataHub assets.
 
 ```bash
 cd service
@@ -14,6 +14,6 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | --- | --- | --- |
 | `VEROMESH_DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub GMS endpoint |
 | `VEROMESH_DATAHUB_TOKEN` | – | DataHub personal access token (needed when metadata auth is on) |
-| `VEROMESH_RDF_STORE` | `memory` | `memory` (embedded, not persisted) or an Oxigraph server URL |
+| `VEROMESH_RDF_STORE` | `memory` | `memory` (embedded, not persisted), `fuseki:<dataset URL>` (e.g. `fuseki:http://localhost:3030/veromesh`) or `oxigraph:<server URL>` |
 | `VEROMESH_BINDINGS_GRAPH` | `https://veromesh.ai/graph/bindings` | Named graph for asset bindings |
 | `VEROMESH_GLOSSARY_ROOT_NAME` | `Veromesh Ontology` | Root glossary node in DataHub |

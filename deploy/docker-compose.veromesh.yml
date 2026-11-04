@@ -3,13 +3,20 @@
 name: veromesh
 
 services:
-  oxigraph:
-    image: ghcr.io/oxigraph/oxigraph:${OXIGRAPH_VERSION:-0.5.13}
-    command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+  fuseki:
+    build:
+      context: fuseki
+      args:
+        JENA_VERSION: ${JENA_VERSION:-6.2.0}
+    image: veromesh/fuseki:${JENA_VERSION:-6.2.0}
+    environment:
+      FUSEKI_DATASET: veromesh
+      JAVA_OPTS: ${VEROMESH_FUSEKI_JAVA_OPTS:--Xmx1g}
     ports:
-      - "${VEROMESH_OXIGRAPH_PORT:-7878}:7878"
+      # Bound to localhost: Fuseki has no authentication in this setup.
+      - "127.0.0.1:${VEROMESH_FUSEKI_PORT:-3030}:3030"
     volumes:
-      - oxigraph-data:/data
+      - fuseki-data:/fuseki/databases
     restart: unless-stopped
 
   veromesh-service:
@@ -19,15 +26,16 @@ services:
     environment:
       VEROMESH_DATAHUB_GMS_URL: http://datahub-gms:8080
       VEROMESH_DATAHUB_TOKEN: ${VEROMESH_DATAHUB_TOKEN:-}
-      VEROMESH_RDF_STORE: http://oxigraph:7878
+      VEROMESH_RDF_STORE: fuseki:http://fuseki:3030/veromesh
     ports:
       - "${VEROMESH_SERVICE_PORT:-8700}:8700"
     depends_on:
-      - oxigraph
+      fuseki:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  oxigraph-data:
+  fuseki-data:
 
 networks:
   default:

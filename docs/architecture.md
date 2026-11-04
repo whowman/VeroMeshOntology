@@ -10,7 +10,7 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
           SPARQL 1.1     │              │  DataHub SDK (REST / GraphQL)
                          ▼              ▼
              ┌──────────────────┐   ┌──────────────────────────────────┐
-             │ Oxigraph         │   │ DataHub v1.8.0 (unmodified)       │
+             │ Jena Fuseki      │   │ DataHub v1.8.0 (unmodified)       │
              │ ontologies +     │   │  GMS + frontend + actions         │
              │ bindings graph   │   │  + veromesh-ontology-model plugin │
              └──────────────────┘   │  Postgres · OpenSearch            │
@@ -21,7 +21,7 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 
 | Concern | Lives in | Why |
 | --- | --- | --- |
-| Ontology classes, properties, hierarchy, axioms | Oxigraph (one named graph per ontology) | OWL/RDF, SPARQL and reasoning need a triple store; DataHub has none |
+| Ontology classes, properties, hierarchy, axioms | Apache Jena Fuseki, TDB2 storage (one named graph per ontology) | OWL/RDF, SPARQL and reasoning need a triple store; DataHub has none |
 | Data assets, lineage, ownership, schemas | DataHub | That's what DataHub is for |
 | Business vocabulary for search and the UI | DataHub glossary (published from the ontology) | People find concepts where they already look |
 | Asset ↔ class bindings | Both: `https://veromesh.ai/graph/bindings` graph **and** DataHub (`veromeshOntologyBindings` aspect + `glossaryTerms`) | SPARQL can answer "all assets that hold any kind of Party"; DataHub shows the concept on the asset page |
@@ -41,4 +41,4 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 2. **Reasoning.** Add an OWL 2 RL materialization step (e.g. owlrl, W3C-licensed) or plug in a reasoner when ontologies need more than subclass closure.
 3. **Auth.** Put the API behind the same SSO as DataHub; pass the caller's DataHub token through instead of a service token.
 4. **Ontology versioning.** Store `owl:versionInfo` on bindings and add a diff/impact endpoint ("which assets are affected if this class changes").
-5. **Production deploy.** DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Oxigraph.
+5. **Production deploy.** DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with RDF Delta for Fuseki high availability.

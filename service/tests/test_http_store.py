@@ -1,50 +1,95 @@
 from __future__ import annotations
 
+import os
+
 import httpx
+import pytest
 
-from veromesh.rdf_store import OxigraphHttpStore, make_store
+from veromesh.rdf_store import (
+    MemoryStore,
+    SparqlHttpStore,
+    StoreRequestError,
+    fuseki_store,
+    make_store,
+    oxigraph_store,
+)
+
+RESULTS = {"head": {"vars": ["g"]}, "results": {"bindings": [{"g": {"type": "uri", "value": "x:g"}}]}}
 
 
-def recording_store():
+def recording(factory, base):
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        if request.url.path == "/query":
-            return httpx.Response(
-                200,
-                json={
-                    "head": {"vars": ["g"]},
-                    "results": {"bindings": [{"g": {"type": "uri", "value": "x:g"}}]},
-                },
-            )
+        if request.url.path.endswith("/query"):
+            return httpx.Response(200, json=RESULTS)
+        if request.content.startswith(b"BAD"):
+            return httpx.Response(400, text="Parse error: line 1")
         return httpx.Response(204)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    return OxigraphHttpStore("http://oxigraph:7878/", client=client), calls
+    return factory(base, client=client), calls
 
 
-def test_load_turtle_uses_graph_store_protocol():
-    store, calls = recording_store()
+def test_fuseki_endpoint_layout():
+    store, calls = recording(fuseki_store, "http://fuseki:3030/veromesh/")
     store.load_turtle("<a:s> <a:p> <a:o> .", "https://example.com/g")
     store.load_turtle("<a:s> <a:p> <a:o> .", "https://example.com/g", replace=False)
-
-    assert [c.method for c in calls] == ["PUT", "POST"]
-    assert calls[0].url.path == "/store"
-    assert calls[0].url.params["graph"] == "https://example.com/g"
-    assert calls[0].headers["content-type"] == "text/turtle"
-
-
-def test_query_and_update_use_sparql_protocol():
-    store, calls = recording_store()
     assert store.list_graphs() == ["x:g"]
     store.update("INSERT DATA { <a:s> <a:p> <a:o> }")
 
-    assert calls[0].headers["content-type"] == "application/sparql-query"
-    assert calls[0].headers["accept"] == "application/sparql-results+json"
-    assert calls[1].url.path == "/update"
-    assert calls[1].headers["content-type"] == "application/sparql-update"
+    assert [(c.method, c.url.path) for c in calls] == [
+        ("PUT", "/veromesh/data"),
+        ("POST", "/veromesh/data"),
+        ("POST", "/veromesh/query"),
+        ("POST", "/veromesh/update"),
+    ]
+    assert calls[0].url.params["graph"] == "https://example.com/g"
+    assert calls[0].headers["content-type"] == "text/turtle"
+    assert calls[2].headers["accept"] == "application/sparql-results+json"
+    assert calls[3].headers["content-type"] == "application/sparql-update"
+
+
+def test_oxigraph_endpoint_layout():
+    store, calls = recording(oxigraph_store, "http://oxigraph:7878")
+    store.load_turtle("<a:s> <a:p> <a:o> .", "https://example.com/g")
+    store.update("INSERT DATA { <a:s> <a:p> <a:o> }")
+    assert [c.url.path for c in calls] == ["/store", "/update"]
+
+
+def test_store_client_errors_raise_store_request_error():
+    store, _ = recording(fuseki_store, "http://fuseki:3030/veromesh")
+    with pytest.raises(StoreRequestError) as exc:
+        store.load_turtle("BAD turtle", "https://example.com/g")
+    assert exc.value.status == 400
 
 
 def test_make_store():
-    assert isinstance(make_store("http://oxigraph:7878"), OxigraphHttpStore)
+    assert isinstance(make_store("memory"), MemoryStore)
+    fuseki = make_store("fuseki:http://fuseki:3030/veromesh")
+    assert isinstance(fuseki, SparqlHttpStore) and fuseki.graph_store_url.endswith("/veromesh/data")
+    oxigraph = make_store("oxigraph:http://oxigraph:7878")
+    assert oxigraph.graph_store_url == "http://oxigraph:7878/store"
+    with pytest.raises(ValueError):
+        make_store("http://fuseki:3030/veromesh")
+
+
+@pytest.mark.skipif(not os.environ.get("VEROMESH_TEST_FUSEKI_URL"), reason="no Fuseki server")
+def test_against_real_fuseki():
+    """Runs when VEROMESH_TEST_FUSEKI_URL points at a Fuseki dataset (CI starts one)."""
+    from veromesh.service import VeromeshService
+
+    from .conftest import BINDINGS_GRAPH, ONTOLOGY_DIR, RET, RETAIL_GRAPH, FakeDataHub
+
+    store = fuseki_store(os.environ["VEROMESH_TEST_FUSEKI_URL"])
+    svc = VeromeshService(store, FakeDataHub(), bindings_graph=BINDINGS_GRAPH)
+    svc.load_ontology(RETAIL_GRAPH, (ONTOLOGY_DIR / "examples" / "retail.ttl").read_text())
+    urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,crm.public.loyalty members,PROD)"
+    svc.bind(urn, RET + "LoyaltyMember")
+
+    assert RETAIL_GRAPH in svc.list_ontologies()
+    assert urn in svc.assets_for_class(RET + "Party")
+    with pytest.raises(StoreRequestError):
+        store.load_turtle("this is not turtle", "https://example.com/bad")
+    svc.unbind(urn, RET + "LoyaltyMember")

@@ -56,6 +56,36 @@ jobs:
       - run: docker compose -f deploy/docker-compose.veromesh.yml config -q
       - run: for f in scripts/*.sh datahub-model/build.sh; do bash -n "$f"; done
 
+  fuseki:
+    # Builds our Fuseki image and runs the store tests against the real server.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start Fuseki
+        run: |
+          set -a; . deploy/versions.env; set +a
+          docker build -q --build-arg JENA_VERSION="$JENA_VERSION" -t veromesh/fuseki:ci deploy/fuseki
+          docker run -d --name fuseki -p 3030:3030 veromesh/fuseki:ci
+          for i in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ] && break; sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' fuseki | grep -q healthy || { docker logs fuseki; exit 1; }
+          docker exec fuseki ls /opt/fuseki/licenses
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Store tests against Fuseki
+        working-directory: service
+        env:
+          VEROMESH_TEST_FUSEKI_URL: http://localhost:3030/veromesh
+        run: |
+          pip install -e ".[dev]"
+          out=$(pytest -q -rs tests/test_http_store.py); echo "$out"
+          if echo "$out" | grep -q SKIPPED; then echo "the real-Fuseki test was skipped"; exit 1; fi
+      - name: Fuseki logs
+        if: failure()
+        run: docker logs fuseki
+
   datahub-model:
     # Compiles the custom aspect inside DataHub's Gradle build at the pinned tag.
     runs-on: ubuntu-latest
@@ -126,6 +156,14 @@ jobs:
           assert len(terms) == 2, terms
           PY
           fi
+          echo "--- bindings stored in Fuseki, and still there after a Fuseki restart"
+          Q='PREFIX vm: <https://veromesh.ai/ontology/core#> SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?a vm:represents ?c } }'
+          count() { curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' \
+            --data-urlencode "query=$Q" | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"]["bindings"][0]["n"]["value"])'; }
+          BEFORE=$(count); echo "bindings before restart: $BEFORE"; test "$BEFORE" -ge 1
+          docker compose -f deploy/docker-compose.veromesh.yml restart fuseki
+          for i in $(seq 1 60); do curl -fs -o /dev/null localhost:3030/\$/ping && break; sleep 2; done
+          AFTER=$(count); echo "bindings after restart: $AFTER"; test "$AFTER" = "$BEFORE"
           if [ -z "$ok" ]; then
             python3 -m json.tool entity.json | head -80
             echo "--- openapi v3 view"
