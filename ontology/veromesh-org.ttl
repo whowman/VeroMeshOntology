@@ -1,0 +1,458 @@
+@prefix vmo:     <https://veromesh.ai/ontology/org#> .
+@prefix vm:      <https://veromesh.ai/ontology/core#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix org:     <http://www.w3.org/ns/org#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix foaf:    <http://xmlns.com/foaf/0.1/> .
+@prefix dcat:    <http://www.w3.org/ns/dcat#> .
+
+# =============================================================================
+# Veromesh organizational meta-model, v1 DRAFT FOR REVIEW
+#
+# Twelve core entity types and the relationships between them: business intent
+# (objectives, KPIs, capabilities, processes, policies), people and authority
+# (persons, roles, delegated authority) and agents and data (AI agents, actions,
+# data products, systems). Customers populate it with instances; industry
+# specifics are added as subclasses in extension packs, never by changing this
+# file.
+#
+# Deliberate modeling choices (see docs/meta-model.md for the full list):
+#  * Time, source and attestation of FACTS live in the provenance layer (one
+#    named graph per source system), not on each property. Only validity that
+#    is intrinsic to the thing itself (a delegation's dates) is modeled here.
+#  * Action means a TYPE of action ("approve supplier invoice"). Individual
+#    executions are recorded in the decision log, not in this model.
+#  * Standard vocabularies are aligned by subclass/subproperty, not imported,
+#    so the graph never depends on fetching them.
+# =============================================================================
+
+<https://veromesh.ai/ontology/org>
+    a owl:Ontology ;
+    rdfs:label "Veromesh Organizational Meta-model" ;
+    dcterms:description "Objectives, KPIs, capabilities, processes, policies, people, roles, delegated authority, AI agents, actions, data products and systems, and how they relate." ;
+    owl:versionInfo "1.0.0-draft" ;
+    owl:imports <https://veromesh.ai/ontology/core> .
+
+# -----------------------------------------------------------------------------
+# Core entity types (12)
+# -----------------------------------------------------------------------------
+
+## Business intent
+
+vmo:Objective
+    a owl:Class ;
+    rdfs:label "Objective" ;
+    skos:definition "An outcome the organization intends to achieve, e.g. 'pay suppliers accurately and on time'." .
+
+vmo:KPI
+    a owl:Class ;
+    rdfs:label "KPI" ;
+    skos:definition "A measure of progress toward one or more objectives. KPIs are used to route impact to their owners, not as targets for agents to optimize." .
+
+vmo:Policy
+    a owl:Class ;
+    rdfs:label "Policy" ;
+    skos:definition "An internal rule that constrains authority, actions, data or systems, e.g. a delegation-of-authority policy." .
+
+vmo:Regulation
+    a owl:Class ;
+    rdfs:subClassOf vmo:Policy ;
+    rdfs:label "Regulation" ;
+    skos:definition "An external law or regulatory requirement, e.g. SOX section 404, HIPAA, the EU AI Act. Regulations are instance data, so adding one needs no model change." .
+
+vmo:BusinessCapability
+    a owl:Class ;
+    rdfs:label "Business capability" ;
+    skos:definition "What the organization is able to do, independent of how or by whom, e.g. 'accounts payable'. Capabilities form the spine of the model." .
+
+vmo:Process
+    a owl:Class ;
+    rdfs:label "Process" ;
+    skos:definition "A business process that realizes a capability, e.g. 'supplier invoice approval'. Not a data pipeline." .
+
+## People and authority
+
+vmo:Person
+    a owl:Class ;
+    rdfs:subClassOf foaf:Person , prov:Person ;
+    rdfs:label "Person" ;
+    skos:definition "A human who fills roles and can be the principal an AI agent acts for. Only role-relevant facts are recorded (see the closed shape in the validation rules)." .
+
+vmo:Role
+    a owl:Class ;
+    rdfs:subClassOf org:Role ;
+    rdfs:label "Role" ;
+    skos:definition "A job role or position, e.g. 'Accounts payable manager'. Ownership attaches to roles, not people, so it survives staff changes. Not an access-control role." .
+
+vmo:DelegatedAuthority
+    a owl:Class ;
+    rdfs:label "Delegated authority" ;
+    skos:definition "A recorded grant to decide or act: which actions, within which scope and limits, for which period, delegated by whom, e.g. 'approve supplier invoices up to 50,000 USD'. Extension packs add kinds such as credit limits or clinical privileges as subclasses." .
+
+## Agents and data
+
+vmo:AIAgent
+    a owl:Class ;
+    rdfs:subClassOf prov:SoftwareAgent ;
+    rdfs:label "AI agent" ;
+    skos:definition "Software that takes actions. An agent holds no authority of its own: it acts for exactly one person, within a bounded subset of that person's authority." .
+
+vmo:Action
+    a owl:Class ;
+    rdfs:label "Action" ;
+    skos:definition "A type of consequential action, e.g. 'approve supplier invoice'. Individual executions are recorded in the decision log." .
+
+vmo:DataProduct
+    a owl:Class ;
+    rdfs:subClassOf dcat:Resource ;
+    rdfs:label "Data product" ;
+    skos:definition "A governed, owned set of data with known producers and consumers, e.g. 'supplier invoices'. Its physical datasets live in the data catalog (DataHub)." .
+
+vmo:System
+    a owl:Class ;
+    rdfs:label "System" ;
+    skos:definition "An application or platform that processes run on and data products are held in, e.g. the ERP. Inventory comes from the CMDB." .
+
+# -----------------------------------------------------------------------------
+# Supporting types
+# -----------------------------------------------------------------------------
+
+vmo:Impact
+    a owl:Class ;
+    rdfs:label "Impact" ;
+    skos:definition "Qualifies 'action affects KPI or capability' with a materiality threshold. Below the threshold the agent acts and informs the owner; above it, the agent consults the owner first." .
+
+vmo:DataElement
+    a owl:Class ;
+    rdfs:label "Business data element" ;
+    skos:definition "A business-level data item, e.g. 'supplier bank account number'. Physical columns in the data catalog are bound to it with vm:represents." .
+
+# -----------------------------------------------------------------------------
+# Relationships
+# -----------------------------------------------------------------------------
+
+## Intent
+
+vmo:measuredBy
+    a owl:ObjectProperty ;
+    rdfs:label "measured by" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range vmo:KPI ;
+    owl:inverseOf vmo:measures .
+
+vmo:measures a owl:ObjectProperty ; rdfs:label "measures" .
+
+vmo:serves
+    a owl:ObjectProperty ;
+    rdfs:label "serves" ;
+    rdfs:domain vmo:BusinessCapability ;
+    rdfs:range vmo:Objective .
+
+vmo:parentCapability
+    a owl:ObjectProperty ;
+    rdfs:label "parent capability" ;
+    rdfs:domain vmo:BusinessCapability ;
+    rdfs:range vmo:BusinessCapability ;
+    skos:definition "Builds the capability map hierarchy." .
+
+vmo:realizedBy
+    a owl:ObjectProperty ;
+    rdfs:label "realized by" ;
+    rdfs:domain vmo:BusinessCapability ;
+    rdfs:range vmo:Process .
+
+vmo:bounds
+    a owl:ObjectProperty ;
+    rdfs:label "bounds" ;
+    rdfs:domain vmo:Policy ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:DelegatedAuthority vmo:Action vmo:DataProduct vmo:System ) ] ;
+    skos:definition "A policy or regulation constrains this authority, action, data product or system." .
+
+## Ownership (always a Role)
+
+vmo:ownedBy
+    a owl:ObjectProperty ;
+    rdfs:label "owned by" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:KPI vmo:BusinessCapability vmo:Process vmo:Policy vmo:DataProduct vmo:System vmo:DataElement ) ] ;
+    rdfs:range vmo:Role ;
+    owl:inverseOf vmo:owns .
+
+vmo:owns a owl:ObjectProperty ; rdfs:label "owns" .
+
+vmo:businessOwner
+    a owl:ObjectProperty ;
+    rdfs:subPropertyOf vmo:ownedBy ;
+    rdfs:label "business owner" .
+
+vmo:technicalOwner
+    a owl:ObjectProperty ;
+    rdfs:subPropertyOf vmo:ownedBy ;
+    rdfs:label "technical owner" .
+
+vmo:steward
+    a owl:ObjectProperty ;
+    rdfs:label "steward" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:DataElement vmo:DataProduct ) ] ;
+    rdfs:range vmo:Role .
+
+## People and authority
+
+vmo:fills
+    a owl:ObjectProperty ;
+    rdfs:label "fills" ;
+    rdfs:domain vmo:Person ;
+    rdfs:range vmo:Role ;
+    skos:definition "The person currently fills the role. When it started or ended is recorded by the provenance layer; a time-bounded org:Membership can be derived for W3C ORG consumers." .
+
+vmo:holds
+    a owl:ObjectProperty ;
+    rdfs:label "holds" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:Role vmo:Person vmo:AIAgent ) ] ;
+    rdfs:range vmo:DelegatedAuthority ;
+    owl:inverseOf vmo:heldBy .
+
+vmo:heldBy a owl:ObjectProperty ; rdfs:label "held by" .
+
+vmo:coversAction
+    a owl:ObjectProperty ;
+    rdfs:label "covers action" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range vmo:Action .
+
+vmo:withinCapability
+    a owl:ObjectProperty ;
+    rdfs:label "within capability" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range vmo:BusinessCapability ;
+    skos:definition "Scope: the authority applies only within this capability." .
+
+vmo:delegatedBy
+    a owl:ObjectProperty ;
+    rdfs:label "delegated by" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:Person vmo:Role ) ] .
+
+vmo:boundedSubsetOf
+    a owl:ObjectProperty ;
+    rdfs:label "bounded subset of" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range vmo:DelegatedAuthority ;
+    skos:definition "This authority is a narrower copy of another: same or fewer actions, same or lower limit, same currency, within the same validity period. The validation rules check each of these." .
+
+vmo:actsFor
+    a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:subPropertyOf prov:actedOnBehalfOf ;
+    rdfs:label "acts for" ;
+    rdfs:domain vmo:AIAgent ;
+    rdfs:range vmo:Person ;
+    skos:definition "Borrowed authority: the agent acts on behalf of this person, its principal." .
+
+vmo:performs
+    a owl:ObjectProperty ;
+    rdfs:label "performs" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:AIAgent vmo:Person ) ] ;
+    rdfs:range vmo:Action .
+
+vmo:partOfProcess
+    a owl:ObjectProperty ;
+    rdfs:label "part of process" ;
+    rdfs:domain vmo:Action ;
+    rdfs:range vmo:Process .
+
+## Impact
+
+vmo:affects
+    a owl:ObjectProperty ;
+    rdfs:label "affects" ;
+    rdfs:domain vmo:Action ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:KPI vmo:BusinessCapability ) ] ;
+    skos:definition "The impact map: taking this action can move this KPI or capability, so its owner is informed or consulted." .
+
+vmo:hasImpact
+    a owl:ObjectProperty ;
+    rdfs:label "has impact" ;
+    rdfs:domain vmo:Action ;
+    rdfs:range vmo:Impact .
+
+vmo:impactOn
+    a owl:ObjectProperty ;
+    rdfs:label "impact on" ;
+    rdfs:domain vmo:Impact ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:KPI vmo:BusinessCapability ) ] .
+
+## Data and systems
+
+vmo:produces
+    a owl:ObjectProperty ;
+    rdfs:label "produces" ;
+    rdfs:domain vmo:BusinessCapability ;
+    rdfs:range vmo:DataProduct .
+
+vmo:consumes
+    a owl:ObjectProperty ;
+    rdfs:label "consumes" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:BusinessCapability vmo:Process vmo:AIAgent ) ] ;
+    rdfs:range vmo:DataProduct ;
+    skos:definition "A registered consumer. Agents are consumers too, so every consumer of a data product is known." .
+
+vmo:feeds
+    a owl:ObjectProperty ;
+    rdfs:label "feeds" ;
+    rdfs:domain vmo:DataProduct ;
+    rdfs:range vmo:DataProduct ;
+    skos:definition "Data-product-level lineage, rolled up from the catalog's technical lineage or declared by an owner. Not declared transitive: impact queries follow it with a property path." .
+
+vmo:computedFrom
+    a owl:ObjectProperty ;
+    rdfs:label "computed from" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range vmo:DataProduct ;
+    skos:definition "Links business lineage to data lineage, so a change to data can be routed to KPI owners." .
+
+vmo:runsOn
+    a owl:ObjectProperty ;
+    rdfs:label "runs on" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:Process vmo:DataProduct vmo:AIAgent ) ] ;
+    rdfs:range vmo:System .
+
+vmo:containsElement
+    a owl:ObjectProperty ;
+    rdfs:label "contains element" ;
+    rdfs:domain vmo:DataProduct ;
+    rdfs:range vmo:DataElement .
+
+vmo:authoritativeSource
+    a owl:ObjectProperty ;
+    rdfs:label "authoritative source" ;
+    rdfs:domain vmo:DataElement ;
+    rdfs:range vmo:System ;
+    skos:definition "The system of record for this data element." .
+
+vmo:regulatoryScope
+    a owl:ObjectProperty ;
+    rdfs:label "regulatory scope" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( vmo:System vmo:DataProduct vmo:Process vmo:DataElement ) ] ;
+    rdfs:range vmo:Regulation .
+
+vmo:sensitivity
+    a owl:ObjectProperty ;
+    rdfs:label "sensitivity" ;
+    rdfs:range skos:Concept ;
+    skos:definition "A value from vmo:SensitivityScheme." .
+
+vmo:dataCategory
+    a owl:ObjectProperty ;
+    rdfs:label "data category" ;
+    rdfs:range skos:Concept ;
+    skos:definition "A value from vmo:DataCategoryScheme, e.g. personal data." .
+
+# -----------------------------------------------------------------------------
+# Attributes
+# -----------------------------------------------------------------------------
+
+vmo:limitAmount
+    a owl:DatatypeProperty ;
+    rdfs:label "limit amount" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:decimal .
+
+vmo:limitCurrency
+    a owl:DatatypeProperty ;
+    rdfs:label "limit currency" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:string ;
+    skos:definition "ISO 4217 code, e.g. USD." .
+
+vmo:validFrom
+    a owl:DatatypeProperty ;
+    rdfs:label "valid from" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:date .
+
+vmo:validUntil
+    a owl:DatatypeProperty ;
+    rdfs:label "valid until" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:date .
+
+vmo:materialityThreshold
+    a owl:DatatypeProperty ;
+    rdfs:label "materiality threshold" ;
+    rdfs:domain vmo:Impact ;
+    rdfs:range xsd:decimal .
+
+vmo:materialityUnit
+    a owl:DatatypeProperty ;
+    rdfs:label "materiality unit" ;
+    rdfs:domain vmo:Impact ;
+    rdfs:range xsd:string ;
+    skos:definition "What the threshold counts, e.g. 'USD per action' or 'days'." .
+
+vmo:unit
+    a owl:DatatypeProperty ;
+    rdfs:label "unit" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range xsd:string .
+
+vmo:jurisdiction
+    a owl:DatatypeProperty ;
+    rdfs:label "jurisdiction" ;
+    rdfs:domain vmo:Regulation ;
+    rdfs:range xsd:string .
+
+vmo:criticalDataElement
+    a owl:DatatypeProperty ;
+    rdfs:label "critical data element" ;
+    rdfs:domain vmo:DataElement ;
+    rdfs:range xsd:boolean .
+
+vmo:retention
+    a owl:DatatypeProperty ;
+    rdfs:label "retention" ;
+    rdfs:range xsd:duration ;
+    skos:definition "How long data is kept, as an ISO 8601 duration, e.g. P7Y." .
+
+vmo:lifecycleStatus
+    a owl:DatatypeProperty ;
+    rdfs:label "lifecycle status" ;
+    rdfs:range xsd:string ;
+    skos:definition "One of: planned, active, retiring, retired." .
+
+vmo:criticality
+    a owl:DatatypeProperty ;
+    rdfs:label "criticality" ;
+    rdfs:domain vmo:System ;
+    rdfs:range xsd:string ;
+    skos:definition "One of: low, medium, high, critical." .
+
+## Identifiers used to match the same thing across source systems
+
+vmo:employeeId a owl:DatatypeProperty ; rdfs:label "employee ID" ; rdfs:domain vmo:Person ; rdfs:range xsd:string .
+vmo:email      a owl:DatatypeProperty ; rdfs:label "email" ; rdfs:domain vmo:Person ; rdfs:range xsd:string .
+vmo:cmdbId     a owl:DatatypeProperty ; rdfs:label "CMDB ID" ; rdfs:domain vmo:System ; rdfs:range xsd:string .
+vmo:catalogUrn
+    a owl:DatatypeProperty ;
+    rdfs:label "catalog URN" ;
+    rdfs:range xsd:string ;
+    skos:definition "Identifier of the matching entity in the data catalog, e.g. a DataHub data product or platform URN." .
+
+# -----------------------------------------------------------------------------
+# Controlled values
+# -----------------------------------------------------------------------------
+
+vmo:SensitivityScheme a skos:ConceptScheme ; rdfs:label "Sensitivity" .
+vmo:Public       a skos:Concept ; skos:inScheme vmo:SensitivityScheme ; skos:prefLabel "Public" .
+vmo:Internal     a skos:Concept ; skos:inScheme vmo:SensitivityScheme ; skos:prefLabel "Internal" .
+vmo:Confidential a skos:Concept ; skos:inScheme vmo:SensitivityScheme ; skos:prefLabel "Confidential" .
+vmo:Restricted   a skos:Concept ; skos:inScheme vmo:SensitivityScheme ; skos:prefLabel "Restricted" .
+
+vmo:DataCategoryScheme a skos:ConceptScheme ; rdfs:label "Regulated data categories" .
+vmo:PersonalData            a skos:Concept ; skos:inScheme vmo:DataCategoryScheme ; skos:prefLabel "Personal data" .
+vmo:HealthData              a skos:Concept ; skos:inScheme vmo:DataCategoryScheme ; skos:prefLabel "Health data" .
+vmo:PaymentCardData         a skos:Concept ; skos:inScheme vmo:DataCategoryScheme ; skos:prefLabel "Payment card data" .
+vmo:FinancialReportingData  a skos:Concept ; skos:inScheme vmo:DataCategoryScheme ; skos:prefLabel "Financial reporting data" .

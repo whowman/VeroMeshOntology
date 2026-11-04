@@ -1,0 +1,296 @@
+@prefix vmo:  <https://veromesh.ai/ontology/org#> .
+@prefix vms:  <https://veromesh.ai/ontology/org/shapes#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix org:  <http://www.w3.org/ns/org#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+# =============================================================================
+# Validation rules for the organizational meta-model, v1 DRAFT FOR REVIEW
+#
+# Two severities:
+#   sh:Violation  structural errors; data that breaks these is rejected
+#   sh:Warning    completeness gaps; data is accepted and the gap is reported
+#                 (these feed the coverage measures, e.g. "% of KPIs with an owner")
+# =============================================================================
+
+<https://veromesh.ai/ontology/org/shapes>
+    a owl:Ontology ;
+    rdfs:label "Veromesh organizational meta-model validation rules" ;
+    sh:declare
+        [ sh:prefix "vmo" ; sh:namespace "https://veromesh.ai/ontology/org#"^^xsd:anyURI ] ,
+        [ sh:prefix "rdfs" ; sh:namespace "http://www.w3.org/2000/01/rdf-schema#"^^xsd:anyURI ] .
+
+# --- Business intent ---------------------------------------------------------
+
+vms:ObjectiveShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Objective ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "An objective needs a name." ] ;
+    sh:property [ sh:path vmo:measuredBy ; sh:class vmo:KPI ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Objective has no KPI measuring it." ] .
+
+vms:KPIShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:KPI ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A KPI needs a name." ] ;
+    sh:property [ sh:path skos:definition ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "KPI has no definition." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:class vmo:Role ; sh:maxCount 1 ;
+                  sh:message "A KPI has exactly one owning role." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "KPI has no owner: impact on it cannot be routed to anyone." ] ;
+    sh:property [ sh:path vmo:computedFrom ; sh:class vmo:DataProduct ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "KPI is not traced to the data products it is computed from." ] .
+
+vms:CapabilityShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:BusinessCapability ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A capability needs a name." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:class vmo:Role ; sh:maxCount 1 ;
+                  sh:message "A capability has exactly one owning role." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Capability has no owner." ] ;
+    sh:property [ sh:path vmo:serves ; sh:class vmo:Objective ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Capability does not serve any objective." ] ;
+    sh:property [ sh:path vmo:parentCapability ; sh:class vmo:BusinessCapability ; sh:maxCount 1 ] .
+
+vms:ProcessShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Process ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A process needs a name." ] ;
+    sh:property [ sh:path [ sh:inversePath vmo:realizedBy ] ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Process does not realize any capability." ] ;
+    sh:property [ sh:path vmo:runsOn ; sh:class vmo:System ] .
+
+vms:PolicyShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Policy ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A policy or regulation needs a name." ] ;
+    sh:property [ sh:path vmo:bounds ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Policy does not bound anything in the model yet." ] .
+
+# --- People and authority ----------------------------------------------------
+
+# Closed shape: only role-relevant facts may be recorded about a person. This
+# enforces the white paper's out-of-scope list (no performance data, no
+# informal influence networks, nothing a person would not expect).
+vms:PersonShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Person ;
+    sh:closed true ;
+    sh:ignoredProperties ( rdf:type ) ;
+    sh:message "Only role-relevant facts may be recorded about a person; this property is outside the model." ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "A person needs exactly one display name." ] ;
+    sh:property [ sh:path foaf:name ] ;
+    sh:property [ sh:path vmo:employeeId ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmo:email ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmo:fills ; sh:class vmo:Role ] ;
+    sh:property [ sh:path vmo:holds ; sh:class vmo:DelegatedAuthority ] ;
+    sh:property [ sh:path vmo:performs ; sh:class vmo:Action ] ;
+    sh:property [ sh:path org:reportsTo ; sh:class vmo:Person ] ;
+    sh:property [ sh:path vmo:employeeId ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Person has no employee ID, so matching across HR and identity systems is unreliable." ] .
+
+vms:RoleShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Role ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A role needs a name." ] ;
+    sh:property [ sh:path [ sh:inversePath vmo:fills ] ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Nobody currently fills this role, so what it owns has no one to route to." ] .
+
+vms:DelegatedAuthorityShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:DelegatedAuthority ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "An authority needs a name." ] ;
+    sh:property [ sh:path [ sh:inversePath vmo:holds ] ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "An authority has exactly one holder (a role, person or agent)." ] ;
+    sh:property [ sh:path vmo:coversAction ; sh:class vmo:Action ; sh:minCount 1 ;
+                  sh:message "An authority must say which actions it covers." ] ;
+    sh:property [ sh:path vmo:limitAmount ; sh:or ( [ sh:datatype xsd:decimal ] [ sh:datatype xsd:integer ] ) ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:limitCurrency ; sh:datatype xsd:string ; sh:maxCount 1 ; sh:pattern "^[A-Z]{3}$" ;
+                  sh:message "Currency is an ISO 4217 code such as USD." ] ;
+    sh:property [ sh:path vmo:validFrom ; sh:datatype xsd:date ; sh:maxCount 1 ;
+                  sh:lessThanOrEquals vmo:validUntil ; sh:message "Validity ends before it starts." ] ;
+    sh:property [ sh:path vmo:validUntil ; sh:datatype xsd:date ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:boundedSubsetOf ; sh:class vmo:DelegatedAuthority ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:delegatedBy ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Authority does not record who delegated it." ] ;
+    sh:sparql [
+        sh:message "A limit amount needs a currency." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE { $this vmo:limitAmount ?a . FILTER NOT EXISTS { $this vmo:limitCurrency ?c } }
+        """ ] ;
+    # Bounded subset: each check below compares this authority with its parent.
+    sh:sparql [
+        sh:message "Bounded subset exceeds its parent: limit {?amount} is above the parent's {?parentAmount}, or the parent has a limit and this has none." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?amount ?parentAmount WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              ?parent vmo:limitAmount ?parentAmount .
+              OPTIONAL { $this vmo:limitAmount ?amount }
+              FILTER (!BOUND(?amount) || ?amount > ?parentAmount)
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset uses currency {?cur}, but its parent uses {?parentCur}." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?cur ?parentCur WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              $this vmo:limitCurrency ?cur . ?parent vmo:limitCurrency ?parentCur .
+              FILTER (?cur != ?parentCur)
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset covers action {?action}, which its parent does not." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?action WHERE {
+              $this vmo:boundedSubsetOf ?parent ; vmo:coversAction ?action .
+              FILTER NOT EXISTS { ?parent vmo:coversAction ?action }
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset is valid outside its parent's validity period." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              {
+                ?parent vmo:validUntil ?pu .
+                OPTIONAL { $this vmo:validUntil ?u }
+                FILTER (!BOUND(?u) || ?u > ?pu)
+              } UNION {
+                ?parent vmo:validFrom ?pf .
+                OPTIONAL { $this vmo:validFrom ?f }
+                FILTER (!BOUND(?f) || ?f < ?pf)
+              }
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset is scoped to capability {?cap}, outside its parent's scope." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?cap WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              ?parent vmo:withinCapability ?parentCap .
+              OPTIONAL { $this vmo:withinCapability ?cap }
+              FILTER (!BOUND(?cap) || NOT EXISTS {
+                ?parent vmo:withinCapability ?pc .
+                ?cap vmo:parentCapability* ?pc
+              })
+            }
+        """ ] .
+
+# --- Agents and data ---------------------------------------------------------
+
+vms:AIAgentShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:AIAgent ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "An agent needs a name." ] ;
+    sh:property [ sh:path vmo:actsFor ; sh:class vmo:Person ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "An agent acts for exactly one person." ] ;
+    sh:property [ sh:path vmo:holds ; sh:class vmo:DelegatedAuthority ] ;
+    sh:sparql [
+        sh:message "Agent holds {?auth}, which is not a bounded subset of an authority its principal holds directly or through a role." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?auth WHERE {
+              $this vmo:holds ?auth .
+              FILTER NOT EXISTS {
+                $this vmo:actsFor ?principal .
+                ?auth vmo:boundedSubsetOf ?parent .
+                { ?principal vmo:holds ?parent } UNION { ?principal vmo:fills ?role . ?role vmo:holds ?parent }
+              }
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Agent performs {?action}, which none of its authorities covers." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?action WHERE {
+              $this vmo:performs ?action .
+              FILTER NOT EXISTS { $this vmo:holds ?auth . ?auth vmo:coversAction ?action }
+            }
+        """ ] .
+
+vms:ActionShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Action ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "An action needs a name." ] ;
+    sh:property [ sh:path vmo:affects ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Action has no impact map: nobody would be informed or consulted when it is taken." ] ;
+    sh:sparql [
+        sh:message "Action has an impact on {?target} but does not list it under 'affects'." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?target WHERE {
+              $this vmo:hasImpact ?i . ?i vmo:impactOn ?target .
+              FILTER NOT EXISTS { $this vmo:affects ?target }
+            }
+        """ ] .
+
+vms:ImpactShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:Impact ;
+    sh:property [ sh:path vmo:impactOn ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "An impact names exactly one KPI or capability." ] ;
+    sh:property [ sh:path vmo:materialityThreshold ; sh:or ( [ sh:datatype xsd:decimal ] [ sh:datatype xsd:integer ] ) ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "An impact needs one materiality threshold." ] ;
+    sh:property [ sh:path vmo:materialityUnit ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "A materiality threshold needs a unit." ] .
+
+vms:DataProductShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:DataProduct ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A data product needs a name." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:class vmo:Role ; sh:maxCount 1 ;
+                  sh:message "A data product has exactly one owning role." ] ;
+    sh:property [ sh:path vmo:ownedBy ; sh:minCount 1 ; sh:severity sh:Warning ; sh:message "Data product has no owner." ] ;
+    sh:property [ sh:path vmo:runsOn ; sh:class vmo:System ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "Data product is not linked to the system that holds it." ] ;
+    sh:property [ sh:path [ sh:inversePath vmo:produces ] ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "No capability is recorded as producing this data product." ] ;
+    sh:property [ sh:path vmo:sensitivity ; sh:maxCount 1 ; sh:in ( vmo:Public vmo:Internal vmo:Confidential vmo:Restricted ) ] ;
+    sh:property [ sh:path vmo:feeds ; sh:class vmo:DataProduct ] .
+
+vms:SystemShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:System ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A system needs a name." ] ;
+    sh:property [ sh:path vmo:businessOwner ; sh:class vmo:Role ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "System has no business owner." ] ;
+    sh:property [ sh:path vmo:technicalOwner ; sh:class vmo:Role ; sh:minCount 1 ; sh:severity sh:Warning ;
+                  sh:message "System has no technical owner." ] ;
+    sh:property [ sh:path vmo:cmdbId ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:criticality ; sh:maxCount 1 ; sh:in ( "low" "medium" "high" "critical" ) ] ;
+    sh:property [ sh:path vmo:lifecycleStatus ; sh:maxCount 1 ; sh:in ( "planned" "active" "retiring" "retired" ) ] ;
+    sh:property [ sh:path vmo:sensitivity ; sh:maxCount 1 ; sh:in ( vmo:Public vmo:Internal vmo:Confidential vmo:Restricted ) ] ;
+    sh:property [ sh:path vmo:regulatoryScope ; sh:class vmo:Regulation ] .
+
+vms:DataElementShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:DataElement ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "A data element needs a name." ] ;
+    sh:property [ sh:path skos:definition ; sh:minCount 1 ; sh:severity sh:Warning ; sh:message "Data element has no definition." ] ;
+    sh:property [ sh:path vmo:criticalDataElement ; sh:datatype xsd:boolean ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:sensitivity ; sh:maxCount 1 ; sh:in ( vmo:Public vmo:Internal vmo:Confidential vmo:Restricted ) ] ;
+    sh:property [ sh:path vmo:dataCategory ; sh:in ( vmo:PersonalData vmo:HealthData vmo:PaymentCardData vmo:FinancialReportingData ) ;
+                  sh:message "Use a value from vmo:DataCategoryScheme (extension packs may add more)." ] ;
+    sh:property [ sh:path vmo:retention ; sh:datatype xsd:duration ; sh:maxCount 1 ] ;
+    sh:sparql [
+        sh:message "A critical data element must have an owner, a steward and an authoritative source system." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE {
+              $this vmo:criticalDataElement true .
+              FILTER (NOT EXISTS { $this vmo:ownedBy ?o }
+                   || NOT EXISTS { $this vmo:steward ?s }
+                   || NOT EXISTS { $this vmo:authoritativeSource ?sys })
+            }
+        """ ] .
