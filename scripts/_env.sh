@@ -6,19 +6,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/deploy/versions.env"
 export DATAHUB_VERSION OXIGRAPH_VERSION
 
-PROFILES_DIR="$ROOT/.build/datahub-profiles-$DATAHUB_VERSION"
+# One shallow checkout of the pinned DataHub release, shared with
+# datahub-model/build.sh (which needs the full source tree anyway).
+PROFILES_DIR="$ROOT/.build/datahub-$DATAHUB_VERSION"
 PROFILES_COMPOSE_DIR="$PROFILES_DIR/docker/profiles"
 
-# DataHub's compose profiles symlink into sibling folders under docker/ (env
-# files, init scripts), so check out the whole docker/ directory of the pinned
-# release, unmodified.
+# DataHub's compose profiles symlink into sibling folders under docker/, so the
+# whole docker/ directory is needed. Plain --depth/--branch only: partial-clone
+# and sparse options are missing from older git versions.
 fetch_datahub_profiles() {
-  if [[ ! -d "$PROFILES_DIR/.git" ]]; then
-    echo ">> Fetching DataHub $DATAHUB_VERSION docker configuration"
-    git clone -q --depth 1 --branch "$DATAHUB_VERSION" --filter=blob:none --sparse \
+  if [[ ! -d "$PROFILES_COMPOSE_DIR" ]]; then
+    echo ">> Fetching DataHub $DATAHUB_VERSION (shallow clone, one-time)"
+    rm -rf "$PROFILES_DIR"
+    git clone --depth 1 --branch "$DATAHUB_VERSION" \
       https://github.com/datahub-project/datahub.git "$PROFILES_DIR"
   fi
-  git -C "$PROFILES_DIR" sparse-checkout set docker
 }
 
 # DataHub's own launcher generates these token-service secrets and persists
