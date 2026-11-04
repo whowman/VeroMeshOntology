@@ -64,7 +64,7 @@ jobs:
       - name: Build and start Fuseki
         run: |
           set -a; . deploy/versions.env; set +a
-          docker build -q --build-arg JENA_VERSION="$JENA_VERSION" -t veromesh/fuseki:ci deploy/fuseki
+          docker build --progress=plain --build-arg JENA_VERSION="$JENA_VERSION" -t veromesh/fuseki:ci deploy/fuseki
           docker run -d --name fuseki -p 3030:3030 veromesh/fuseki:ci
           for i in $(seq 1 60); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ] && break; sleep 2
