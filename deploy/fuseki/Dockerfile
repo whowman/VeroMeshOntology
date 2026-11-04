@@ -29,9 +29,9 @@ EXPOSE 3030
 ENV JAVA_OPTS="-Xmx1g"
 ENV FUSEKI_DATASET=veromesh
 
-# Persistent TDB2 dataset with read/write endpoints:
+# Persistent TDB2 dataset (Fuseki needs its folder to exist) with read/write endpoints:
 #   /<ds>/query  /<ds>/update  /<ds>/data (Graph Store Protocol)
-CMD ["sh", "-c", "exec java $JAVA_OPTS -jar /opt/fuseki/fuseki-server.jar --port 3030 --ping --tdb2 --loc /fuseki/databases/$FUSEKI_DATASET --update /$FUSEKI_DATASET"]
+CMD ["sh", "-c", "mkdir -p /fuseki/databases/$FUSEKI_DATASET && exec java $JAVA_OPTS -jar /opt/fuseki/fuseki-server.jar --port 3030 --ping --tdb2 --loc /fuseki/databases/$FUSEKI_DATASET --update /$FUSEKI_DATASET"]
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=30s --retries=12 \
   CMD curl -fs http://localhost:3030/\$/ping >/dev/null || exit 1
