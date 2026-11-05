@@ -25,7 +25,8 @@ fi
 if [[ -z "${SKIP_BRANDING:-}" ]]; then
   "$ROOT/branding/datahub/build.sh"
   export DATAHUB_FRONTEND_IMAGE=veromesh/datahub-frontend-react
-  export DATAHUB_LOCAL_GMS_ENV="$ROOT/branding/datahub/gms.env"
+  export DATAHUB_LOCAL_GMS_ENV="$ROOT/branding/datahub/datahub.env"
+  export DATAHUB_LOCAL_FRONTEND_ENV="$ROOT/branding/datahub/datahub.env"
 fi
 
 # 3. Start DataHub.

@@ -30,7 +30,7 @@ DataHub itself is not modified. Three of its own extension points are used:
 
 1. **Theme.** DataHub loads a JSON theme when GMS has `REACT_APP_CUSTOM_THEME_ID=<name>.json`. `datahub/make_theme.py` writes `veromesh.theme.json` from DataHub's own light theme at the pinned version (`colorThemes/color.ts`, `light.ts`, `themeV2.ts`) with the palette swapped in, so every colour token DataHub defines is present and an upgrade regenerates the theme from the new token set. If DataHub changes the shape of those files, generation stops with an error rather than producing a partial theme.
 2. **Assets.** The frontend serves `/assets/*` from a jar. `datahub/build.sh` builds `veromesh/datahub-frontend-react:<version>`: the official image plus our theme and logos added to that jar (`datahub/add_assets.py`), nothing else.
-3. **Settings.** `datahub/gms.env` selects the theme, logo, favicon and browser title. `scripts/dev-up.sh` passes it with DataHub's `DATAHUB_LOCAL_GMS_ENV` hook and selects the image with `DATAHUB_FRONTEND_IMAGE`.
+3. **Settings.** `datahub/datahub.env` selects the theme, logo, favicon and browser title. `scripts/dev-up.sh` passes it to GMS and the frontend with DataHub's `DATAHUB_LOCAL_GMS_ENV` and `DATAHUB_LOCAL_FRONTEND_ENV` hooks (GMS hands the settings to the UI; the frontend serves the favicon itself), and selects the image with `DATAHUB_FRONTEND_IMAGE`.
 
 `SKIP_BRANDING=1 scripts/dev-up.sh` starts the stock DataHub look instead.
 

@@ -167,10 +167,10 @@ def test_assets_are_added_to_the_jar_that_serves_them(tmp_path):
     assert len(z.namelist()) == 3
 
 
-def test_frontend_gms_settings_point_at_shipped_files():
+def test_datahub_settings_point_at_shipped_files():
     env = dict(
         line.split("=", 1)
-        for line in (ROOT / "branding/datahub/gms.env").read_text().splitlines()
+        for line in (ROOT / "branding/datahub/datahub.env").read_text().splitlines()
         if "=" in line and not line.startswith("#")
     )
     assert env["REACT_APP_CUSTOM_THEME_ID"] == mt.THEME_ID

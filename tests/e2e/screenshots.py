@@ -1,7 +1,10 @@
 """Screenshots of the running stack's UIs, for reviewing the look (CI uploads them).
 
     pip install playwright && python -m playwright install chromium
-    python tests/e2e/screenshots.py <out dir>
+    python tests/e2e/screenshots.py <out dir> [--log-previews]
+
+--log-previews also prints small JPEG previews (base64, in a collapsed CI
+log group) for reviewers who can read job logs but not download artifacts.
 
 Not part of the regression suites: it checks nothing, it only captures.
 """
@@ -22,6 +25,26 @@ PAGES = [
     ("datahub-glossary", f"{UI}/glossary"),
     ("api-docs", f"{API}/docs"),
 ]
+
+
+def log_previews(out: Path) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    print("::group::screenshot previews (base64 JPEG)")
+    for f in sorted(out.glob("*.png")):
+        im = Image.open(f).convert("RGB")
+        im.thumbnail((1100, 700))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=70)
+        print(f"PREVIEW-BEGIN {f.stem}")
+        data = base64.b64encode(buf.getvalue()).decode()
+        for i in range(0, len(data), 3000):
+            print(data[i : i + 3000])
+        print(f"PREVIEW-END {f.stem}")
+    print("::endgroup::")
 
 
 def main(out: Path) -> int:
@@ -48,4 +71,9 @@ def main(out: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(Path(sys.argv[1] if len(sys.argv) > 1 else ".build/test-results/screenshots")))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    target = Path(args[0] if args else ".build/test-results/screenshots")
+    code = main(target)
+    if "--log-previews" in sys.argv:
+        log_previews(target)
+    sys.exit(code)

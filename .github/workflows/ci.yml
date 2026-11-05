@@ -75,8 +75,8 @@ jobs:
       - name: Screenshots of the UIs (for review)
         if: always()
         run: |
-          pip install -q playwright && python -m playwright install --with-deps chromium >/dev/null
-          python tests/e2e/screenshots.py .build/test-results/screenshots || true
+          pip install -q playwright pillow && python -m playwright install --with-deps chromium >/dev/null
+          python tests/e2e/screenshots.py .build/test-results/screenshots --log-previews || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
