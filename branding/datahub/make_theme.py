@@ -170,6 +170,37 @@ def swap_rgba(value: str, p: dict[str, str]) -> str:
     return value
 
 
+HEX = re.compile(r"#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?\b")
+
+
+def is_violet(h: str) -> bool:
+    """DataHub's brand hue: the violet family (hue 230-275 degrees, clearly saturated)."""
+    hue, _, sat = colorsys.rgb_to_hls(*(c / 255 for c in hex_to_rgb(h)))
+    return 230 <= hue * 360 <= 275 and sat >= 0.35
+
+
+def swap_hex(value: str, base: dict[str, str], brand: dict[str, str]) -> str:
+    """Replace violet hex colours inside literal tokens (gradients, chart and nav colours).
+
+    An exact DataHub palette colour becomes its brand counterpart; any other
+    violet becomes the brand shade closest in luminance. Alpha suffixes stay.
+    """
+    exact = {base[k]: brand[k] for k in base if k.startswith("violet") and k in brand}
+    scale = sorted({brand[k] for k in brand if k.startswith("violet")}, key=luminance)
+
+    def sub(m: re.Match) -> str:
+        rgb = "#" + m.group(1).upper()
+        if rgb in exact:
+            new = exact[rgb]
+        elif is_violet(rgb):
+            new = min(scale, key=lambda c: abs(luminance(c) - luminance(rgb)))
+        else:
+            return m.group(0)
+        return new + (m.group(2) or "")
+
+    return HEX.sub(sub, value)
+
+
 def build_theme(src: Path, p: dict[str, str], *, api_docs_url: str = "http://localhost:8700/docs") -> dict:
     conf = src / "datahub-web-react/src/conf/theme"
     base = parse_palette((conf / "colorThemes/color.ts").read_text())
@@ -184,7 +215,21 @@ def build_theme(src: Path, p: dict[str, str], *, api_docs_url: str = "http://loc
                 raise ThemeSourceError(f"light.ts: {token} uses unknown palette colour {value}")
             colors[token] = pal[value]
         else:
-            colors[token] = swap_rgba(value, p)
+            colors[token] = swap_hex(swap_rgba(value, p), base, pal)
+
+    # No colour DataHub uses for its own violet brand may survive anywhere.
+    datahub_violets = {v for k, v in base.items() if k.startswith("violet")} | {
+        "#" + m.group(1).upper()
+        for kind, value in tokens.values()
+        if kind == "lit"
+        for m in HEX.finditer(value)
+        if is_violet("#" + m.group(1))
+    }
+    leftover = sorted(
+        t for t, v in colors.items() if {"#" + m.group(1).upper() for m in HEX.finditer(v)} & datahub_violets
+    )
+    if leftover:
+        raise ThemeSourceError(f"DataHub violet left in: {', '.join(leftover)}")
 
     navy_rgb = ", ".join(str(c) for c in hex_to_rgb(p["navy"]))
     styles.update(

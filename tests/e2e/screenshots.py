@@ -64,8 +64,21 @@ def main(out: Path) -> int:
             except Exception as exc:  # keep going; a missing page is visible in the output
                 print(f"{name}: {exc}")
             page.wait_for_timeout(3000)
+            for _ in range(3):  # close DataHub's onboarding pop-ups so the page itself is visible
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
             page.screenshot(path=out / f"{name}.png")
-            print("captured", name)
+            applied = page.evaluate(
+                """() => ({
+                    title: document.title,
+                    themeId: localStorage.getItem('customThemeId'),
+                    button: (() => {
+                        const b = [...document.querySelectorAll('button')].find(x => /Create|Discover|Add/.test(x.textContent));
+                        return b ? getComputedStyle(b).backgroundImage + ' / ' + getComputedStyle(b).backgroundColor : null;
+                    })(),
+                })"""
+            )
+            print("captured", name, applied)
         browser.close()
     return 0
 

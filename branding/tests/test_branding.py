@@ -45,6 +45,8 @@ LIGHT_TS = (
             "    iconBrand: colors.violet500,",
             "    border: colors.gray200,",
             "    bgSelectedSubtle: 'rgba(83, 63, 209, 0.04)',",
+            "    brandGradient: 'linear-gradient(180deg, #705EE4 20%, #5340cc 80%)',",
+            "    highlightBg: '#ffe58f',",
         ]
         + [f"    filler{i}: colors.gray200," for i in range(50)]
     )
@@ -98,6 +100,9 @@ def test_theme_maps_brand_roles(datahub_src):
     assert c["border"] == p["lightGray"]
     assert c["icon"] == p["midGray"]
     assert c["bgSelectedSubtle"] == "rgba(35, 57, 93, 0.04)"
+    # violet inside literal tokens: exact palette colour -> its brand shade; other violets -> nearest shade
+    assert c["brandGradient"] == f"linear-gradient(180deg, {p['purple']} 20%, {p['deepBlue']} 80%)"
+    assert c["highlightBg"] == "#ffe58f"  # not violet: untouched
     assert theme["styles"]["primary-color"] == p["deepBlue"]
     assert theme["styles"]["highlight-border-color"] == p["teal"]
     assert theme["styles"]["body-background"] == "white"  # untouched DataHub style kept
