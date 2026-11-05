@@ -17,8 +17,9 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
 | `deploy/` | Pinned versions and the compose file for Veromesh services |
-| `scripts/` | Local stack helpers |
-| `docs/` | Architecture and licensing |
+| `scripts/` | Local stack helpers, and `test.sh`, the regression test harness |
+| `tests/` | Regression harness, contract snapshots and end-to-end tests; see [docs/testing.md](docs/testing.md) |
+| `docs/` | Architecture, connectors, testing and licensing |
 | `third_party/` | Upstream license and notice files we redistribute |
 
 ## Quick start (local)
@@ -72,7 +73,18 @@ The wrapper runs the connectors in Docker; with Python 3.11+ you can `pip instal
 
 DataHub UI: http://localhost:9002 (login `datahub` / `datahub`) · Veromesh API docs: http://localhost:8700/docs
 
-Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data). The CI `stack` job runs this same flow on every push.
+Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data).
+
+## Testing
+
+```bash
+scripts/test.sh                     # lint, unit tests and contract snapshots for every component
+scripts/test.sh integration         # + a real Fuseki and the container images
+scripts/test.sh e2e                 # end-to-end against the running stack
+scripts/test.sh all --start-stack   # everything
+```
+
+Needs only Docker and `python3`; add `--local` to run without Docker. CI runs the same commands. Suites, snapshots and how to add a component: [docs/testing.md](docs/testing.md).
 
 Service-only development (no Docker): see [service/README.md](service/README.md).
 

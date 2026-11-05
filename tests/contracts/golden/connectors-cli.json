@@ -1,0 +1,74 @@
+{
+  "args": [],
+  "commands": {
+    "cleanup": {
+      "args": [],
+      "options": [
+        "--older-than-hours"
+      ]
+    },
+    "csv": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [
+            "path"
+          ],
+          "options": [
+            "--type",
+            "--mapping",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
+    "runs": {
+      "args": [],
+      "options": [
+        "--source",
+        "--limit"
+      ]
+    },
+    "sources": {
+      "args": [],
+      "options": []
+    },
+    "spreadsheet": {
+      "args": [],
+      "commands": {
+        "export": {
+          "args": [],
+          "options": [
+            "--source",
+            "-o/--output"
+          ]
+        },
+        "import": {
+          "args": [
+            "file"
+          ],
+          "options": [
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        },
+        "template": {
+          "args": [],
+          "options": [
+            "-o/--output",
+            "--example"
+          ]
+        }
+      },
+      "options": []
+    }
+  },
+  "options": [
+    "--api",
+    "--token"
+  ]
+}

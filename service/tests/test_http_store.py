@@ -83,6 +83,7 @@ def test_against_real_fuseki():
     from .conftest import BINDINGS_GRAPH, ONTOLOGY_DIR, RET, RETAIL_GRAPH, FakeDataHub
 
     store = fuseki_store(os.environ["VEROMESH_TEST_FUSEKI_URL"])
+    store.update("DROP ALL")  # start clean: other suites may have used this dataset
     svc = VeromeshService(store, FakeDataHub(), bindings_graph=BINDINGS_GRAPH)
     svc.load_ontology(RETAIL_GRAPH, (ONTOLOGY_DIR / "examples" / "retail.ttl").read_text())
     urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,crm.public.loyalty members,PROD)"
@@ -106,6 +107,7 @@ def test_changesets_against_real_fuseki():
     from .conftest import BINDINGS_GRAPH, FakeDataHub
 
     store = fuseki_store(os.environ["VEROMESH_TEST_FUSEKI_URL"])
+    store.update("DROP ALL")  # start clean: other suites may have used this dataset
     client = TestClient(
         create_app(VeromeshService(store, FakeDataHub(), bindings_graph=BINDINGS_GRAPH), Settings())
     )

@@ -1,0 +1,990 @@
+{
+  "ontology/shapes/veromesh-org-shapes.ttl": {
+    "vms:AIAgentShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:DelegatedAuthority",
+          "path": "vmo:holds"
+        },
+        {
+          "class": "vmo:Person",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:actsFor"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 2,
+      "target": [
+        "vmo:AIAgent"
+      ]
+    },
+    "vms:ActionShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:affects",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 1,
+      "target": [
+        "vmo:Action"
+      ]
+    },
+    "vms:CapabilityShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:BusinessCapability",
+          "maxCount": "1",
+          "path": "vmo:parentCapability"
+        },
+        {
+          "class": "vmo:Objective",
+          "minCount": "1",
+          "path": "vmo:serves",
+          "severity": "sh:Warning"
+        },
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "path": "vmo:ownedBy"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:ownedBy",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:BusinessCapability"
+      ]
+    },
+    "vms:CoApprovalShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:approverRole"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:aboveAmount"
+        },
+        {
+          "minCount": "1",
+          "path": "^vmo:requiresCoApproval"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:CoApproval"
+      ]
+    },
+    "vms:DataElementShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "datatype": "xsd:boolean",
+          "maxCount": "1",
+          "path": "vmo:criticalDataElement"
+        },
+        {
+          "datatype": "xsd:duration",
+          "maxCount": "1",
+          "path": "vmo:retention"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:sensitivity"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "skos:definition",
+          "severity": "sh:Warning"
+        },
+        {
+          "path": "vmo:dataCategory"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 1,
+      "target": [
+        "vmo:DataElement"
+      ]
+    },
+    "vms:DataProductShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:DataProduct",
+          "path": "vmo:feeds"
+        },
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "path": "vmo:ownedBy"
+        },
+        {
+          "class": "vmo:System",
+          "minCount": "1",
+          "path": "vmo:runsOn",
+          "severity": "sh:Warning"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:sensitivity"
+        },
+        {
+          "minCount": "1",
+          "path": "^vmo:produces",
+          "severity": "sh:Warning"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:ownedBy",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:DataProduct"
+      ]
+    },
+    "vms:DelegatedAuthorityShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:Action",
+          "minCount": "1",
+          "path": "vmo:coversAction"
+        },
+        {
+          "class": "vmo:CoApproval",
+          "path": "vmo:requiresCoApproval"
+        },
+        {
+          "class": "vmo:DelegatedAuthority",
+          "maxCount": "1",
+          "path": "vmo:boundedSubsetOf"
+        },
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmo:validFrom"
+        },
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmo:validUntil"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmo:limitCurrency"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "^vmo:holds"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:limitAmount"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:delegatedBy",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 7,
+      "target": [
+        "vmo:DelegatedAuthority"
+      ]
+    },
+    "vms:DelegatedAuthorityWarningsShape": {
+      "closed": "false",
+      "properties": [],
+      "severity": "sh:Warning",
+      "sparqlRules": 2,
+      "target": [
+        "vmo:DelegatedAuthority"
+      ]
+    },
+    "vms:ImpactShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:impactOn"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:materialityThreshold"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:materialityUnit"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Impact"
+      ]
+    },
+    "vms:KPIShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:DataProduct",
+          "minCount": "1",
+          "path": "vmo:computedFrom",
+          "severity": "sh:Warning"
+        },
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "path": "vmo:ownedBy"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "skos:definition",
+          "severity": "sh:Warning"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:ownedBy",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:KPI"
+      ]
+    },
+    "vms:ObjectiveShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:KPI",
+          "minCount": "1",
+          "path": "vmo:measuredBy",
+          "severity": "sh:Warning"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Objective"
+      ]
+    },
+    "vms:PersonShape": {
+      "closed": "true",
+      "properties": [
+        {
+          "class": "vmo:Action",
+          "path": "vmo:performs"
+        },
+        {
+          "class": "vmo:DelegatedAuthority",
+          "path": "vmo:holds"
+        },
+        {
+          "class": "vmo:Person",
+          "path": "org:reportsTo"
+        },
+        {
+          "class": "vmo:Role",
+          "path": "vmo:fills"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmo:employeeId"
+        },
+        {
+          "datatype": "xsd:string",
+          "path": "vmo:email"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:employeeId",
+          "severity": "sh:Warning"
+        },
+        {
+          "path": "foaf:name"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Person"
+      ]
+    },
+    "vms:PolicyShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        },
+        {
+          "minCount": "1",
+          "path": "vmo:bounds",
+          "severity": "sh:Warning"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Policy"
+      ]
+    },
+    "vms:ProcessShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:System",
+          "path": "vmo:runsOn"
+        },
+        {
+          "minCount": "1",
+          "path": "^vmo:realizedBy",
+          "severity": "sh:Warning"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Process"
+      ]
+    },
+    "vms:RoleShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "minCount": "1",
+          "path": "^vmo:fills",
+          "severity": "sh:Warning"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:Role"
+      ]
+    },
+    "vms:SystemShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:Regulation",
+          "path": "vmo:regulatoryScope"
+        },
+        {
+          "class": "vmo:Role",
+          "minCount": "1",
+          "path": "vmo:businessOwner",
+          "severity": "sh:Warning"
+        },
+        {
+          "class": "vmo:Role",
+          "minCount": "1",
+          "path": "vmo:technicalOwner",
+          "severity": "sh:Warning"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:cmdbId"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:criticality"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:lifecycleStatus"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:sensitivity"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmo:System"
+      ]
+    }
+  },
+  "ontology/veromesh-core.ttl": {
+    "classes": {
+      "vm:DataAsset": []
+    },
+    "properties": {
+      "vm:datahubUrn": {
+        "domain": [
+          "vm:DataAsset"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vm:represents": {
+        "domain": [
+          "vm:DataAsset"
+        ],
+        "kind": "owl:AnnotationProperty",
+        "range": []
+      }
+    }
+  },
+  "ontology/veromesh-org.ttl": {
+    "classes": {
+      "vmo:AIAgent": [
+        "prov:SoftwareAgent"
+      ],
+      "vmo:Action": [],
+      "vmo:BusinessCapability": [],
+      "vmo:CoApproval": [],
+      "vmo:DataElement": [],
+      "vmo:DataProduct": [
+        "dcat:Resource"
+      ],
+      "vmo:DelegatedAuthority": [],
+      "vmo:Impact": [],
+      "vmo:KPI": [],
+      "vmo:Objective": [],
+      "vmo:Person": [
+        "foaf:Person",
+        "prov:Person"
+      ],
+      "vmo:Policy": [],
+      "vmo:Process": [],
+      "vmo:Regulation": [
+        "vmo:Policy"
+      ],
+      "vmo:Role": [
+        "org:Role"
+      ],
+      "vmo:System": []
+    },
+    "properties": {
+      "vmo:aboveAmount": {
+        "domain": [
+          "vmo:CoApproval"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
+        ]
+      },
+      "vmo:actsFor": {
+        "domain": [
+          "vmo:AIAgent"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Person"
+        ]
+      },
+      "vmo:affects": {
+        "domain": [
+          "vmo:Action"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "(vmo:BusinessCapability or vmo:KPI)"
+        ]
+      },
+      "vmo:approverRole": {
+        "domain": [
+          "vmo:CoApproval"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Role"
+        ]
+      },
+      "vmo:authoritativeSource": {
+        "domain": [
+          "vmo:DataElement"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:System"
+        ]
+      },
+      "vmo:boundedSubsetOf": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DelegatedAuthority"
+        ]
+      },
+      "vmo:bounds": {
+        "domain": [
+          "vmo:Policy"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "(vmo:Action or vmo:DataProduct or vmo:DelegatedAuthority or vmo:System)"
+        ]
+      },
+      "vmo:businessOwner": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmo:catalogUrn": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:cmdbId": {
+        "domain": [
+          "vmo:System"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:computedFrom": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataProduct"
+        ]
+      },
+      "vmo:consumes": {
+        "domain": [
+          "(vmo:AIAgent or vmo:BusinessCapability or vmo:Process)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataProduct"
+        ]
+      },
+      "vmo:containsElement": {
+        "domain": [
+          "vmo:DataProduct"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataElement"
+        ]
+      },
+      "vmo:coversAction": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Action"
+        ]
+      },
+      "vmo:criticalDataElement": {
+        "domain": [
+          "vmo:DataElement"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:boolean"
+        ]
+      },
+      "vmo:criticality": {
+        "domain": [
+          "vmo:System"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:dataCategory": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "skos:Concept"
+        ]
+      },
+      "vmo:delegatedBy": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "(vmo:Person or vmo:Policy or vmo:Role)"
+        ]
+      },
+      "vmo:email": {
+        "domain": [
+          "vmo:Person"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:employeeId": {
+        "domain": [
+          "vmo:Person"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:feeds": {
+        "domain": [
+          "vmo:DataProduct"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataProduct"
+        ]
+      },
+      "vmo:fills": {
+        "domain": [
+          "vmo:Person"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Role"
+        ]
+      },
+      "vmo:hasImpact": {
+        "domain": [
+          "vmo:Action"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Impact"
+        ]
+      },
+      "vmo:heldBy": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmo:holds": {
+        "domain": [
+          "(vmo:AIAgent or vmo:Person or vmo:Role)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DelegatedAuthority"
+        ]
+      },
+      "vmo:impactOn": {
+        "domain": [
+          "vmo:Impact"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "(vmo:BusinessCapability or vmo:KPI)"
+        ]
+      },
+      "vmo:jurisdiction": {
+        "domain": [
+          "vmo:Regulation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:lifecycleStatus": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:limitAmount": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
+        ]
+      },
+      "vmo:limitCurrency": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:materialityThreshold": {
+        "domain": [
+          "vmo:Impact"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
+        ]
+      },
+      "vmo:materialityUnit": {
+        "domain": [
+          "vmo:Impact"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:measuredBy": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:KPI"
+        ]
+      },
+      "vmo:measures": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmo:ownedBy": {
+        "domain": [
+          "(vmo:BusinessCapability or vmo:DataElement or vmo:DataProduct or vmo:KPI or vmo:Policy or vmo:Process or vmo:System)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Role"
+        ]
+      },
+      "vmo:owns": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmo:parentCapability": {
+        "domain": [
+          "vmo:BusinessCapability"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:BusinessCapability"
+        ]
+      },
+      "vmo:partOfProcess": {
+        "domain": [
+          "vmo:Action"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Process"
+        ]
+      },
+      "vmo:performs": {
+        "domain": [
+          "(vmo:AIAgent or vmo:Person)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Action"
+        ]
+      },
+      "vmo:produces": {
+        "domain": [
+          "vmo:BusinessCapability"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataProduct"
+        ]
+      },
+      "vmo:realizedBy": {
+        "domain": [
+          "vmo:BusinessCapability"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Process"
+        ]
+      },
+      "vmo:regulatoryScope": {
+        "domain": [
+          "(vmo:DataElement or vmo:DataProduct or vmo:Process or vmo:System)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Regulation"
+        ]
+      },
+      "vmo:requiresCoApproval": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:CoApproval"
+        ]
+      },
+      "vmo:retention": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:duration"
+        ]
+      },
+      "vmo:runsOn": {
+        "domain": [
+          "(vmo:AIAgent or vmo:DataProduct or vmo:Process)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:System"
+        ]
+      },
+      "vmo:sensitivity": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "skos:Concept"
+        ]
+      },
+      "vmo:serves": {
+        "domain": [
+          "vmo:BusinessCapability"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Objective"
+        ]
+      },
+      "vmo:steward": {
+        "domain": [
+          "(vmo:DataElement or vmo:DataProduct)"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Role"
+        ]
+      },
+      "vmo:technicalOwner": {
+        "domain": [],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmo:unit": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:validFrom": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
+      "vmo:validUntil": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
+      "vmo:withinCapability": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:BusinessCapability"
+        ]
+      }
+    }
+  }
+}

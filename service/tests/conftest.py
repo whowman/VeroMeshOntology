@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from veromesh.datahub import Binding
-from veromesh.rdf_store import MemoryStore
+from veromesh.rdf_store import RDFStore, make_store
 from veromesh.service import VeromeshService
 
 ONTOLOGY_DIR = Path(__file__).resolve().parents[2] / "ontology"
@@ -48,6 +49,19 @@ class FakeDataHub:
         self.asset_terms[urn] = current
 
 
+def fresh_store() -> RDFStore:
+    """The in-memory store, or the store named by VEROMESH_TEST_STORE (emptied first).
+
+    The regression harness sets VEROMESH_TEST_STORE=fuseki:<dataset URL> to run
+    this whole suite against a real Fuseki (scripts/test.sh integration).
+    """
+    spec = os.environ.get("VEROMESH_TEST_STORE", "memory")
+    store = make_store(spec)
+    if spec != "memory":
+        store.update("DROP ALL")
+    return store
+
+
 @pytest.fixture
 def fake_datahub() -> FakeDataHub:
     return FakeDataHub()
@@ -55,7 +69,7 @@ def fake_datahub() -> FakeDataHub:
 
 @pytest.fixture
 def service(fake_datahub: FakeDataHub) -> VeromeshService:
-    svc = VeromeshService(MemoryStore(), fake_datahub, bindings_graph=BINDINGS_GRAPH)
+    svc = VeromeshService(fresh_store(), fake_datahub, bindings_graph=BINDINGS_GRAPH)
     svc.load_ontology(CORE_GRAPH, (ONTOLOGY_DIR / "veromesh-core.ttl").read_text())
     svc.load_ontology(RETAIL_GRAPH, (ONTOLOGY_DIR / "examples" / "retail.ttl").read_text())
     return svc

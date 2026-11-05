@@ -1,0 +1,1074 @@
+[
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the objective.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "definition",
+        "kind": "text",
+        "label": "Definition",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "IDs of KPIs that measure progress. Separate several with ';'.",
+        "key": "measuredByKpis",
+        "kind": "ref",
+        "label": "Measured by KPIs",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "kpis"
+        ]
+      }
+    ],
+    "help": "Outcomes the organization intends to achieve.",
+    "keyed": true,
+    "label": "Objectives",
+    "type": "objectives"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the KPI.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "definition",
+        "kind": "text",
+        "label": "Definition",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "e.g. percent, days, USD",
+        "key": "unit",
+        "kind": "text",
+        "label": "Unit",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "computedFromDataProducts",
+        "kind": "ref",
+        "label": "Computed from data products",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-products"
+        ]
+      }
+    ],
+    "help": "Measures of progress. Used to route impact to their owners, not as targets.",
+    "keyed": true,
+    "label": "KPIs",
+    "type": "kpis"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the capability.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "definition",
+        "kind": "text",
+        "label": "Definition",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "servesObjectives",
+        "kind": "ref",
+        "label": "Serves objectives",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "objectives"
+        ]
+      },
+      {
+        "help": "",
+        "key": "parentCapability",
+        "kind": "ref",
+        "label": "Parent capability",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "capabilities"
+        ]
+      },
+      {
+        "help": "",
+        "key": "realizedByProcesses",
+        "kind": "ref",
+        "label": "Realized by processes",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "processes"
+        ]
+      },
+      {
+        "help": "",
+        "key": "producesDataProducts",
+        "kind": "ref",
+        "label": "Produces data products",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-products"
+        ]
+      },
+      {
+        "help": "",
+        "key": "consumesDataProducts",
+        "kind": "ref",
+        "label": "Consumes data products",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-products"
+        ]
+      }
+    ],
+    "help": "What the organization is able to do; the spine of the model.",
+    "keyed": true,
+    "label": "Capabilities",
+    "type": "capabilities"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the process.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "runsOnSystems",
+        "kind": "ref",
+        "label": "Runs on systems",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "systems"
+        ]
+      }
+    ],
+    "help": "Business processes that realize capabilities.",
+    "keyed": true,
+    "label": "Processes",
+    "type": "processes"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the policy or regulation.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Policy (internal rule) or Regulation (external law).",
+        "key": "type",
+        "kind": "class",
+        "label": "Type",
+        "multi": false,
+        "required": true,
+        "values": [
+          "Policy",
+          "Regulation"
+        ]
+      },
+      {
+        "help": "For regulations, e.g. US, EU.",
+        "key": "jurisdiction",
+        "kind": "text",
+        "label": "Jurisdiction",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "IDs of authorities, actions, data products or systems this constrains.",
+        "key": "bounds",
+        "kind": "ref",
+        "label": "Bounds",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "authorities",
+          "actions",
+          "data-products",
+          "systems"
+        ]
+      },
+      {
+        "help": "URL of the policy text.",
+        "key": "link",
+        "kind": "text",
+        "label": "Link",
+        "multi": false,
+        "required": false
+      }
+    ],
+    "help": "Internal policies and external regulations.",
+    "keyed": true,
+    "label": "Policies",
+    "type": "policies"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the role.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "definition",
+        "kind": "text",
+        "label": "Definition",
+        "multi": false,
+        "required": false
+      }
+    ],
+    "help": "Job roles or positions. Not access-control roles.",
+    "keyed": true,
+    "label": "Roles",
+    "type": "roles"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the person.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "From HR; used to match the same person across systems.",
+        "key": "employeeId",
+        "kind": "text",
+        "label": "Employee ID",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "email",
+        "kind": "text",
+        "label": "Email",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "rolesFilled",
+        "kind": "ref",
+        "label": "Roles filled",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "reportsTo",
+        "kind": "ref",
+        "label": "Reports to",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "people"
+        ]
+      }
+    ],
+    "help": "Only role-relevant facts. Anything else is rejected by the validation rules.",
+    "keyed": true,
+    "label": "People",
+    "type": "people"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the authority.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "ID of the role, person or agent that holds this authority.",
+        "key": "holder",
+        "kind": "ref",
+        "label": "Holder",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "roles",
+          "people",
+          "agents"
+        ]
+      },
+      {
+        "help": "",
+        "key": "actionsCovered",
+        "kind": "ref",
+        "label": "Actions covered",
+        "multi": true,
+        "required": true,
+        "targets": [
+          "actions"
+        ]
+      },
+      {
+        "help": "",
+        "key": "withinCapability",
+        "kind": "ref",
+        "label": "Within capability",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "capabilities"
+        ]
+      },
+      {
+        "help": "",
+        "key": "limitAmount",
+        "kind": "decimal",
+        "label": "Limit amount",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "ISO 4217 code, e.g. USD.",
+        "key": "currency",
+        "kind": "text",
+        "label": "Currency",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "validFrom",
+        "kind": "date",
+        "label": "Valid from",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "validUntil",
+        "kind": "date",
+        "label": "Valid until",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "Who granted it: a person, a role, or the policy that establishes it.",
+        "key": "delegatedBy",
+        "kind": "ref",
+        "label": "Delegated by",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "people",
+          "roles",
+          "policies"
+        ]
+      },
+      {
+        "help": "For narrower copies (e.g. an agent's authority): the authority this is a bounded subset of.",
+        "key": "parentAuthority",
+        "kind": "ref",
+        "label": "Parent authority",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "authorities"
+        ]
+      }
+    ],
+    "help": "Grants to decide or act, with their limits.",
+    "keyed": true,
+    "label": "Authorities",
+    "type": "authorities"
+  },
+  {
+    "fields": [
+      {
+        "help": "Optional; generated from the other fields when omitted.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "ID of the authority that requires this co-approval.",
+        "key": "authority",
+        "kind": "ref",
+        "label": "Authority",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "authorities"
+        ]
+      },
+      {
+        "help": "",
+        "key": "approverRole",
+        "kind": "ref",
+        "label": "Approver role",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "Applies to actions above this amount, in the authority's currency.",
+        "key": "aboveAmount",
+        "kind": "decimal",
+        "label": "Above amount",
+        "multi": false,
+        "required": true
+      }
+    ],
+    "help": "Second sign-offs required above an amount. One row per tier.",
+    "keyed": false,
+    "label": "Co-approvals",
+    "type": "co-approvals"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the agent.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "ID of the one person the agent acts for.",
+        "key": "actsFor",
+        "kind": "ref",
+        "label": "Acts for",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "people"
+        ]
+      },
+      {
+        "help": "",
+        "key": "performsActions",
+        "kind": "ref",
+        "label": "Performs actions",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "actions"
+        ]
+      },
+      {
+        "help": "",
+        "key": "consumesDataProducts",
+        "kind": "ref",
+        "label": "Consumes data products",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-products"
+        ]
+      },
+      {
+        "help": "",
+        "key": "runsOnSystems",
+        "kind": "ref",
+        "label": "Runs on systems",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "systems"
+        ]
+      }
+    ],
+    "help": "AI agents. Each acts for exactly one person.",
+    "keyed": true,
+    "label": "Agents",
+    "type": "agents"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the action.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "partOfProcess",
+        "kind": "ref",
+        "label": "Part of process",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "processes"
+        ]
+      },
+      {
+        "help": "IDs of KPIs or capabilities this action can move. Rows on the Impacts sheet are added here automatically.",
+        "key": "affects",
+        "kind": "ref",
+        "label": "Affects",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "kpis",
+          "capabilities"
+        ]
+      }
+    ],
+    "help": "Types of consequential action, e.g. 'approve supplier invoice'.",
+    "keyed": true,
+    "label": "Actions",
+    "type": "actions"
+  },
+  {
+    "fields": [
+      {
+        "help": "Optional; generated from the other fields when omitted.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "action",
+        "kind": "ref",
+        "label": "Action",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "actions"
+        ]
+      },
+      {
+        "help": "",
+        "key": "impactOn",
+        "kind": "ref",
+        "label": "Impact on",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "kpis",
+          "capabilities"
+        ]
+      },
+      {
+        "help": "Below this, the agent acts and informs the owner; above it, it consults the owner first.",
+        "key": "materialityThreshold",
+        "kind": "decimal",
+        "label": "Materiality threshold",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "e.g. USD per invoice, invoices per day.",
+        "key": "thresholdUnit",
+        "kind": "text",
+        "label": "Threshold unit",
+        "multi": false,
+        "required": true
+      }
+    ],
+    "help": "Materiality thresholds per action and KPI or capability.",
+    "keyed": false,
+    "label": "Impacts",
+    "type": "impacts"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the data product.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "stewardRole",
+        "kind": "ref",
+        "label": "Steward role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "runsOnSystems",
+        "kind": "ref",
+        "label": "Runs on systems",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "systems"
+        ]
+      },
+      {
+        "help": "",
+        "key": "feedsDataProducts",
+        "kind": "ref",
+        "label": "Feeds data products",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-products"
+        ]
+      },
+      {
+        "help": "",
+        "key": "containsDataElements",
+        "kind": "ref",
+        "label": "Contains data elements",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "data-elements"
+        ]
+      },
+      {
+        "help": "",
+        "key": "sensitivity",
+        "kind": "iri_enum",
+        "label": "Sensitivity",
+        "multi": false,
+        "required": false,
+        "values": [
+          "Public",
+          "Internal",
+          "Confidential",
+          "Restricted"
+        ]
+      },
+      {
+        "help": "The data product's URN in DataHub, if registered.",
+        "key": "catalogUrn",
+        "kind": "text",
+        "label": "Catalog URN",
+        "multi": false,
+        "required": false
+      }
+    ],
+    "help": "Governed, owned data with known producers and consumers.",
+    "keyed": true,
+    "label": "Data products",
+    "type": "data-products"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the system.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "cmdbId",
+        "kind": "text",
+        "label": "CMDB ID",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "businessOwner",
+        "kind": "ref",
+        "label": "Business owner",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "technicalOwner",
+        "kind": "ref",
+        "label": "Technical owner",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "criticality",
+        "kind": "str_enum",
+        "label": "Criticality",
+        "multi": false,
+        "required": false,
+        "values": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ]
+      },
+      {
+        "help": "",
+        "key": "lifecycle",
+        "kind": "str_enum",
+        "label": "Lifecycle",
+        "multi": false,
+        "required": false,
+        "values": [
+          "planned",
+          "active",
+          "retiring",
+          "retired"
+        ]
+      },
+      {
+        "help": "",
+        "key": "sensitivity",
+        "kind": "iri_enum",
+        "label": "Sensitivity",
+        "multi": false,
+        "required": false,
+        "values": [
+          "Public",
+          "Internal",
+          "Confidential",
+          "Restricted"
+        ]
+      },
+      {
+        "help": "IDs of regulations that apply.",
+        "key": "regulatoryScope",
+        "kind": "ref",
+        "label": "Regulatory scope",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "policies"
+        ]
+      }
+    ],
+    "help": "Applications and platforms.",
+    "keyed": true,
+    "label": "Systems",
+    "type": "systems"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "Display name of the data element.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "",
+        "key": "definition",
+        "kind": "text",
+        "label": "Definition",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "yes or no. Critical elements need an owner, steward and authoritative source.",
+        "key": "critical",
+        "kind": "bool",
+        "label": "Critical",
+        "multi": false,
+        "required": false,
+        "values": [
+          "yes",
+          "no"
+        ]
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "stewardRole",
+        "kind": "ref",
+        "label": "Steward role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "authoritativeSource",
+        "kind": "ref",
+        "label": "Authoritative source",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "systems"
+        ]
+      },
+      {
+        "help": "",
+        "key": "sensitivity",
+        "kind": "iri_enum",
+        "label": "Sensitivity",
+        "multi": false,
+        "required": false,
+        "values": [
+          "Public",
+          "Internal",
+          "Confidential",
+          "Restricted"
+        ]
+      },
+      {
+        "help": "",
+        "key": "dataCategories",
+        "kind": "iri_enum",
+        "label": "Data categories",
+        "multi": true,
+        "required": false,
+        "values": [
+          "Personal data",
+          "Health data",
+          "Payment card data",
+          "Financial reporting data"
+        ]
+      },
+      {
+        "help": "ISO 8601 duration, e.g. P7Y for seven years.",
+        "key": "retention",
+        "kind": "duration",
+        "label": "Retention",
+        "multi": false,
+        "required": false
+      }
+    ],
+    "help": "Business-level data items. Physical columns in DataHub are bound to these.",
+    "keyed": true,
+    "label": "Data elements",
+    "type": "data-elements"
+  }
+]
