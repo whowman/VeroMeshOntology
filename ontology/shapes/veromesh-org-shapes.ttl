@@ -118,6 +118,7 @@ vms:DelegatedAuthorityShape
                   sh:lessThanOrEquals vmo:validUntil ; sh:message "Validity ends before it starts." ] ;
     sh:property [ sh:path vmo:validUntil ; sh:datatype xsd:date ; sh:maxCount 1 ] ;
     sh:property [ sh:path vmo:boundedSubsetOf ; sh:class vmo:DelegatedAuthority ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:requiresCoApproval ; sh:class vmo:CoApproval ] ;
     sh:property [ sh:path vmo:delegatedBy ; sh:minCount 1 ; sh:severity sh:Warning ;
                   sh:message "Authority does not record who delegated it." ] ;
     sh:sparql [
@@ -175,6 +176,23 @@ vms:DelegatedAuthorityShape
             }
         """ ] ;
     sh:sparql [
+        sh:message "Bounded subset drops the co-approval by {?role} above {?above} that its parent requires." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?role ?above WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              ?parent vmo:requiresCoApproval ?pc .
+              ?pc vmo:approverRole ?role ; vmo:aboveAmount ?above .
+              OPTIONAL { $this vmo:limitAmount ?amount }
+              FILTER (!BOUND(?amount) || ?amount > ?above)
+              FILTER NOT EXISTS {
+                $this vmo:requiresCoApproval ?c .
+                ?c vmo:approverRole ?role ; vmo:aboveAmount ?a2 .
+                FILTER (?a2 <= ?above)
+              }
+            }
+        """ ] ;
+    sh:sparql [
         sh:message "Bounded subset is scoped to capability {?cap}, outside its parent's scope." ;
         sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
         sh:select """
@@ -188,6 +206,47 @@ vms:DelegatedAuthorityShape
               })
             }
         """ ] .
+
+# Completeness checks on authority that are reported, not enforced.
+vms:DelegatedAuthorityWarningsShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:DelegatedAuthority ;
+    sh:severity sh:Warning ;
+    sh:sparql [
+        sh:message "Delegated by {?delegator}, who does not hold an authority covering {?action} themselves." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?delegator ?action WHERE {
+              $this vmo:delegatedBy ?delegator ; vmo:coversAction ?action .
+              FILTER NOT EXISTS { ?delegator a vmo:Policy }
+              FILTER NOT EXISTS {
+                ?delegator vmo:fills? ?holder .
+                ?holder vmo:holds ?own .
+                ?own vmo:coversAction ?action .
+                FILTER (?own != $this)
+              }
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Co-approval above {?above} never applies: the authority's limit is {?limit}." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?above ?limit WHERE {
+              $this vmo:limitAmount ?limit ; vmo:requiresCoApproval ?c .
+              ?c vmo:aboveAmount ?above .
+              FILTER (?above >= ?limit)
+            }
+        """ ] .
+
+vms:CoApprovalShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:CoApproval ;
+    sh:property [ sh:path vmo:approverRole ; sh:class vmo:Role ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "A co-approval names exactly one approver role." ] ;
+    sh:property [ sh:path vmo:aboveAmount ; sh:or ( [ sh:datatype xsd:decimal ] [ sh:datatype xsd:integer ] ) ;
+                  sh:minCount 1 ; sh:maxCount 1 ; sh:message "A co-approval needs one amount it applies above." ] ;
+    sh:property [ sh:path [ sh:inversePath vmo:requiresCoApproval ] ; sh:minCount 1 ;
+                  sh:message "A co-approval must belong to an authority." ] .
 
 # --- Agents and data ---------------------------------------------------------
 

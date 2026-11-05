@@ -29,6 +29,9 @@
 #    executions are recorded in the decision log, not in this model.
 #  * Standard vocabularies are aligned by subclass/subproperty, not imported,
 #    so the graph never depends on fetching them.
+#  * Reviewed decisions (v1): organizational units deferred to a later version;
+#    co-approval rules are part of the model; formal reporting lines are kept
+#    (W3C ORG org:reportsTo); KPIs carry no targets.
 # =============================================================================
 
 <https://veromesh.ai/ontology/org>
@@ -126,6 +129,11 @@ vmo:Impact
     a owl:Class ;
     rdfs:label "Impact" ;
     skos:definition "Qualifies 'action affects KPI or capability' with a materiality threshold. Below the threshold the agent acts and informs the owner; above it, the agent consults the owner first." .
+
+vmo:CoApproval
+    a owl:Class ;
+    rdfs:label "Co-approval" ;
+    skos:definition "A second sign-off an authority requires above an amount, from whoever fills the approver role, e.g. 'co-approval by the financial controller above 25,000 USD'. An authority can have several tiers." .
 
 vmo:DataElement
     a owl:Class ;
@@ -235,7 +243,20 @@ vmo:delegatedBy
     a owl:ObjectProperty ;
     rdfs:label "delegated by" ;
     rdfs:domain vmo:DelegatedAuthority ;
-    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:Person vmo:Role ) ] .
+    rdfs:range [ a owl:Class ; owl:unionOf ( vmo:Person vmo:Role vmo:Policy ) ] ;
+    skos:definition "Who granted this authority: a person, a role, or for top-level grants the policy that establishes them (e.g. the delegation-of-authority policy)." .
+
+vmo:requiresCoApproval
+    a owl:ObjectProperty ;
+    rdfs:label "requires co-approval" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range vmo:CoApproval .
+
+vmo:approverRole
+    a owl:ObjectProperty ;
+    rdfs:label "approver role" ;
+    rdfs:domain vmo:CoApproval ;
+    rdfs:range vmo:Role .
 
 vmo:boundedSubsetOf
     a owl:ObjectProperty ;
@@ -379,6 +400,13 @@ vmo:validUntil
     rdfs:label "valid until" ;
     rdfs:domain vmo:DelegatedAuthority ;
     rdfs:range xsd:date .
+
+vmo:aboveAmount
+    a owl:DatatypeProperty ;
+    rdfs:label "above amount" ;
+    rdfs:domain vmo:CoApproval ;
+    rdfs:range xsd:decimal ;
+    skos:definition "Co-approval applies to actions above this amount, in the authority's currency." .
 
 vmo:materialityThreshold
     a owl:DatatypeProperty ;

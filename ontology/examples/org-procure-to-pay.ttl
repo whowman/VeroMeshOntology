@@ -51,7 +51,7 @@ ex:DelegationPolicy
     a vmo:Policy ;
     rdfs:label "Delegation of authority policy" ;
     vmo:ownedBy ex:Controller ;
-    vmo:bounds ex:ApApprovalAuthority .
+    vmo:bounds ex:ControllerAuthority , ex:ApApprovalAuthority .
 
 ex:Sox404
     a vmo:Regulation ;
@@ -68,7 +68,20 @@ ex:ApManager
 
 ex:Controller
     a vmo:Role ;
-    rdfs:label "Financial controller" .
+    rdfs:label "Financial controller" ;
+    vmo:holds ex:ControllerAuthority .
+
+# Top-level grant, established by the delegation-of-authority policy.
+ex:ControllerAuthority
+    a vmo:DelegatedAuthority ;
+    rdfs:label "Approve and hold supplier invoices up to 250,000 USD" ;
+    vmo:coversAction ex:ApproveSupplierInvoice , ex:HoldSupplierInvoice ;
+    vmo:withinCapability ex:AccountsPayable ;
+    vmo:limitAmount 250000.00 ;
+    vmo:limitCurrency "USD" ;
+    vmo:validFrom "2026-01-01"^^xsd:date ;
+    vmo:validUntil "2026-12-31"^^xsd:date ;
+    vmo:delegatedBy ex:DelegationPolicy .
 
 ex:ErpPlatformLead
     a vmo:Role ;
@@ -93,8 +106,10 @@ ex:ApApprovalAuthority
     rdfs:label "Approve supplier invoices up to 50,000 USD" ;
     vmo:coversAction ex:ApproveSupplierInvoice , ex:HoldSupplierInvoice ;
     vmo:withinCapability ex:AccountsPayable ;
+    vmo:boundedSubsetOf ex:ControllerAuthority ;
     vmo:limitAmount 50000.00 ;
     vmo:limitCurrency "USD" ;
+    vmo:requiresCoApproval [ a vmo:CoApproval ; vmo:approverRole ex:Controller ; vmo:aboveAmount 25000.00 ] ;
     vmo:validFrom "2026-01-01"^^xsd:date ;
     vmo:validUntil "2026-12-31"^^xsd:date ;
     vmo:delegatedBy ex:Controller .

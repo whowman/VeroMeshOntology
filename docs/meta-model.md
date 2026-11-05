@@ -1,4 +1,4 @@
-# Organizational meta-model v1 (draft for review)
+# Organizational meta-model v1
 
 The meta-model defines the 12 entity types from the white paper and how they relate. Customers fill it with their own objectives, roles, people, authority, agents, data and systems; it ships with the product and changes only through review.
 
@@ -6,7 +6,7 @@ Files:
 - `ontology/veromesh-org.ttl`: the model (OWL)
 - `ontology/shapes/veromesh-org-shapes.ttl`: the validation rules (SHACL)
 - `ontology/examples/org-procure-to-pay.ttl`: a worked example, one value stream at a fictional company
-- `ontology/tests/test_shapes.py`: 20 tests; each breaks the example one way and checks the right rule fires
+- `ontology/tests/test_shapes.py`: 24 tests; each breaks the example one way and checks the right rule fires
 
 ## The model at a glance
 
@@ -63,13 +63,13 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Process | A business process realizing a capability | owner, systems it runs on | Process repository |
 | Person | A human filling roles; principal for agents | name, employee ID, email, roles, reporting line, nothing else | HR, identity |
 | Role | A job role or position; ownership attaches here | name, who fills it, authority held | HR |
-| Delegated authority | A grant to decide or act | holder, actions covered, capability scope, limit and currency, validity dates, delegated by, parent grant | ERP approval matrix, credentialing, credit authority |
+| Delegated authority | A grant to decide or act | holder, actions covered, capability scope, limit and currency, co-approval tiers, validity dates, delegated by (person, role or policy), parent grant | ERP approval matrix, credentialing, credit authority |
 | AI agent | Software that acts for exactly one person | principal, authority held, actions performed, data consumed, system | Agent registry |
 | Action | A type of consequential action | process, KPIs and capabilities affected, materiality thresholds | Process owners |
 | Data product | Governed, owned data with known producers and consumers | owner, system, lineage (feeds), elements, sensitivity, catalog URN | DataHub |
 | System | An application or platform | business and technical owner, CMDB ID, criticality, lifecycle, regulatory scope | CMDB |
 
-Two supporting types: **Impact** (attaches a materiality threshold to "action affects KPI") and **Business data element** (a business-level data item; physical columns bind to it).
+Three supporting types: **Impact** (attaches a materiality threshold to "action affects KPI"), **Co-approval** (a second sign-off by a role above an amount) and **Business data element** (a business-level data item; physical columns bind to it).
 
 ## Validation rules
 
@@ -79,7 +79,8 @@ Two supporting types: **Impact** (attaches a materiality threshold to "action af
 | --- | --- |
 | An agent acts for exactly one person | Violation |
 | An agent's authority is a bounded subset of an authority its principal holds, directly or through a role | Violation |
-| A bounded subset never exceeds its parent: limit, currency, actions, validity dates, capability scope | Violation |
+| A bounded subset never exceeds its parent: limit, currency, actions, validity dates, capability scope, and it keeps every co-approval its parent requires | Violation |
+| A co-approval names exactly one approver role and one amount | Violation |
 | An agent only performs actions one of its authorities covers | Violation |
 | Each authority has exactly one holder and covers at least one action; a limit needs a currency; validity cannot end before it starts | Violation |
 | Only role-relevant facts may be recorded about a person (closed shape: no performance data, no informal networks) | Violation |
@@ -87,6 +88,8 @@ Two supporting types: **Impact** (attaches a materiality threshold to "action af
 | A critical data element has an owner, a steward and an authoritative source system | Violation |
 | Sensitivity and data category use the controlled lists | Violation |
 | Every impact with a threshold is also listed under "affects" | Violation |
+| Whoever delegated an authority holds one covering the same actions (top-level grants come from a policy) | Warning |
+| A co-approval above the authority's own limit never applies | Warning |
 | Missing owner, KPI, definition, employee ID, unfilled role, action with no impact map, KPI not traced to data, system without owners | Warning |
 
 ## Choices made in this draft
@@ -99,12 +102,15 @@ Two supporting types: **Impact** (attaches a materiality threshold to "action af
 6. **Standards are aligned, not imported.** Person is a FOAF and PROV Person, Role is a W3C ORG Role, AI agent is a PROV software agent, acts-for is a kind of PROV acted-on-behalf-of, and data product is a DCAT resource. Tools that understand those standards can read our data; nothing is fetched at runtime.
 7. **Industry specifics are subclasses.** A clinical privilege or a credit limit becomes a subclass of Delegated authority in an extension pack; the decision protocol treats it like any other authority.
 
-## Questions for review
+## Review decisions (4 November 2026)
 
-1. **Organizational units.** Departments and legal entities are not modeled. Add W3C ORG's organizational unit now (roles belong to units), or wait?
-2. **Reporting lines.** The draft allows formal reporting lines (W3C ORG "reports to"). Keep them, or treat them as out of scope with the other people data?
-3. **Approval chains.** Some authorities need a second approver above a limit. Model that as part of Delegated authority now, or leave it to the policy engine?
-4. **Who may delegate.** The draft records who delegated a grant but does not check that they were allowed to. Add a rule that the delegator must hold the parent authority?
-5. **KPI targets.** The draft deliberately has no targets, following the paper's point that agents should not optimize KPIs. Confirm, or add targets for display only?
-6. **Data contracts.** Contracts (ODCS) are planned for Phase 3 and not in this draft. Fine to leave them until then?
-7. **Naming.** Is "organizational ontology" the name customers should see for this model, given the white paper's open question about "organizational context model"?
+| Question | Decision |
+| --- | --- |
+| Organizational units (departments, legal entities) | Deferred to a later version; v1 keeps the 12 core types |
+| Approval chains (second approver above a limit) | In the model: an authority lists co-approval tiers (approver role and amount); agents' authorities must keep them |
+| Who may delegate | Checked as a warning: a delegator should hold an authority covering the same actions; top-level grants are delegated by a policy |
+| Formal reporting lines | Kept (W3C ORG "reports to"), for escalation when an owner cannot be reached |
+| KPI targets | None; KPIs route impact to owners and are not targets for agents |
+| Data contracts | Added in Phase 3 |
+
+Still open: whether customers see this model named "organizational ontology" or "organizational context model" (the white paper's open question).
