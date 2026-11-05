@@ -1,7 +1,7 @@
 # Build context: repository root (see deploy/docker-compose.veromesh.yml).
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 VEROMESH_ONTOLOGY_DIR=/app/ontology
 WORKDIR /app
 
 COPY service/pyproject.toml service/README.md ./

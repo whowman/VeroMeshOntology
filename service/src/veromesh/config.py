@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +25,13 @@ class Settings(BaseSettings):
 
     # Glossary node under which ontology classes are published in DataHub.
     glossary_root_name: str = "Veromesh Ontology"
+
+    # IRI prefix for model instances imported from workbooks (one per customer install).
+    instance_base: str = "urn:veromesh:org:"
+
+    # Folder with the meta-model, validation rules and examples. Defaults to the
+    # repository's ontology/ folder; the Docker image sets /app/ontology.
+    ontology_dir: str = str(Path(__file__).resolve().parents[3] / "ontology")
 
 
 @lru_cache

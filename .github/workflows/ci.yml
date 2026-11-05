@@ -26,11 +26,22 @@ jobs:
             --ignore-packages veromesh pip-licenses > ../service-licenses.md
           # Fail on licenses we don't ship (see docs/licensing.md).
           pip-licenses --ignore-packages veromesh pip-licenses \
-            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License"
+            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License;Elastic License 2.0 (ELv2)"
       - uses: actions/upload-artifact@v4
         with:
           name: service-licenses
           path: service-licenses.md
+
+  connectors:
+    # The connector SDK and its connectors, tested against the real API in-process.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "./service[dev]" -e "./connectors[dev]"
+      - run: cd connectors && ruff check . && ruff format --check . && pytest -q
 
   ontology:
     runs-on: ubuntu-latest
@@ -118,6 +129,18 @@ jobs:
         run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
       - name: Load example ontology and publish glossary
         run: scripts/load-examples.sh
+      - name: Load the example workbook with the connectors container (through the REST API)
+        run: |
+          set -euo pipefail
+          scripts/veromesh-connect.sh spreadsheet template --example -o example.xlsx
+          scripts/veromesh-connect.sh spreadsheet import example.xlsx --source p2p | tee import.txt
+          grep -q "0 violations" import.txt && grep -q "Committed changeset" import.txt
+          scripts/veromesh-connect.sh sources | tee sources.txt
+          grep -q "^p2p " sources.txt
+          curl -fsS localhost:8700/api/v1/authorities/AssistantApprovalAuthority | tee auth.json; echo
+          grep -q '"holder":"InvoiceAssistant"' auth.json
+          curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' --data-urlencode \
+            'query=ASK { GRAPH <https://veromesh.ai/graph/source/p2p> { ?a a <https://veromesh.ai/ontology/org#AIAgent> } }' | grep -q true
       - name: Bind a dataset and verify in both stores
         run: |
           set -euo pipefail
