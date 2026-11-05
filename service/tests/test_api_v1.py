@@ -165,7 +165,8 @@ def test_merge_changeset_upserts_without_touching_the_rest(client, example):
 def test_changeset_lifecycle_and_bad_requests(client, example):
     cs, _ = submit(client, example)
     assert client.post(f"{API}/changesets/{cs}/commit").status_code == 200
-    assert client.post(f"{API}/changesets/{cs}/commit").status_code == 409
+    again = client.post(f"{API}/changesets/{cs}/commit")
+    assert again.status_code == 200 and again.json()["alreadyCommitted"] is True
     assert client.post(f"{API}/changesets/{cs}/items", json={"items": []}).status_code == 409
 
     cs2, _ = submit(client, example, source="other")
@@ -176,3 +177,37 @@ def test_changeset_lifecycle_and_bad_requests(client, example):
     assert client.post(f"{API}/changesets", json={"source": "Not Valid!"}).status_code == 400
     _, report = submit(client, [{"type": "roles", "op": "delete", "entity": {"id": "X"}}], source="z")
     assert "only allowed in merge mode" in report["errors"][0]["message"]
+
+
+def test_concurrent_loads_cannot_overwrite_each_other(client, example):
+    load(client, example)
+    a, _ = submit(client, example)
+    b, _ = submit(client, example)
+    assert client.post(f"{API}/changesets/{a}/commit").status_code == 200
+    r = client.post(f"{API}/changesets/{b}/commit")
+    assert r.status_code == 409 and "changed since this changeset was opened" in r.json()["detail"]
+    assert client.get(f"{API}/sources").json()[0]["version"] == a
+
+
+def test_idempotency_key_resumes_the_same_changeset(client, example):
+    body = {"source": "p2p", "idempotencyKey": "run-1", "connector": "spreadsheet"}
+    first = client.post(f"{API}/changesets", json=body)
+    second = client.post(f"{API}/changesets", json=body)
+    assert first.status_code == 201 and second.status_code == 200
+    assert first.json()["id"] == second.json()["id"] and second.json()["reused"] is True
+    assert second.json()["connector"] == "spreadsheet"
+
+    client.delete(f"{API}/changesets/{first.json()['id']}")
+    third = client.post(f"{API}/changesets", json=body)
+    assert third.status_code == 201 and third.json()["id"] != first.json()["id"]
+
+
+def test_run_history(client, example):
+    load(client, example)
+    load(
+        client, [{"type": "roles", "op": "upsert", "entity": {"id": "Treasurer", "name": "T"}}], mode="merge"
+    )
+    runs = client.get(f"{API}/changesets", params={"source": "p2p"}).json()
+    assert [r["status"] for r in runs] == ["committed", "committed"]
+    assert runs[0]["mode"] == "merge" and runs[0]["baseVersion"] == runs[1]["id"]
+    assert client.get(f"{API}/changesets", params={"status": "open"}).json() == []

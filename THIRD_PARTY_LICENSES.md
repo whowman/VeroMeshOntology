@@ -27,11 +27,12 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | rdflib | BSD-3-Clause |
 | pyshacl | Apache-2.0 |
 
-## Spreadsheet loader (Python)
+## Connectors (Python)
 
 | Package | License |
 | --- | --- |
 | openpyxl | MIT |
 | httpx | BSD-3-Clause |
+| PyYAML | MIT |
 
 Transitive dependencies are listed in the CI artifact. Review any new GPL, AGPL, LGPL, SSPL or "source-available" license before release.

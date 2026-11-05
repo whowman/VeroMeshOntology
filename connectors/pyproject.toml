@@ -3,24 +3,25 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "veromesh-loader"
-version = "0.1.0"
-description = "Load the VeroMesh organizational model from Excel workbooks through the VeroMesh REST API"
+name = "veromesh-connectors"
+version = "0.2.0"
+description = "VeroMesh connector SDK and connectors (spreadsheet, CSV); clients of the VeroMesh REST API"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 dependencies = [
     "openpyxl>=3.1,<4",  # MIT
     "httpx>=0.27",       # BSD-3-Clause
+    "pyyaml>=6,<7",      # MIT (mapping files)
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
-veromesh-loader = "veromesh_loader.cli:main"
+veromesh-connect = "veromesh_connectors.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/veromesh_loader"]
+packages = ["src/veromesh_connectors"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

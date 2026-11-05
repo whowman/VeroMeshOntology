@@ -34,12 +34,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Spreadsheet loader: a client of the REST API. Run it with scripts/veromesh-loader.sh.
-  loader:
+  # Connectors (spreadsheet, CSV, ...): clients of the REST API. Run them with scripts/veromesh-connect.sh.
+  connectors:
     profiles: ["tools"]
     build:
-      context: ../loader
-    image: veromesh/loader:local
+      context: ../connectors
+    image: veromesh/connectors:local
     environment:
       VEROMESH_API: http://veromesh-service:8700
       VEROMESH_TOKEN: ${VEROMESH_TOKEN:-}

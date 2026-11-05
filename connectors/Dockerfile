@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 VEROMESH_API=http://veromesh-se
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir . && useradd --system --uid 10003 loader
-USER loader
+RUN pip install --no-cache-dir . && useradd --system --uid 10003 connect
+USER connect
 WORKDIR /work
-ENTRYPOINT ["veromesh-loader"]
+ENTRYPOINT ["veromesh-connect"]

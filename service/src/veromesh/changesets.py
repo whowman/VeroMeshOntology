@@ -12,6 +12,12 @@ the attestation workflow) writes through a changeset:
   from any source, and a change is rejected if it introduces a rule violation
   anywhere (e.g. deleting a role that a KPI in another source is owned by).
 * Nothing is written until commit, and commit re-validates first.
+* Each changeset records the source version it started from (the changeset
+  that last wrote the source). Commit refuses if the source has changed since,
+  so two concurrent loads can never silently overwrite each other.
+* An idempotency key on create returns the existing changeset for the same
+  source and key, and committing an already-committed changeset returns its
+  report. Clients can therefore retry or resume any step safely.
 
 Changesets and their items are stored in the RDF store, so they survive
 restarts and remain as an audit trail after commit.
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -136,6 +143,16 @@ def get_entity(store: RDFStore, type_: str, rid: str, base: str) -> dict:
     return {**E.to_entity(union, subj, type_, base), "sources": sorted(found_in)}
 
 
+def source_version(store: RDFStore, source: str) -> str:
+    """The changeset that last wrote ``source``, or 'none' for a source never written."""
+    res = store.query(
+        f"""SELECT ?cs WHERE {{ GRAPH <{PROVENANCE_GRAPH}> {{
+              <{source_graph(source)}> <http://www.w3.org/ns/prov#wasGeneratedBy> ?cs }} }}"""
+    )
+    rows = res["results"]["bindings"]
+    return rows[0]["cs"]["value"][len(CHANGESET_BASE) :] if rows else "none"
+
+
 def list_sources(store: RDFStore) -> list[dict]:
     res = store.query(
         f"""
@@ -160,6 +177,7 @@ def list_sources(store: RDFStore) -> list[dict]:
             "updatedAt": b["at"]["value"],
             "facts": int(b["n"]["value"]) if "n" in b else None,
             "changeset": b["cs"]["value"][len(CHANGESET_BASE) :] if "cs" in b else None,
+            "version": b["cs"]["value"][len(CHANGESET_BASE) :] if "cs" in b else None,
         }
         for b in res["results"]["bindings"]
     ]
@@ -188,8 +206,20 @@ def create(
     kind: str = "api",
     description: str | None = None,
     file: str | None = None,
+    connector: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
     check_source(source)
+    if idempotency_key is not None and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", idempotency_key):
+        raise ValueError("Idempotency key must be 1-128 letters, digits, '.', '_', ':' or '-'.")
+    if idempotency_key:
+        found = store.query(
+            f"""SELECT ?c WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{
+                  ?c <{VM.source}> {literal(source)} ; <{VM.idempotencyKey}> {literal(idempotency_key)} ;
+                     <{VM.status}> ?st . FILTER(?st != "discarded") }} }}"""
+        )["results"]["bindings"]
+        if found:
+            return {**get(store, found[0]["c"]["value"][len(CHANGESET_BASE) :]), "reused": True}
     if mode not in MODES:
         raise ValueError(f"Mode must be one of: {', '.join(MODES)}.")
     if kind not in KINDS:
@@ -200,6 +230,11 @@ def create(
         extra += f" ; <{VM.description}> {literal(description)}"
     if file:
         extra += f" ; <{VM.file}> {literal(file)}"
+    if connector:
+        extra += f" ; <{VM.connector}> {literal(connector)}"
+    if idempotency_key:
+        extra += f" ; <{VM.idempotencyKey}> {literal(idempotency_key)}"
+    extra += f" ; <{VM.baseVersion}> {literal(source_version(store, source))}"
     store.update(
         f"""INSERT DATA {{ GRAPH <{CHANGESET_GRAPH}> {{
               <{_cs_iri(cs)}> a <{VM.Changeset}> ;
@@ -208,7 +243,7 @@ def create(
                 <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> {extra} .
             }} }}"""
     )
-    return get(store, cs)
+    return {**get(store, cs), "reused": False}
 
 
 def get(store: RDFStore, cs: str, *, with_report: bool = True) -> dict:
@@ -232,11 +267,34 @@ def get(store: RDFStore, cs: str, *, with_report: bool = True) -> dict:
         "description": props.get(str(VM.description)),
         "file": props.get(str(VM.file)),
         "committedAt": props.get(str(VM.committedAt)),
+        "connector": props.get(str(VM.connector)),
+        "idempotencyKey": props.get(str(VM.idempotencyKey)),
+        "baseVersion": props.get(str(VM.baseVersion)),
         "items": {"upsert": by_op.get("upsert", 0), "delete": by_op.get("delete", 0)},
     }
     if with_report and str(VM.report) in props:
         out["report"] = json.loads(props[str(VM.report)])
     return out
+
+
+def list_changesets(
+    store: RDFStore, *, source: str | None = None, status: str | None = None, limit: int = 50
+) -> list[dict]:
+    """Run history, newest first."""
+    filters = ""
+    if source:
+        check_source(source)
+        filters += f" ?c <{VM.source}> {literal(source)} ."
+    if status:
+        filters += f" ?c <{VM.status}> {literal(status)} ."
+    res = store.query(
+        f"""SELECT ?c ?at WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{ ?c a <{VM.Changeset}> ; <{VM.createdAt}> ?at .{filters} }} }}
+            ORDER BY DESC(?at) LIMIT {max(1, min(int(limit), 500))}"""
+    )
+    return [
+        get(store, b["c"]["value"][len(CHANGESET_BASE) :], with_report=False)
+        for b in res["results"]["bindings"]
+    ]
 
 
 def _set_status(store: RDFStore, cs: str, status: str, report: dict | None = None, extra: str = "") -> None:
@@ -530,8 +588,35 @@ def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
     return plan.report
 
 
+_commit_locks: dict[str, threading.Lock] = {}
+_commit_locks_guard = threading.Lock()
+
+
+def _source_lock(source: str) -> threading.Lock:
+    with _commit_locks_guard:
+        return _commit_locks.setdefault(source, threading.Lock())
+
+
 def commit(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
-    meta = _require_open(store, cs)
+    meta = get(store, cs)
+    if meta["status"] == "committed":
+        return {**meta.get("report", {}), "alreadyCommitted": True}
+    if meta["status"] == "discarded":
+        raise Conflict(f"Changeset {cs} is discarded.")
+    # One commit per source at a time within this service; the version check below
+    # catches anything that changed the source since the changeset was opened.
+    with _source_lock(meta["source"]):
+        return _commit_locked(store, cs, meta, base=base, ontology_dir=ontology_dir)
+
+
+def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_dir: str) -> dict:
+    current = source_version(store, meta["source"])
+    if meta.get("baseVersion") and current != meta["baseVersion"]:
+        raise Conflict(
+            f"Source '{meta['source']}' changed since this changeset was opened "
+            f"(now at version {current}, changeset started from {meta['baseVersion']}). "
+            "Nothing was written; re-run the load against the current state."
+        )
     plan = _plan(store, meta, _load_items(store, cs), base, ontology_dir)
     if not plan.report["valid"]:
         _set_status(store, cs, "invalid", plan.report)
@@ -559,7 +644,7 @@ def commit(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
         }} }}
         """
     )
-    report = {**plan.report, "committed": True, "facts": len(plan.target)}
+    report = {**plan.report, "committed": True, "facts": len(plan.target), "version": cs}
     _set_status(store, cs, "committed", report, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
     return report
 

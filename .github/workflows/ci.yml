@@ -32,16 +32,16 @@ jobs:
           name: service-licenses
           path: service-licenses.md
 
-  loader:
-    # The spreadsheet loader, tested against the real API in-process.
+  connectors:
+    # The connector SDK and its connectors, tested against the real API in-process.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "./service[dev]" -e "./loader[dev]"
-      - run: cd loader && ruff check . && ruff format --check . && pytest -q
+      - run: pip install -e "./service[dev]" -e "./connectors[dev]"
+      - run: cd connectors && ruff check . && ruff format --check . && pytest -q
 
   ontology:
     runs-on: ubuntu-latest
@@ -129,13 +129,13 @@ jobs:
         run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
       - name: Load example ontology and publish glossary
         run: scripts/load-examples.sh
-      - name: Load the example workbook with the loader container (through the REST API)
+      - name: Load the example workbook with the connectors container (through the REST API)
         run: |
           set -euo pipefail
-          scripts/veromesh-loader.sh template --example -o example.xlsx
-          scripts/veromesh-loader.sh import example.xlsx --source p2p | tee import.txt
+          scripts/veromesh-connect.sh spreadsheet template --example -o example.xlsx
+          scripts/veromesh-connect.sh spreadsheet import example.xlsx --source p2p | tee import.txt
           grep -q "0 violations" import.txt && grep -q "Committed changeset" import.txt
-          scripts/veromesh-loader.sh sources | tee sources.txt
+          scripts/veromesh-connect.sh sources | tee sources.txt
           grep -q "^p2p " sources.txt
           curl -fsS localhost:8700/api/v1/authorities/AssistantApprovalAuthority | tee auth.json; echo
           grep -q '"holder":"InvoiceAssistant"' auth.json

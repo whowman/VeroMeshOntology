@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from openpyxl import load_workbook
 
-from veromesh_loader.cli import main
+from veromesh_connectors.cli import main
 
 
 def run(http, *args) -> int:
+    if args and args[0] in ("template", "import", "export"):
+        args = ("spreadsheet", *args)
     return main(["--api", "http://testserver", *args], http=http)
 
 
@@ -63,6 +65,7 @@ def test_field_error_points_at_the_column(http, tmp_path, capsys):
     assert run(http, "import", str(ex), "--source", "p2p") == 1
     out = capsys.readouterr().out
     assert "error     KPIs row " in out and ", Owner role: No entity with ID 'NoSuchRole'" in out
+    assert "Not written" in out
 
 
 def test_workbook_problems_are_caught_before_calling_the_api(http, tmp_path, capsys):
@@ -71,7 +74,7 @@ def test_workbook_problems_are_caught_before_calling_the_api(http, tmp_path, cap
     set_cell(ex, "Roles", "Controller", "ID", "ApManager")
     assert run(http, "import", str(ex), "--source", "p2p") == 1
     out = capsys.readouterr().out
-    assert "already used on row" in out and "nothing sent" in out
+    assert "also defined at Roles row" in out and "nothing sent" in out
 
 
 def test_references_to_another_source(http, tmp_path, capsys):
@@ -91,6 +94,7 @@ def test_references_to_another_source(http, tmp_path, capsys):
     assert out.count("Committed changeset") == 2 and "0 violations" in out
 
 
-def test_unreachable_api(tmp_path, capsys):
+def test_unreachable_api(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("VEROMESH_RETRIES", "0")
     assert main(["--api", "http://127.0.0.1:9", "sources"]) == 2
     assert "cannot reach the VeroMesh API" in capsys.readouterr().out

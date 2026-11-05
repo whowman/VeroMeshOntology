@@ -45,6 +45,8 @@ class ChangesetIn(BaseModel):
     kind: str = "api"
     description: str | None = None
     file: str | None = None
+    connector: str | None = None
+    idempotencyKey: str | None = None
 
 
 class ItemsIn(BaseModel):
@@ -196,16 +198,26 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         return {"items": items}
 
     @app.post("/api/v1/changesets", status_code=201, tags=["changesets"])
-    def changeset_create(s: Svc, body: ChangesetIn) -> dict:
+    def changeset_create(s: Svc, body: ChangesetIn):
         """Open a changeset for one source. `replace`: its items become the whole source. `merge`: upsert/delete within it."""
-        return changesets.create(
+        cs = changesets.create(
             s.store,
             source=body.source,
             mode=body.mode,
             kind=body.kind,
             description=body.description,
             file=body.file,
+            connector=body.connector,
+            idempotency_key=body.idempotencyKey,
         )
+        return JSONResponse(status_code=200 if cs["reused"] else 201, content=cs)
+
+    @app.get("/api/v1/changesets", tags=["changesets"])
+    def changeset_list(
+        s: Svc, source: str | None = None, status: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        """Run history, newest first; filter by source and status (e.g. open, committed)."""
+        return changesets.list_changesets(s.store, source=source, status=status, limit=limit)
 
     @app.get("/api/v1/changesets/{cs}", tags=["changesets"])
     def changeset_get(s: Svc, cs: str) -> dict:
