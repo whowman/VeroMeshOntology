@@ -39,7 +39,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pyoxigraph
+      - run: pip install pyoxigraph "pyshacl>=0.40,<0.41" pytest
+      - name: Validation rules (meta-model + SHACL)
+        run: pytest -q ontology/tests
       - name: Parse all Turtle files
         run: |
           python - <<'EOF'

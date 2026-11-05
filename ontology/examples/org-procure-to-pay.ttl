@@ -1,0 +1,203 @@
+@prefix vmo:  <https://veromesh.ai/ontology/org#> .
+@prefix vm:   <https://veromesh.ai/ontology/core#> .
+@prefix ex:   <https://example.com/org#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix org:  <http://www.w3.org/ns/org#> .
+
+# Worked example: one value stream (procure to pay) at a fictional company.
+# Every name here is invented. It populates all 12 core entity types and is
+# valid against the shapes (warnings only).
+
+# --- Business intent ---------------------------------------------------------
+
+ex:PaySuppliersCorrectly
+    a vmo:Objective ;
+    rdfs:label "Pay suppliers accurately and on time" ;
+    vmo:measuredBy ex:OnTimePaymentRate , ex:DuplicatePaymentRate .
+
+ex:OnTimePaymentRate
+    a vmo:KPI ;
+    rdfs:label "On-time payment rate" ;
+    skos:definition "Share of supplier invoices paid by their due date." ;
+    vmo:unit "percent" ;
+    vmo:ownedBy ex:ApManager ;
+    vmo:computedFrom ex:SupplierInvoices .
+
+ex:DuplicatePaymentRate
+    a vmo:KPI ;
+    rdfs:label "Duplicate payment rate" ;
+    skos:definition "Share of payments that duplicate an earlier payment of the same invoice." ;
+    vmo:unit "percent" ;
+    vmo:ownedBy ex:Controller ;
+    vmo:computedFrom ex:SupplierPayments .
+
+ex:AccountsPayable
+    a vmo:BusinessCapability ;
+    rdfs:label "Accounts payable" ;
+    vmo:serves ex:PaySuppliersCorrectly ;
+    vmo:ownedBy ex:ApManager ;
+    vmo:realizedBy ex:InvoiceApproval ;
+    vmo:produces ex:SupplierInvoices , ex:SupplierPayments .
+
+ex:InvoiceApproval
+    a vmo:Process ;
+    rdfs:label "Supplier invoice approval" ;
+    vmo:ownedBy ex:ApManager ;
+    vmo:runsOn ex:Erp .
+
+ex:DelegationPolicy
+    a vmo:Policy ;
+    rdfs:label "Delegation of authority policy" ;
+    vmo:ownedBy ex:Controller ;
+    vmo:bounds ex:ControllerAuthority , ex:ApApprovalAuthority .
+
+ex:Sox404
+    a vmo:Regulation ;
+    rdfs:label "Sarbanes-Oxley Act, section 404" ;
+    vmo:jurisdiction "US" ;
+    vmo:bounds ex:Erp , ex:SupplierPayments .
+
+# --- People and authority ----------------------------------------------------
+
+ex:ApManager
+    a vmo:Role ;
+    rdfs:label "Accounts payable manager" ;
+    vmo:holds ex:ApApprovalAuthority .
+
+ex:Controller
+    a vmo:Role ;
+    rdfs:label "Financial controller" ;
+    vmo:holds ex:ControllerAuthority .
+
+# Top-level grant, established by the delegation-of-authority policy.
+ex:ControllerAuthority
+    a vmo:DelegatedAuthority ;
+    rdfs:label "Approve and hold supplier invoices up to 250,000 USD" ;
+    vmo:coversAction ex:ApproveSupplierInvoice , ex:HoldSupplierInvoice ;
+    vmo:withinCapability ex:AccountsPayable ;
+    vmo:limitAmount 250000.00 ;
+    vmo:limitCurrency "USD" ;
+    vmo:validFrom "2026-01-01"^^xsd:date ;
+    vmo:validUntil "2026-12-31"^^xsd:date ;
+    vmo:delegatedBy ex:DelegationPolicy .
+
+ex:ErpPlatformLead
+    a vmo:Role ;
+    rdfs:label "ERP platform lead" .
+
+ex:DanaExample
+    a vmo:Person ;
+    rdfs:label "Dana Example" ;
+    vmo:employeeId "E-1001" ;
+    vmo:email "dana@example.com" ;
+    vmo:fills ex:ApManager ;
+    org:reportsTo ex:LeeExample .
+
+ex:LeeExample
+    a vmo:Person ;
+    rdfs:label "Lee Example" ;
+    vmo:employeeId "E-0042" ;
+    vmo:fills ex:Controller , ex:ErpPlatformLead .
+
+ex:ApApprovalAuthority
+    a vmo:DelegatedAuthority ;
+    rdfs:label "Approve supplier invoices up to 50,000 USD" ;
+    vmo:coversAction ex:ApproveSupplierInvoice , ex:HoldSupplierInvoice ;
+    vmo:withinCapability ex:AccountsPayable ;
+    vmo:boundedSubsetOf ex:ControllerAuthority ;
+    vmo:limitAmount 50000.00 ;
+    vmo:limitCurrency "USD" ;
+    vmo:requiresCoApproval [ a vmo:CoApproval ; vmo:approverRole ex:Controller ; vmo:aboveAmount 25000.00 ] ;
+    vmo:validFrom "2026-01-01"^^xsd:date ;
+    vmo:validUntil "2026-12-31"^^xsd:date ;
+    vmo:delegatedBy ex:Controller .
+
+# --- Agents and data ---------------------------------------------------------
+
+ex:InvoiceAssistant
+    a vmo:AIAgent ;
+    rdfs:label "Invoice assistant" ;
+    vmo:actsFor ex:DanaExample ;
+    vmo:holds ex:AssistantApprovalAuthority ;
+    vmo:performs ex:ApproveSupplierInvoice ;
+    vmo:consumes ex:SupplierInvoices ;
+    vmo:runsOn ex:AgentPlatform .
+
+# The agent's authority: a bounded subset of the AP manager's role authority.
+ex:AssistantApprovalAuthority
+    a vmo:DelegatedAuthority ;
+    rdfs:label "Approve supplier invoices up to 5,000 USD" ;
+    vmo:boundedSubsetOf ex:ApApprovalAuthority ;
+    vmo:coversAction ex:ApproveSupplierInvoice ;
+    vmo:withinCapability ex:AccountsPayable ;
+    vmo:limitAmount 5000.00 ;
+    vmo:limitCurrency "USD" ;
+    vmo:validFrom "2026-03-01"^^xsd:date ;
+    vmo:validUntil "2026-12-31"^^xsd:date ;
+    vmo:delegatedBy ex:DanaExample .
+
+ex:ApproveSupplierInvoice
+    a vmo:Action ;
+    rdfs:label "Approve supplier invoice" ;
+    vmo:partOfProcess ex:InvoiceApproval ;
+    vmo:affects ex:OnTimePaymentRate , ex:DuplicatePaymentRate ;
+    vmo:hasImpact [ a vmo:Impact ; vmo:impactOn ex:DuplicatePaymentRate ;
+                    vmo:materialityThreshold 1000.00 ; vmo:materialityUnit "USD per invoice" ] ,
+                  [ a vmo:Impact ; vmo:impactOn ex:OnTimePaymentRate ;
+                    vmo:materialityThreshold 25 ; vmo:materialityUnit "invoices per day" ] .
+
+ex:HoldSupplierInvoice
+    a vmo:Action ;
+    rdfs:label "Put supplier invoice on hold" ;
+    vmo:partOfProcess ex:InvoiceApproval ;
+    vmo:affects ex:OnTimePaymentRate .
+
+ex:SupplierInvoices
+    a vmo:DataProduct ;
+    rdfs:label "Supplier invoices" ;
+    vmo:ownedBy ex:ApManager ;
+    vmo:runsOn ex:Erp ;
+    vmo:feeds ex:SupplierPayments ;
+    vmo:containsElement ex:SupplierBankAccount ;
+    vmo:sensitivity vmo:Confidential ;
+    vmo:catalogUrn "urn:li:dataProduct:supplier-invoices" .
+
+ex:SupplierPayments
+    a vmo:DataProduct ;
+    rdfs:label "Supplier payments" ;
+    vmo:ownedBy ex:Controller ;
+    vmo:runsOn ex:Erp ;
+    vmo:sensitivity vmo:Restricted .
+
+ex:SupplierBankAccount
+    a vmo:DataElement ;
+    rdfs:label "Supplier bank account number" ;
+    skos:definition "The account a supplier is paid into." ;
+    vmo:criticalDataElement true ;
+    vmo:ownedBy ex:Controller ;
+    vmo:steward ex:ApManager ;
+    vmo:authoritativeSource ex:Erp ;
+    vmo:sensitivity vmo:Restricted ;
+    vmo:dataCategory vmo:FinancialReportingData ;
+    vmo:retention "P7Y"^^xsd:duration .
+
+ex:Erp
+    a vmo:System ;
+    rdfs:label "ERP" ;
+    vmo:cmdbId "CI-00017" ;
+    vmo:businessOwner ex:Controller ;
+    vmo:technicalOwner ex:ErpPlatformLead ;
+    vmo:criticality "critical" ;
+    vmo:lifecycleStatus "active" ;
+    vmo:regulatoryScope ex:Sox404 .
+
+ex:AgentPlatform
+    a vmo:System ;
+    rdfs:label "Agent platform" ;
+    vmo:cmdbId "CI-00231" ;
+    vmo:businessOwner ex:ApManager ;
+    vmo:technicalOwner ex:ErpPlatformLead ;
+    vmo:criticality "high" ;
+    vmo:lifecycleStatus "active" .

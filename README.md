@@ -14,7 +14,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | --- | --- |
 | `service/` | Veromesh API (Python, FastAPI) |
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
-| `ontology/` | Veromesh core vocabulary and an example retail ontology |
+| `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
 | `deploy/` | Pinned versions and the compose file for Veromesh services |
 | `scripts/` | Local stack helpers |
 | `docs/` | Architecture and licensing |
