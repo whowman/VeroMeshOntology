@@ -1,32 +1,24 @@
-"""Spreadsheet loader: an Excel workbook <-> the organizational meta-model.
+"""The organizational model as REST resources.
 
-One spec (``SHEETS``) drives three things so they can never drift apart:
-
-* ``build_template``  - a workbook with one sheet per entity type, header help
-  and drop-downs, optionally pre-filled from an existing graph (export);
-* ``workbook_to_graph`` - rows -> RDF, with row-level errors (unknown IDs,
-  duplicates, bad values) reported against sheet, row and column;
-* ``graph_to_workbook`` - RDF -> rows, for export and round-trips.
-
-Rows reference each other by ID. IDs are unique across the whole workbook and
-become IRIs under a configurable base.
+``SHEETS`` describes every entity type the API exposes: its fields, their kinds,
+which other types a reference may point to, and the help text clients show.
+The same spec drives the JSON schema (``/api/v1/schema``), JSON <-> RDF
+conversion, and any client that renders forms or spreadsheets from the schema.
+(The name ``Sheet`` is historical: each type maps to one sheet in the loader's
+workbook.)
 """
 
 from __future__ import annotations
 
-import io
+import hashlib
+import json
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, unquote
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.comments import Comment
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.worksheet.datavalidation import DataValidation
-from rdflib import BNode, Graph, Literal, Namespace, URIRef
+from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, RDFS, SKOS, XSD
 
 VMO = Namespace("https://veromesh.ai/ontology/org#")
@@ -412,353 +404,282 @@ SHEETS: tuple[Sheet, ...] = (
 SHEET_BY_NAME = {s.name: s for s in SHEETS}
 
 
-# --------------------------------------------------------------------------- errors
+# --------------------------------------------------------------------------- resource names and keys
 
 
-@dataclass
-class RowError:
-    sheet: str
-    row: int
-    column: str
-    message: str
-
-    def as_dict(self) -> dict:
-        return {"sheet": self.sheet, "row": self.row, "column": self.column, "message": self.message}
+def type_name(sheet: Sheet) -> str:
+    """REST resource name, e.g. 'Data products' -> 'data-products'."""
+    return re.sub(r"[^a-z0-9]+", "-", sheet.name.lower()).strip("-")
 
 
-@dataclass
-class ParseResult:
-    graph: Graph
-    errors: list[RowError] = field(default_factory=list)
-    counts: dict[str, int] = field(default_factory=dict)
-    locations: dict[URIRef, tuple[str, int]] = field(default_factory=dict)  # IRI -> (sheet, row)
-    ids: dict[URIRef, str] = field(default_factory=dict)  # IRI -> ID as written
+def field_key(col: Col) -> str:
+    """JSON key, e.g. 'Owner role' -> 'ownerRole', 'Measured by KPIs' -> 'measuredByKpis'."""
+    if col.kind == "id":
+        return "id"
+    if col.kind == "label":
+        return "name"
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", col.header) if w]
+    return words[0].lower() + "".join(w[:1].upper() + w[1:].lower() for w in words[1:])
+
+
+TYPES: dict[str, Sheet] = {type_name(s): s for s in SHEETS}
+TYPE_OF_SHEET: dict[str, str] = {s.name: type_name(s) for s in SHEETS}
+FIELDS: dict[str, dict[str, Col]] = {t: {field_key(c): c for c in s.cols} for t, s in TYPES.items()}
+
+
+def check_type(name: str) -> Sheet:
+    if name not in TYPES:
+        raise LookupError(f"Unknown entity type '{name}'. Known types: {', '.join(TYPES)}.")
+    return TYPES[name]
+
+
+def schema() -> list[dict]:
+    """Machine-readable description of every resource type, for clients."""
+    out = []
+    for t, s in TYPES.items():
+        fields = []
+        for c in s.cols:
+            f = {
+                "key": field_key(c),
+                "label": c.header,
+                "kind": c.kind,
+                "required": c.required or c.kind == "id",
+                "multi": c.multi,
+                "help": c.help,
+            }
+            if c.kind == "ref":
+                f["targets"] = [TYPE_OF_SHEET[x] for x in c.targets]
+            if c.kind in ("iri_enum", "class"):
+                f["values"] = list(c.values)  # type: ignore[arg-type]
+            elif c.kind == "str_enum":
+                f["values"] = list(c.values)
+            elif c.kind == "bool":
+                f["values"] = ["yes", "no"]
+            fields.append(f)
+        if not s.keyed:
+            fields.insert(
+                0,
+                {
+                    "key": "id",
+                    "label": "ID",
+                    "kind": "id",
+                    "required": False,
+                    "multi": False,
+                    "help": "Optional; generated from the other fields when omitted.",
+                },
+            )
+        out.append({"type": t, "label": s.name, "help": s.help, "keyed": s.keyed, "fields": fields})
+    return out
 
 
 # --------------------------------------------------------------------------- IRIs
 
 
-def iri_for(base: str, local_id: str) -> URIRef:
-    return URIRef(base + quote(local_id, safe="._-"))
+def iri_for(base: str, local: str) -> URIRef:
+    return URIRef(base + quote(local, safe="._-"))
 
 
-def local_id(base: str, iri: URIRef) -> str:
+def local_id(base: str, iri) -> str:
     s = str(iri)
-    if s.startswith(base):
+    if base and s.startswith(base):
         return unquote(s[len(base) :])
     return re.split(r"[#/:]", s.rstrip("/#"))[-1]
 
 
-# --------------------------------------------------------------------------- template / export
+def generated_id(type_: str, entity: dict) -> str:
+    """Stable ID for types without one (impacts, co-approvals): parent + content hash."""
+    sheet = TYPES[type_]
+    parent_key = next(field_key(c) for c in sheet.cols if c.inverse)
+    parent = str(entity.get(parent_key) or "item")
+    body = json.dumps({k: v for k, v in sorted(entity.items()) if k != "id"}, sort_keys=True, default=str)
+    return f"{parent}.{type_}.{hashlib.sha1(body.encode()).hexdigest()[:8]}"
 
 
-HEADER_FILL = PatternFill("solid", fgColor="DDE6F2")
-REQUIRED_FONT = Font(bold=True, color="1F3864")
-OPTIONAL_FONT = Font(bold=True, color="404040")
+# --------------------------------------------------------------------------- JSON -> RDF
 
 
-def _instructions(ws) -> None:
-    lines = [
-        ("VeroMesh model workbook", Font(bold=True, size=14)),
-        ("Fill in one sheet per kind of thing. Rows reference each other by ID.", None),
-        ("", None),
-        ("Rules", Font(bold=True)),
-        ("- IDs are unique across the whole workbook and use letters, digits, '.', '_' or '-'.", None),
-        ("- Columns in dark blue are required. Hover over a header for help.", None),
-        ("- Put several IDs in one cell separated by ';'.", None),
-        ("- Dates are YYYY-MM-DD. Amounts are plain numbers in the stated currency.", None),
-        ("- Ownership always points to a role (Roles sheet), never directly to a person.", None),
-        ("", None),
-        ("On import, every row is checked against the VeroMesh validation rules.", None),
-        ("Errors stop the import; gaps (e.g. a KPI without an owner) are reported as warnings.", None),
-        ("", None),
-        ("Sheets", Font(bold=True)),
-    ]
-    for text, font in lines:
-        ws.append([text])
-        if font:
-            ws.cell(ws.max_row, 1).font = font
-    for sheet in SHEETS:
-        ws.append([sheet.name, sheet.help])
-        ws.cell(ws.max_row, 1).font = Font(bold=True)
-    ws.column_dimensions["A"].width = 24
-    ws.column_dimensions["B"].width = 90
+@dataclass
+class FieldError:
+    type: str
+    id: str
+    field: str
+    message: str
+
+    def as_dict(self) -> dict:
+        return {"type": self.type, "id": self.id, "field": self.field, "message": self.message}
 
 
-def build_template(rows: dict[str, list[list[str]]] | None = None) -> bytes:
-    """Workbook bytes; ``rows`` pre-fills sheets (used by export)."""
-    wb = Workbook()
-    _instructions(wb.active)
-    wb.active.title = "How to use"
-    for sheet in SHEETS:
-        ws = wb.create_sheet(sheet.name)
-        ws.append([c.header for c in sheet.cols])
-        for i, c in enumerate(sheet.cols, start=1):
-            cell = ws.cell(1, i)
-            cell.font = REQUIRED_FONT if c.required else OPTIONAL_FONT
-            cell.fill = HEADER_FILL
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-            tip = c.help or ""
-            if c.kind == "ref":
-                tip = (tip + " " if tip else "") + f"ID from: {', '.join(c.targets)}."
-            if c.multi:
-                tip += " Several allowed, separated by ';'."
-            if tip:
-                cell.comment = Comment(tip.strip(), "VeroMesh")
-            letter = cell.column_letter
-            ws.column_dimensions[letter].width = max(14, min(42, len(c.header) + 6))
-            choices: Iterable[str] = ()
-            if c.kind in ("iri_enum", "class"):
-                choices = c.values.keys()  # type: ignore[union-attr]
-            elif c.kind == "str_enum":
-                choices = c.values  # type: ignore[assignment]
-            elif c.kind == "bool":
-                choices = ("yes", "no")
-            if choices and not c.multi:
-                dv = DataValidation(type="list", formula1='"' + ",".join(choices) + '"', allow_blank=True)
-                ws.add_data_validation(dv)
-                dv.add(f"{letter}2:{letter}1000")
-        ws.freeze_panes = "A2"
-        for r in (rows or {}).get(sheet.name, []):
-            ws.append(r)
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+@dataclass
+class Converted:
+    subject: URIRef
+    triples: list[tuple] = field(default_factory=list)
+    errors: list[FieldError] = field(default_factory=list)
 
 
-def _fmt(value) -> str:
-    if isinstance(value, Literal):
-        if value.datatype == XSD.boolean:
-            return "yes" if value.toPython() else "no"
-        return str(value)
-    return str(value)
+def _values(raw) -> list:
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, list):
+        return [v for v in raw if v is not None and v != ""]
+    if isinstance(raw, str):
+        return [p.strip() for p in MULTI_SPLIT.split(raw) if p.strip()]
+    return [raw]
 
 
-def graph_to_workbook(graph: Graph, base: str) -> bytes:
-    """Export: the instances in ``graph`` as a filled-in workbook."""
-    rows: dict[str, list[list[str]]] = {}
-
-    def ref_text(node) -> str:
-        return local_id(base, node) if isinstance(node, URIRef) else str(node)
-
-    for sheet in SHEETS:
-        if sheet.cls is not None:
-            subjects = sorted(set(graph.subjects(RDF.type, sheet.cls)), key=str)
-        else:  # Policies: class column decides
-            subjects = sorted(
-                {s for cls in POLICY_TYPES.values() for s in graph.subjects(RDF.type, cls)}, key=str
-            )
-        out = []
-        for s in subjects:
-            row = []
-            for c in sheet.cols:
-                if c.kind == "id":
-                    row.append(local_id(base, s))
-                    continue
-                if c.kind == "class":
-                    row.append("Regulation" if (s, RDF.type, VMO.Regulation) in graph else "Policy")
-                    continue
-                vals = list(graph.subjects(c.prop, s)) if c.inverse else list(graph.objects(s, c.prop))
-                if c.kind == "ref":
-                    texts = sorted(ref_text(v) for v in vals)
-                elif c.kind == "iri_enum":
-                    rev = {v: k for k, v in c.values.items()}  # type: ignore[union-attr]
-                    texts = sorted(rev.get(v, str(v)) for v in vals)
-                else:
-                    texts = sorted(_fmt(v) for v in vals)
-                row.append("; ".join(texts))
-            out.append(row)
-        rows[sheet.name] = out
-    return build_template(rows)
+def entity_id(type_: str, entity: dict) -> str:
+    rid = entity.get("id")
+    if rid in (None, "") and not TYPES[type_].keyed:
+        return generated_id(type_, entity)
+    return str(rid or "")
 
 
-# --------------------------------------------------------------------------- import
+def to_triples(type_: str, entity: dict, base: str, resolve) -> Converted:
+    """Convert one JSON entity. ``resolve(id) -> type name | None`` checks references."""
+    sheet = check_type(type_)
+    rid = entity_id(type_, entity)
+    subj = iri_for(base, rid) if rid else URIRef(base + "invalid")
+    out = Converted(subject=subj)
 
+    def err(key: str, msg: str):
+        out.errors.append(FieldError(type_, rid, key, msg))
 
-def _cell_text(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
-
-
-def workbook_to_graph(data: bytes, base: str) -> ParseResult:
-    """Parse a workbook into RDF. Row errors are collected, not raised."""
-    try:
-        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    except Exception as exc:  # openpyxl raises several exception types for bad files
-        raise ValueError(f"Not a readable Excel workbook (.xlsx): {exc}") from exc
-
-    result = ParseResult(graph=Graph())
-    g = result.graph
-    g.bind("vmo", VMO)
-
-    # Pass 1: read rows, register IDs.
-    sheet_rows: dict[str, list[tuple[int, dict[str, str]]]] = {}
-    id_sheet: dict[str, str] = {}
-    for sheet in SHEETS:
-        if sheet.name not in wb.sheetnames:
+    if not rid:
+        err("id", "Missing ID.")
+        return out
+    if not ID_PATTERN.match(rid) and sheet.keyed:
+        err("id", f"'{rid}' is not a valid ID: use letters, digits, '.', '_' or '-'.")
+        return out
+    fields = FIELDS[type_]
+    for key in entity:
+        if key not in fields and not (key == "id" and not sheet.keyed):
+            err(key, f"Unknown field for {type_}.")
+    if sheet.cls is not None:
+        out.triples.append((subj, RDF.type, sheet.cls))
+    for key, col in fields.items():
+        if col.kind == "id":
             continue
-        ws = wb[sheet.name]
-        it = ws.iter_rows(values_only=True)
-        header = [_cell_text(h) for h in next(it, ())]
-        known = {c.header for c in sheet.cols}
-        for h in header:
-            if h and h not in known:
-                result.errors.append(
-                    RowError(sheet.name, 1, h, "Unknown column; check the header against the template.")
-                )
-        parsed = []
-        for rownum, values in enumerate(it, start=2):
-            rec = {header[i]: _cell_text(v) for i, v in enumerate(values) if i < len(header) and header[i]}
-            if not any(rec.values()):
+        vals = _values(entity.get(key))
+        if not col.multi and len(vals) > 1:
+            err(key, "Only one value allowed.")
+            vals = vals[:1]
+        if not vals:
+            if col.required:
+                err(key, "Required value missing.")
+            continue
+        for v in vals:
+            obj = _to_node(col, v, base, resolve, lambda m, k=key: err(k, m))
+            if obj is None:
                 continue
-            parsed.append((rownum, rec))
-            if sheet.keyed:
-                rid = rec.get("ID", "")
-                if not rid:
-                    result.errors.append(RowError(sheet.name, rownum, "ID", "Missing ID."))
-                elif not ID_PATTERN.match(rid):
-                    result.errors.append(
-                        RowError(
-                            sheet.name,
-                            rownum,
-                            "ID",
-                            f"'{rid}' is not a valid ID: use letters, digits, '.', '_' or '-'.",
-                        )
-                    )
-                elif rid in id_sheet:
-                    result.errors.append(
-                        RowError(
-                            sheet.name,
-                            rownum,
-                            "ID",
-                            f"ID '{rid}' is already used on the {id_sheet[rid]} sheet.",
-                        )
-                    )
-                else:
-                    id_sheet[rid] = sheet.name
-        sheet_rows[sheet.name] = parsed
-
-    def resolve(sheet: Sheet, rownum: int, col: Col, text: str) -> URIRef | None:
-        where = id_sheet.get(text)
-        if where is None:
-            result.errors.append(
-                RowError(
-                    sheet.name,
-                    rownum,
-                    col.header,
-                    f"No row with ID '{text}' (expected one from: {', '.join(col.targets)}).",
-                )
-            )
-            return None
-        if where not in col.targets:
-            result.errors.append(
-                RowError(
-                    sheet.name,
-                    rownum,
-                    col.header,
-                    f"'{text}' is on the {where} sheet; expected one from: {', '.join(col.targets)}.",
-                )
-            )
-            return None
-        return iri_for(base, text)
-
-    # Pass 2: build triples.
-    for sheet in SHEETS:
-        rows = sheet_rows.get(sheet.name, [])
-        result.counts[sheet.name] = len(rows)
-        for n, (rownum, rec) in enumerate(rows, start=1):
-            if sheet.keyed:
-                rid = rec.get("ID", "")
-                if not rid or id_sheet.get(rid) != sheet.name:
-                    continue
-                subj = iri_for(base, rid)
-                result.ids[subj] = rid
+            if col.kind == "class":
+                out.triples.append((subj, RDF.type, obj))
+            elif col.inverse:
+                out.triples.append((obj, col.prop, subj))
             else:
-                parent_col = next(c for c in sheet.cols if c.inverse)
-                parent = rec.get(parent_col.header, "")
-                slug = re.sub(r"[^A-Za-z0-9._-]", "-", sheet.name.lower())
-                subj = iri_for(base, f"{parent or 'row'}.{slug}.{n}")
-                result.ids[subj] = f"{sheet.name} row {rownum}"
-            result.locations[subj] = (sheet.name, rownum)
-            if sheet.cls is not None:
-                g.add((subj, RDF.type, sheet.cls))
-            for col in sheet.cols:
-                if col.kind == "id":
-                    continue
-                raw = rec.get(col.header, "")
-                if not raw:
-                    if col.required:
-                        result.errors.append(
-                            RowError(sheet.name, rownum, col.header, "Required value missing.")
-                        )
-                    continue
-                parts = [p.strip() for p in MULTI_SPLIT.split(raw)] if col.multi else [raw]
-                for part in filter(None, parts):
-                    obj = _convert(sheet, rownum, col, part, resolve, result.errors)
-                    if obj is None:
-                        continue
-                    if col.kind == "class":
-                        g.add((subj, RDF.type, obj))
-                    elif col.inverse:
-                        g.add((obj, col.prop, subj))
-                    else:
-                        g.add((subj, col.prop, obj))
-                    # An impact on a KPI implies the action affects it.
-                    if sheet.name == "Impacts" and col.header == "Impact on":
-                        action_id = rec.get("Action", "")
-                        if action_id and id_sheet.get(action_id) == "Actions":
-                            g.add((iri_for(base, action_id), VMO.affects, obj))
-    return result
+                out.triples.append((subj, col.prop, obj))
+            if type_ == "impacts" and key == "impactOn":
+                action = entity.get("action")
+                if action:
+                    out.triples.append((iri_for(base, str(action)), VMO.affects, obj))
+    return out
 
 
-def _convert(sheet: Sheet, rownum: int, col: Col, text: str, resolve, errors: list[RowError]):
-    def bad(msg: str):
-        errors.append(RowError(sheet.name, rownum, col.header, msg))
-        return None
-
+def _to_node(col: Col, value, base: str, resolve, bad):
     k = col.kind
+    text = ("yes" if value else "no") if isinstance(value, bool) else str(value).strip()
     if k in ("label", "text"):
         return Literal(text)
     if k == "ref":
-        return resolve(sheet, rownum, col, text)
+        found = resolve(text)
+        allowed = [TYPE_OF_SHEET[x] for x in col.targets]
+        if found is None:
+            bad(f"No entity with ID '{text}' (expected one of: {', '.join(allowed)}).")
+            return None
+        if found not in allowed:
+            bad(f"'{text}' is a {found} entity; expected one of: {', '.join(allowed)}.")
+            return None
+        return iri_for(base, text)
     if k == "decimal":
         try:
             return Literal(Decimal(text.replace(",", "")), datatype=XSD.decimal)
         except InvalidOperation:
-            return bad(f"'{text}' is not a number.")
+            bad(f"'{text}' is not a number.")
+            return None
     if k == "date":
         try:
             return Literal(date.fromisoformat(text[:10]), datatype=XSD.date)
         except ValueError:
-            return bad(f"'{text}' is not a date (use YYYY-MM-DD).")
+            bad(f"'{text}' is not a date (use YYYY-MM-DD).")
+            return None
     if k == "bool":
         low = text.lower()
         if low in ("yes", "y", "true", "1"):
             return Literal(True)
         if low in ("no", "n", "false", "0"):
             return Literal(False)
-        return bad(f"'{text}' is not yes or no.")
+        bad(f"'{text}' is not yes or no.")
+        return None
     if k == "duration":
         if not re.fullmatch(r"P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?", text):
-            return bad(f"'{text}' is not an ISO 8601 duration such as P7Y.")
+            bad(f"'{text}' is not an ISO 8601 duration such as P7Y.")
+            return None
         return Literal(text, datatype=XSD.duration)
     if k in ("iri_enum", "class"):
-        values = col.values  # type: ignore[assignment]
-        match = next((v for key, v in values.items() if key.lower() == text.lower()), None)  # type: ignore[union-attr]
-        return match if match is not None else bad(f"'{text}' is not one of: {', '.join(values)}.")
+        match = next((v for key, v in col.values.items() if key.lower() == text.lower()), None)  # type: ignore[union-attr]
+        if match is None:
+            bad(f"'{text}' is not one of: {', '.join(col.values)}.")
+        return match
     if k == "str_enum":
         if text.lower() in col.values:
             return Literal(text.lower())
-        return bad(f"'{text}' is not one of: {', '.join(col.values)}.")
-    raise AssertionError(f"unknown column kind {k}")
+        bad(f"'{text}' is not one of: {', '.join(col.values)}.")
+        return None
+    raise AssertionError(f"unknown field kind {k}")
 
 
-def blank_free(graph: Graph) -> bool:
-    return not any(isinstance(t, BNode) for triple in graph for t in triple)
+# --------------------------------------------------------------------------- RDF -> JSON
+
+
+def types_of(graph: Graph, subject) -> list[str]:
+    classes = set(graph.objects(subject, RDF.type))
+    found = []
+    for t, s in TYPES.items():
+        if s.cls is not None and s.cls in classes:
+            found.append(t)
+        elif s.cls is None and classes & set(POLICY_TYPES.values()):
+            found.append(t)
+    return found
+
+
+def subjects_of_type(graph: Graph, type_: str) -> list:
+    sheet = TYPES[type_]
+    classes = [sheet.cls] if sheet.cls is not None else list(POLICY_TYPES.values())
+    return sorted({s for c in classes for s in graph.subjects(RDF.type, c)}, key=str)
+
+
+def to_entity(graph: Graph, subject, type_: str, base: str) -> dict:
+    ent: dict = {}
+    for key, col in FIELDS[type_].items():
+        if col.kind == "id":
+            continue
+        if col.kind == "class":
+            ent[key] = "Regulation" if (subject, RDF.type, VMO.Regulation) in graph else "Policy"
+            continue
+        vals = (
+            list(graph.subjects(col.prop, subject)) if col.inverse else list(graph.objects(subject, col.prop))
+        )
+        if col.kind == "ref":
+            out = sorted(local_id(base, v) for v in vals)
+        elif col.kind == "iri_enum":
+            rev = {v: k for k, v in col.values.items()}  # type: ignore[union-attr]
+            out = sorted(rev.get(v, str(v)) for v in vals)
+        elif col.kind == "bool":
+            out = [bool(v.toPython()) for v in vals]
+        elif col.kind == "decimal":
+            out = sorted(str(v) for v in vals)
+        else:
+            out = sorted(str(v) for v in vals)
+        if col.multi:
+            ent[key] = out
+        elif out:
+            ent[key] = out[0]
+    return {"id": local_id(base, subject), **ent}

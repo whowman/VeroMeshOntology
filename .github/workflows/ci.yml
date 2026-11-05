@@ -32,6 +32,17 @@ jobs:
           name: service-licenses
           path: service-licenses.md
 
+  loader:
+    # The spreadsheet loader, tested against the real API in-process.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "./service[dev]" -e "./loader[dev]"
+      - run: cd loader && ruff check . && ruff format --check . && pytest -q
+
   ontology:
     runs-on: ubuntu-latest
     steps:
@@ -118,17 +129,18 @@ jobs:
         run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
       - name: Load example ontology and publish glossary
         run: scripts/load-examples.sh
-      - name: Import the example model workbook through the API
+      - name: Load the example workbook with the loader container (through the REST API)
         run: |
           set -euo pipefail
-          curl -fsS -o example.xlsx 'localhost:8700/model/template?example=true'
-          curl -fsS -X POST 'localhost:8700/model/import?source=p2p' -F 'file=@example.xlsx' | tee import.json
-          echo
-          python3 -c 'import json; r=json.load(open("import.json")); assert r["written"] and r["summary"]["violations"]==0, r'
-          curl -fsS localhost:8700/model/sources | tee sources.json; echo
-          grep -q '"source":"p2p"' sources.json
+          scripts/veromesh-loader.sh template --example -o example.xlsx
+          scripts/veromesh-loader.sh import example.xlsx --source p2p | tee import.txt
+          grep -q "0 violations" import.txt && grep -q "Committed changeset" import.txt
+          scripts/veromesh-loader.sh sources | tee sources.txt
+          grep -q "^p2p " sources.txt
+          curl -fsS localhost:8700/api/v1/authorities/AssistantApprovalAuthority | tee auth.json; echo
+          grep -q '"holder":"InvoiceAssistant"' auth.json
           curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' --data-urlencode \
-            'query=ASK { GRAPH <https://veromesh.ai/graph/source/spreadsheet/p2p> { ?a a <https://veromesh.ai/ontology/org#AIAgent> } }' | grep -q true
+            'query=ASK { GRAPH <https://veromesh.ai/graph/source/p2p> { ?a a <https://veromesh.ai/ontology/org#AIAgent> } }' | grep -q true
       - name: Bind a dataset and verify in both stores
         run: |
           set -euo pipefail

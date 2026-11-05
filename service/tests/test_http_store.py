@@ -96,43 +96,27 @@ def test_against_real_fuseki():
 
 
 @pytest.mark.skipif(not os.environ.get("VEROMESH_TEST_FUSEKI_URL"), reason="no Fuseki server")
-def test_model_import_against_real_fuseki():
-    from rdflib import Graph
+def test_changesets_against_real_fuseki():
+    from fastapi.testclient import TestClient
 
-    from veromesh import model_import
+    from veromesh.api import create_app
     from veromesh.config import Settings
-    from veromesh.workbook import graph_to_workbook
+    from veromesh.service import VeromeshService
 
-    settings = Settings()
+    from .conftest import BINDINGS_GRAPH, FakeDataHub
+
     store = fuseki_store(os.environ["VEROMESH_TEST_FUSEKI_URL"])
-    example = Graph().parse(f"{settings.ontology_dir}/examples/org-procure-to-pay.ttl")
-    data = graph_to_workbook(example, "https://example.com/org#")
-    report = model_import.import_workbook(
-        store,
-        data,
-        source="p2p",
-        filename="p2p.xlsx",
-        base=settings.instance_base,
-        ontology_dir=settings.ontology_dir,
+    client = TestClient(
+        create_app(VeromeshService(store, FakeDataHub(), bindings_graph=BINDINGS_GRAPH), Settings())
     )
-    assert report["written"] and report["summary"]["violations"] == 0, report
-    assert [s["source"] for s in model_import.list_sources(store)] == ["p2p"]
-    again = model_import.import_workbook(
-        store,
-        data,
-        source="p2p",
-        filename="p2p.xlsx",
-        base=settings.instance_base,
-        ontology_dir=settings.ontology_dir,
-    )
-    assert again["written"] and len(model_import.list_sources(store)) == 1
-    exported = model_import.export_workbook(store, "p2p", settings.instance_base)
-    assert model_import.import_workbook(
-        store,
-        exported,
-        source="p2p-copy",
-        filename="x.xlsx",
-        base=settings.instance_base,
-        ontology_dir=settings.ontology_dir,
-        dry_run=True,
-    )["summary"] == {"errors": 0, "violations": 0, "warnings": 0}
+    items = client.get("/api/v1/examples/procure-to-pay").json()["items"]
+    for _ in range(2):  # second run replaces the source in place
+        cs = client.post("/api/v1/changesets", json={"source": "p2p-fuseki"}).json()["id"]
+        client.post(f"/api/v1/changesets/{cs}/items", json={"items": items})
+        r = client.post(f"/api/v1/changesets/{cs}/commit")
+        assert r.status_code == 200 and r.json()["summary"]["violations"] == 0, r.json()
+    assert [s["source"] for s in client.get("/api/v1/sources").json()].count("p2p-fuseki") == 1
+    assert len(client.get("/api/v1/kpis", params={"source": "p2p-fuseki"}).json()) == 2
+    r = client.put("/api/v1/roles/Treasurer", params={"source": "p2p-fuseki"}, json={"name": "Treasurer"})
+    assert r.status_code == 200, r.json()
+    assert client.get("/api/v1/changesets/" + cs).json()["status"] == "committed"

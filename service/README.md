@@ -21,11 +21,19 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_INSTANCE_BASE` | `urn:veromesh:org:` | IRI prefix for model rows imported from workbooks |
 | `VEROMESH_ONTOLOGY_DIR` | repo `ontology/` (image: `/app/ontology`) | Meta-model, validation rules and examples |
 
-## Model workbook endpoints
+## Model API
+
+All writes go through changesets (`src/veromesh/changesets.py`); entity types and their fields come from one spec (`src/veromesh/entities.py`), which also produces `GET /api/v1/schema`. The service never reads spreadsheets; see `loader/` for the spreadsheet client.
 
 | Endpoint | Does |
 | --- | --- |
-| `GET /model/template` | Blank workbook; `?example=true` for the procure-to-pay example |
-| `POST /model/import` | Upload a workbook (`file`), optional `source` name and `dry_run`; 200 with a report when it passes, 422 when errors or rule violations block it |
-| `GET /model/sources` | Imported sources with file name, load time and number of facts |
-| `GET /model/export?source=` | Download an imported source as a workbook |
+| `GET /api/v1/schema` | Entity types, fields, kinds, reference targets, help text |
+| `GET /api/v1/{type}[/{id}]` | Read entities across the model or `?source=` |
+| `POST /api/v1/{type}?source=`, `PUT` / `DELETE /api/v1/{type}/{id}?source=` | Single-entity writes as one-item merge changesets; 422 with the report when invalid |
+| `POST /api/v1/changesets` | Open a changeset: `{"source", "mode": "replace"\|"merge", "kind", "file"}` |
+| `POST /api/v1/changesets/{id}/items` | Add `{"type", "op": "upsert"\|"delete", "entity"}` items |
+| `POST /api/v1/changesets/{id}/validate` | Validate against the whole model; nothing written |
+| `POST /api/v1/changesets/{id}/commit` | Re-validate and write; 409 with the report when invalid |
+| `DELETE /api/v1/changesets/{id}` | Discard |
+| `GET /api/v1/sources` | Sources with provenance |
+| `GET /api/v1/examples/procure-to-pay` | The worked example as changeset items |
