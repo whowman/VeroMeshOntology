@@ -38,6 +38,17 @@ curl -X POST localhost:8700/bindings -H 'Content-Type: application/json' -d '{
 curl 'localhost:8700/classes/assets?class_iri=https://example.com/ontology/retail%23Party'
 ```
 
+### Load your organizational model from a spreadsheet
+
+```bash
+curl -o template.xlsx localhost:8700/model/template                  # blank workbook, one sheet per entity type
+curl -o example.xlsx 'localhost:8700/model/template?example=true'    # filled-in procure-to-pay example
+scripts/import-model.sh example.xlsx p2p                             # validate and import
+DRY_RUN=1 scripts/import-model.sh my-model.xlsx                      # validate only
+```
+
+Every row is checked against the meta-model's validation rules. Errors and rule violations stop the import and are reported by sheet and row; gaps such as a KPI without an owner are reported as warnings. Each workbook is stored as its own source and replaced on re-import; `GET /model/sources` lists them and `GET /model/export?source=p2p` downloads one back as a workbook.
+
 DataHub UI: http://localhost:9002 (login `datahub` / `datahub`) · Veromesh API docs: http://localhost:8700/docs
 
 Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data). The CI `stack` job runs this same flow on every push.

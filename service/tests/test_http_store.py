@@ -93,3 +93,46 @@ def test_against_real_fuseki():
     with pytest.raises(StoreRequestError):
         store.load_turtle("this is not turtle", "https://example.com/bad")
     svc.unbind(urn, RET + "LoyaltyMember")
+
+
+@pytest.mark.skipif(not os.environ.get("VEROMESH_TEST_FUSEKI_URL"), reason="no Fuseki server")
+def test_model_import_against_real_fuseki():
+    from rdflib import Graph
+
+    from veromesh import model_import
+    from veromesh.config import Settings
+    from veromesh.workbook import graph_to_workbook
+
+    settings = Settings()
+    store = fuseki_store(os.environ["VEROMESH_TEST_FUSEKI_URL"])
+    example = Graph().parse(f"{settings.ontology_dir}/examples/org-procure-to-pay.ttl")
+    data = graph_to_workbook(example, "https://example.com/org#")
+    report = model_import.import_workbook(
+        store,
+        data,
+        source="p2p",
+        filename="p2p.xlsx",
+        base=settings.instance_base,
+        ontology_dir=settings.ontology_dir,
+    )
+    assert report["written"] and report["summary"]["violations"] == 0, report
+    assert [s["source"] for s in model_import.list_sources(store)] == ["p2p"]
+    again = model_import.import_workbook(
+        store,
+        data,
+        source="p2p",
+        filename="p2p.xlsx",
+        base=settings.instance_base,
+        ontology_dir=settings.ontology_dir,
+    )
+    assert again["written"] and len(model_import.list_sources(store)) == 1
+    exported = model_import.export_workbook(store, "p2p", settings.instance_base)
+    assert model_import.import_workbook(
+        store,
+        exported,
+        source="p2p-copy",
+        filename="x.xlsx",
+        base=settings.instance_base,
+        ontology_dir=settings.ontology_dir,
+        dry_run=True,
+    )["summary"] == {"errors": 0, "violations": 0, "warnings": 0}

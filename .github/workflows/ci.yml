@@ -26,7 +26,7 @@ jobs:
             --ignore-packages veromesh pip-licenses > ../service-licenses.md
           # Fail on licenses we don't ship (see docs/licensing.md).
           pip-licenses --ignore-packages veromesh pip-licenses \
-            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License"
+            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License;Elastic License 2.0 (ELv2)"
       - uses: actions/upload-artifact@v4
         with:
           name: service-licenses
@@ -118,6 +118,17 @@ jobs:
         run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
       - name: Load example ontology and publish glossary
         run: scripts/load-examples.sh
+      - name: Import the example model workbook through the API
+        run: |
+          set -euo pipefail
+          curl -fsS -o example.xlsx 'localhost:8700/model/template?example=true'
+          curl -fsS -X POST 'localhost:8700/model/import?source=p2p' -F 'file=@example.xlsx' | tee import.json
+          echo
+          python3 -c 'import json; r=json.load(open("import.json")); assert r["written"] and r["summary"]["violations"]==0, r'
+          curl -fsS localhost:8700/model/sources | tee sources.json; echo
+          grep -q '"source":"p2p"' sources.json
+          curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' --data-urlencode \
+            'query=ASK { GRAPH <https://veromesh.ai/graph/source/spreadsheet/p2p> { ?a a <https://veromesh.ai/ontology/org#AIAgent> } }' | grep -q true
       - name: Bind a dataset and verify in both stores
         run: |
           set -euo pipefail

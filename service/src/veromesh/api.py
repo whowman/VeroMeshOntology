@@ -6,10 +6,11 @@
 from typing import Annotated
 
 from datahub.configuration.common import OperationalError
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Depends, FastAPI, File, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import __version__
+from . import __version__, model_import
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
 from .rdf_store import StoreRequestError, make_store
@@ -47,9 +48,20 @@ def build_service(settings: Settings, datahub: DataHubPort | None = None) -> Ver
     )
 
 
-def create_app(service: VeromeshService | None = None) -> FastAPI:
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _xlsx(data: bytes, filename: str) -> Response:
+    return Response(
+        data, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+def create_app(service: VeromeshService | None = None, settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Veromesh Ontology Service", version=__version__)
     app.state.service = service
+    app.state.settings = settings
 
     def svc(request: Request) -> VeromeshService:
         if request.app.state.service is None:
@@ -60,29 +72,21 @@ def create_app(service: VeromeshService | None = None) -> FastAPI:
 
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @app.exception_handler(ValueError)
     @app.exception_handler(SyntaxError)  # pyoxigraph raises SyntaxError on bad Turtle/SPARQL
     async def _bad_request(_: Request, exc: Exception):
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.exception_handler(StoreRequestError)
     async def _store_error(_: Request, exc: StoreRequestError):
-        from fastapi.responses import JSONResponse
-
         # 400 from the store = the caller sent invalid Turtle or SPARQL; anything else is ours.
         status = 400 if exc.status == 400 else 502
         return JSONResponse(status_code=status, content={"detail": str(exc)})
 
     @app.exception_handler(OperationalError)
     async def _datahub_error(_: Request, exc: OperationalError):
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(status_code=502, content={"detail": f"DataHub request failed: {exc}"})
 
     @app.get("/health")
@@ -139,6 +143,68 @@ def create_app(service: VeromeshService | None = None) -> FastAPI:
     def sparql(s: Svc, body: SparqlIn) -> dict:
         """Read-only SPARQL (SELECT / ASK)."""
         return s.sparql(body.query)
+
+    def cfg(request: Request) -> Settings:
+        return request.app.state.settings or get_settings()
+
+    Cfg = Annotated[Settings, Depends(cfg)]
+
+    @app.get("/model/template", tags=["model"])
+    def model_template(c: Cfg, example: bool = False) -> Response:
+        """Download the model workbook. `example=true` fills it with the procure-to-pay example."""
+        from pathlib import Path
+
+        from rdflib import Graph
+
+        from .workbook import build_template, graph_to_workbook
+
+        if not example:
+            return _xlsx(build_template(), "veromesh-model-template.xlsx")
+        g = Graph().parse(Path(c.ontology_dir) / "examples" / "org-procure-to-pay.ttl")
+        return _xlsx(graph_to_workbook(g, "https://example.com/org#"), "veromesh-model-example.xlsx")
+
+    @app.post("/model/import", tags=["model"])
+    async def model_import_endpoint(
+        s: Svc,
+        c: Cfg,
+        file: Annotated[UploadFile, File(description="Filled-in model workbook (.xlsx)")],
+        source: Annotated[
+            str | None, Query(description="Name for this source; defaults to the file name")
+        ] = None,
+        dry_run: bool = False,
+    ):
+        """Validate a workbook and, unless `dry_run`, replace that source's facts in the model.
+
+        Returns 200 with the report when it passes (warnings allowed), 422 with the report when
+        any row error or rule violation blocks it. Nothing is written on 422.
+        """
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise ValueError("Workbook is larger than 20 MB.")
+        name = source or model_import.slugify_source((file.filename or "workbook").rsplit(".", 1)[0])
+        report = model_import.import_workbook(
+            s.store,
+            data,
+            source=name,
+            filename=file.filename or "workbook.xlsx",
+            base=c.instance_base,
+            ontology_dir=c.ontology_dir,
+            dry_run=dry_run,
+        )
+        blocked = report["summary"]["errors"] or report["summary"]["violations"]
+        return JSONResponse(status_code=422 if blocked else 200, content=report)
+
+    @app.get("/model/sources", tags=["model"])
+    def model_sources(s: Svc) -> list[dict]:
+        """Imported sources with when and from which file they were loaded."""
+        return model_import.list_sources(s.store)
+
+    @app.get("/model/export", tags=["model"])
+    def model_export(s: Svc, c: Cfg, source: str) -> Response:
+        """Download an imported source as a workbook, ready to edit and re-import."""
+        return _xlsx(
+            model_import.export_workbook(s.store, source, c.instance_base), f"veromesh-{source}.xlsx"
+        )
 
     return app
 
