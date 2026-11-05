@@ -1,8 +1,10 @@
 """Add VeroMesh files to the DataHub frontend's static assets.
 
-The frontend serves /assets/* from public/assets/ on its classpath, inside
-one of the jars in /datahub-frontend/lib. This finds that jar and writes a
-copy with our files added under public/assets/:
+The frontend serves /assets/* from public/assets/ on its classpath. Several
+jars in /datahub-frontend/lib can hold public/assets/ entries (the React
+build, and the frontend's own jar with the ingestion connector registry);
+ours go into the React build's jar, the one that also has public/index.html.
+This writes a copy of that jar with our files added under public/assets/:
 
     python add_assets.py <lib dir> <files dir> <out dir>
 
@@ -20,14 +22,22 @@ PREFIX = "public/assets/"
 
 
 def find_assets_jar(lib: Path) -> Path:
-    found = []
+    candidates = []
     for jar in sorted(lib.glob("*.jar")):
         with zipfile.ZipFile(jar) as z:
-            if any(n.startswith(PREFIX) for n in z.namelist()):
-                found.append(jar)
-    if len(found) != 1:
-        raise SystemExit(f"expected exactly one jar with {PREFIX}, found {[j.name for j in found]}")
-    return found[0]
+            names = z.namelist()
+        assets = sum(n.startswith(PREFIX) for n in names)
+        if assets:
+            candidates.append(("public/index.html" in names, assets, jar))
+    if not candidates:
+        raise SystemExit(f"no jar in {lib} holds {PREFIX}")
+    has_index = [c for c in candidates if c[0]]
+    if len(has_index) > 1:
+        raise SystemExit(f"several jars hold public/index.html: {[c[2].name for c in has_index]}")
+    # The React build (has index.html); otherwise the jar with the most assets.
+    best = has_index[0] if has_index else max(candidates, key=lambda c: c[1])
+    print(f"assets jars: {', '.join(f'{c[2].name} ({c[1]})' for c in candidates)}; using {best[2].name}")
+    return best[2]
 
 
 def add(jar: Path, files: Path, out: Path) -> list[str]:

@@ -151,7 +151,12 @@ def test_assets_are_added_to_the_jar_that_serves_them(tmp_path):
     (files / "conf/theme/veromesh.theme.json").write_text("{}")
     with zipfile.ZipFile(lib / "other.jar", "w") as z:
         z.writestr("com/Example.class", b"x")
-    with zipfile.ZipFile(lib / "frontend-assets.jar", "w") as z:
+    with zipfile.ZipFile(lib / "datahub-frontend.jar", "w") as z:  # the frontend's own jar
+        z.writestr("public/assets/ingestion/connector_registry/a.json", b"{}")
+        z.writestr("public/assets/ingestion/connector_registry/b.json", b"{}")
+        z.writestr("public/assets/ingestion/connector_registry/c.json", b"{}")
+    with zipfile.ZipFile(lib / "frontend-assets.jar", "w") as z:  # the React build
+        z.writestr("public/index.html", b"<html>")
         z.writestr("public/assets/logo.png", b"png")
         z.writestr("public/assets/conf/theme/veromesh.theme.json", b"old")
     assert add_assets.main([str(lib), str(files), str(out)]) == 0
@@ -159,7 +164,7 @@ def test_assets_are_added_to_the_jar_that_serves_them(tmp_path):
     z = zipfile.ZipFile(out / "frontend-assets.jar")
     assert z.read("public/assets/conf/theme/veromesh.theme.json") == b"{}"
     assert z.read("public/assets/logo.png") == b"png"
-    assert len(z.namelist()) == 2
+    assert len(z.namelist()) == 3
 
 
 def test_frontend_gms_settings_point_at_shipped_files():

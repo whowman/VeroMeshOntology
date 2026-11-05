@@ -25,5 +25,7 @@ cp "$HERE/add_assets.py" "$HERE/Dockerfile" "$CTX/"
 chmod -R a+rX "$CTX"
 
 echo ">> Building $IMAGE"
-docker build -q --build-arg DATAHUB_VERSION="$DATAHUB_VERSION" -t "$IMAGE" "$CTX" >/dev/null
+docker build --progress=plain --build-arg DATAHUB_VERSION="$DATAHUB_VERSION" -t "$IMAGE" "$CTX" \
+  > "$ROOT/.build/branding/frontend-build.log" 2>&1 || { tail -40 "$ROOT/.build/branding/frontend-build.log"; exit 1; }
+grep -E "assets jars:|\+ public/assets" "$ROOT/.build/branding/frontend-build.log" | sed 's/^#[0-9]* [0-9.]* /   /' || true
 echo ">> Built $IMAGE"
