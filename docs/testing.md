@@ -22,13 +22,15 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | quick | `service` | `service/` | REST model API, changesets, validation, bindings, glossary (in-memory store) |
 | quick | `connectors` | `connectors/` | connector SDK, spreadsheet and CSV connectors, against the real API in-process |
 | quick | `ontology` | `ontology/` | SHACL validation rules fire as intended; every Turtle file parses |
+| quick | `branding` | `branding/` | DataHub theme generator (palette mapping, contrast) and asset injector |
 | quick | `contracts` | interfaces | golden snapshots (below) |
 | quick | `licenses` | dependencies | no GPL / AGPL / SSPL / Elastic License package; report in the results folder |
 | quick | `scripts`, `compose` | `scripts/`, `deploy/` | shell scripts parse; compose file is valid |
 | integration | `fuseki` | `service/`, `connectors/` | the whole service and connector suites again, on a real Fuseki |
 | integration | `images` | Dockerfiles | service and connector images build, start, and carry their license files |
+| integration | `datahub-frontend` | `branding/datahub/` | the VeroMesh-branded DataHub frontend image builds with the theme and logos in place |
 | build | `datahub-model` | `datahub-model/` | the custom aspect compiles inside DataHub's Gradle build |
-| e2e | `e2e` | the running stack | health and plugin loaded; ontologies load and publish to the DataHub glossary; bindings reach Fuseki and DataHub and are removed again; the worked example loads through the spreadsheet connector, re-runs as a no-op, exports and re-imports, and a breaking delete is refused |
+| e2e | `e2e` | the running stack | health and plugin loaded; DataHub serves the VeroMesh theme, logos and favicon; ontologies load and publish to the DataHub glossary; bindings reach Fuseki and DataHub and are removed again; the worked example loads through the spreadsheet connector, re-runs as a no-op, exports and re-imports, and a breaking delete is refused |
 | e2e | `stack-scripts` | developer scripts | `load-examples.sh` and `veromesh-connect.sh` work against the stack |
 | e2e | `persistence` | Fuseki volume | the model survives a Fuseki restart |
 

@@ -3,6 +3,7 @@
 # No `from __future__ import annotations` here: FastAPI must resolve the
 # dependency aliases defined inside create_app() at runtime.
 
+from pathlib import Path
 from typing import Annotated
 
 from datahub.configuration.common import OperationalError
@@ -10,7 +11,7 @@ from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import __version__, changesets, entities
+from . import __version__, branding, changesets, entities
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
 from .rdf_store import StoreRequestError, make_store
@@ -63,9 +64,16 @@ def build_service(settings: Settings, datahub: DataHubPort | None = None) -> Ver
 
 
 def create_app(service: VeromeshService | None = None, settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="Veromesh Ontology Service", version=__version__)
+    app = FastAPI(
+        title="VeroMesh API",
+        version=__version__,
+        description="Organizational ontology, model changesets and DataHub bindings.",
+        docs_url=None,
+        redoc_url=None,
+    )
     app.state.service = service
     app.state.settings = settings
+    branding.install(app, Path((settings or get_settings()).branding_dir))
 
     def svc(request: Request) -> VeromeshService:
         if request.app.state.service is None:

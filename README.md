@@ -15,6 +15,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | `service/` | Veromesh API (Python, FastAPI): REST model API, changesets, validation |
 | `connectors/` | Connector SDK and connectors (spreadsheet, CSV): clients of the REST API, CLI and container; see [docs/connectors.md](docs/connectors.md) |
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
+| `branding/` | VeroMesh palette, logos, and the DataHub theme; see [branding/README.md](branding/README.md) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
 | `deploy/` | Pinned versions and the compose file for Veromesh services |
 | `scripts/` | Local stack helpers, and `test.sh`, the regression test harness |
@@ -71,7 +72,7 @@ The wrapper runs the connectors in Docker; with Python 3.11+ you can `pip instal
 | `POST /api/v1/changesets` → `/items` → `/validate` → `/commit` | Bulk changes, all or nothing |
 | `GET /api/v1/sources` | Sources with kind, file, last update and the changeset that wrote them |
 
-DataHub UI: http://localhost:9002 (login `datahub` / `datahub`) · Veromesh API docs: http://localhost:8700/docs
+DataHub UI: http://localhost:9002 (login `datahub` / `datahub`), in the VeroMesh theme · VeroMesh API docs: http://localhost:8700/docs. `SKIP_BRANDING=1 scripts/dev-up.sh` gives the stock DataHub look.
 
 Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data).
 

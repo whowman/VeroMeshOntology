@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test.sh fuseki images --strict
+      - run: scripts/test.sh fuseki images datahub-frontend --strict
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -72,6 +72,11 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@v4
       - run: BUILD_IN_DOCKER=1 scripts/test.sh e2e --start-stack --strict
+      - name: Screenshots of the UIs (for review)
+        if: always()
+        run: |
+          pip install -q playwright pillow && python -m playwright install --with-deps chromium >/dev/null
+          python tests/e2e/screenshots.py .build/test-results/screenshots --log-previews || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

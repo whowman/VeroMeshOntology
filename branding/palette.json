@@ -1,0 +1,8 @@
+{
+  "navy": {"hex": "#1A2A44", "role": "Primary dark navy: hover and active states, headings, dark surfaces"},
+  "deepBlue": {"hex": "#23395D", "role": "Deep blue: primary buttons, links, brand text"},
+  "purple": {"hex": "#7B72E9", "role": "Purple accent: brand icons, focus and selected borders"},
+  "teal": {"hex": "#4ECBA0", "role": "Soft teal accent: highlight edges, secondary accents"},
+  "lightGray": {"hex": "#E8EAF0", "role": "Light gray: borders, subtle backgrounds"},
+  "midGray": {"hex": "#8B90A0", "role": "Mid gray: secondary icons, muted text; neutral tint for all grays"}
+}

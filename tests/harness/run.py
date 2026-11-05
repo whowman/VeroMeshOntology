@@ -393,9 +393,16 @@ def check_stack(run: Run) -> str | None:
             "gms": "http://datahub-gms:8080",
             "fuseki_stack": "http://fuseki:3030/veromesh",
             "token_file": "/repo/.build/datahub-token",
+            "frontend": "http://datahub-frontend-react:9002",
         }
     else:
-        run.stack = {"api": api, "gms": gms, "fuseki_stack": f"{fuseki}/veromesh", "token_file": str(token)}
+        run.stack = {
+            "api": api,
+            "gms": gms,
+            "fuseki_stack": f"{fuseki}/veromesh",
+            "token_file": str(token),
+            "frontend": os.environ.get("DATAHUB_FRONTEND", "http://localhost:9002"),
+        }
     return None
 
 

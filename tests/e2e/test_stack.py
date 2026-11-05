@@ -6,6 +6,7 @@ Run them with ``scripts/test.sh e2e``. They talk to the real services:
     VEROMESH_E2E_GMS      DataHub GMS          default http://localhost:8080
     VEROMESH_E2E_FUSEKI   Fuseki dataset URL   default http://localhost:3030/veromesh
     VEROMESH_E2E_TOKEN_FILE  DataHub token     default .build/datahub-token
+    VEROMESH_E2E_FRONTEND DataHub UI           default http://localhost:9002
 
 Everything they create is named "regtest" and removed afterwards, so they can
 run against your development stack without touching your own sources.
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 API = os.environ.get("VEROMESH_E2E_API", "http://localhost:8700")
 GMS = os.environ.get("VEROMESH_E2E_GMS", "http://localhost:8080")
 FUSEKI = os.environ.get("VEROMESH_E2E_FUSEKI", "http://localhost:3030/veromesh").rstrip("/")
+FRONTEND = os.environ.get("VEROMESH_E2E_FRONTEND", "http://localhost:9002").rstrip("/")
 TOKEN_FILE = Path(os.environ.get("VEROMESH_E2E_TOKEN_FILE", ROOT / ".build" / "datahub-token"))
 
 CORE = "https://veromesh.ai/ontology/core"
@@ -88,6 +90,30 @@ def test_services_are_up(api, gms):
     assert gms.post("/api/graphql", json={"query": "{ me { corpUser { urn } } }"}).status_code == 200, (
         "the DataHub token in .build/datahub-token is not accepted"
     )
+
+
+# ---------------------------------------------------------------------------- branding
+
+
+def test_datahub_ui_uses_the_veromesh_theme(api, gms):
+    q = "{ appConfig { visualConfig { logoUrl faviconUrl appTitle theme { themeId } } } }"
+    visual = gms.post("/api/graphql", json={"query": q}).json()["data"]["appConfig"]["visualConfig"]
+    if not (visual.get("theme") or {}).get("themeId"):
+        pytest.skip("stack started with SKIP_BRANDING=1")
+    assert visual["theme"]["themeId"] == "veromesh.theme.json"
+    assert visual["appTitle"] == "VeroMesh"
+    logos = ROOT / "branding" / "logos"
+    with httpx.Client(base_url=FRONTEND, timeout=30) as ui:
+        theme = ui.get("/assets/conf/theme/veromesh.theme.json")
+        assert theme.status_code == 200, "the frontend does not serve the VeroMesh theme"
+        assert theme.json()["styles"]["primary-color"] == "#23395D"
+        for url in (visual["logoUrl"], theme.json()["assets"]["logoUrl"]):
+            r = ui.get("/" + url.lstrip("/"))
+            assert r.status_code == 200 and r.content == (logos / url.rsplit("/", 1)[-1]).read_bytes(), url
+        assert ui.get("/assets/icons/favicon.ico").content == (logos / "favicon.ico").read_bytes()
+    # The API's own docs carry the brand too
+    assert "/brand/logos/veromesh-landscape.svg" in api.get("/docs").text
+    assert api.get("/favicon.ico").content == (logos / "favicon.ico").read_bytes()
 
 
 # ---------------------------------------------------------------------------- ontologies and glossary
