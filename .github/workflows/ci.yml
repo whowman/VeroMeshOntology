@@ -1,103 +1,49 @@
 name: CI
 
+# Every job runs the regression harness (scripts/test.sh), the same command
+# developers run locally, so CI and a laptop test exactly the same things.
+# Suites and tiers are defined in tests/harness/suites.py.
+
 on:
   push:
     branches: [main]
   pull_request:
 
 jobs:
-  service:
+  quick:
+    # Lint, unit, ontology rules, contract snapshots, licenses, scripts, compose.
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: service
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: ruff check . && ruff format --check .
-      - run: pytest -q
-
-      - name: License report
-        run: |
-          pip-licenses --format=markdown --with-urls --order=license \
-            --ignore-packages veromesh pip-licenses > ../service-licenses.md
-          # Fail on licenses we don't ship (see docs/licensing.md).
-          pip-licenses --ignore-packages veromesh pip-licenses \
-            --fail-on="GNU General Public License v2 (GPLv2);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3;Server Side Public License;Elastic License 2.0 (ELv2)"
+      - run: scripts/test.sh quick --strict
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: service-licenses
-          path: service-licenses.md
+          name: results-quick
+          path: .build/test-results/
 
-  connectors:
-    # The connector SDK and its connectors, tested against the real API in-process.
+  quick-local:
+    # The same tier through the --local (virtualenv) path, so both ways of
+    # running the harness stay working.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "./service[dev]" -e "./connectors[dev]"
-      - run: cd connectors && ruff check . && ruff format --check . && pytest -q
+      - run: scripts/test.sh quick --local --strict
 
-  ontology:
+  integration:
+    # Service and connector suites on a real Fuseki; container images.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - run: scripts/test.sh fuseki images --strict
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          python-version: "3.12"
-      - run: pip install pyoxigraph "pyshacl>=0.40,<0.41" pytest
-      - name: Validation rules (meta-model + SHACL)
-        run: pytest -q ontology/tests
-      - name: Parse all Turtle files
-        run: |
-          python - <<'EOF'
-          import pathlib, pyoxigraph as ox
-          for p in pathlib.Path("ontology").rglob("*.ttl"):
-              ox.Store().load(p.read_bytes(), format=ox.RdfFormat.TURTLE)
-              print("ok", p)
-          EOF
-
-  deploy-config:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker compose -f deploy/docker-compose.veromesh.yml config -q
-      - run: for f in scripts/*.sh datahub-model/build.sh; do bash -n "$f"; done
-
-  fuseki:
-    # Builds our Fuseki image and runs the store tests against the real server.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and start Fuseki
-        run: |
-          set -a; . deploy/versions.env; set +a
-          docker build --progress=plain --build-arg JENA_VERSION="$JENA_VERSION" -t veromesh/fuseki:ci deploy/fuseki
-          docker run -d --name fuseki -p 3030:3030 veromesh/fuseki:ci
-          for i in $(seq 1 60); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ] && break; sleep 2
-          done
-          docker inspect -f '{{.State.Health.Status}}' fuseki | grep -q healthy || { docker logs fuseki; exit 1; }
-          docker exec fuseki ls /opt/fuseki/licenses
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Store tests against Fuseki
-        working-directory: service
-        env:
-          VEROMESH_TEST_FUSEKI_URL: http://localhost:3030/veromesh
-        run: |
-          pip install -e ".[dev]"
-          out=$(pytest -q -rs tests/test_http_store.py); echo "$out"
-          if echo "$out" | grep -q SKIPPED; then echo "the real-Fuseki test was skipped"; exit 1; fi
-      - name: Fuseki logs
-        if: failure()
-        run: docker logs fuseki
+          name: results-integration
+          path: .build/test-results/
 
   datahub-model:
     # Compiles the custom aspect inside DataHub's Gradle build at the pinned tag.
@@ -110,94 +56,27 @@ jobs:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v4
-      - run: datahub-model/build.sh
+      - run: scripts/test.sh datahub-model --strict
       - uses: actions/upload-artifact@v4
         with:
           name: veromesh-ontology-model
           path: datahub-model/dist/*.zip
 
-  stack:
-    # End-to-end: start the full local stack exactly as a developer would
-    # (Docker-only plugin build), load the example ontology and bind a dataset.
+  e2e:
+    # Starts the full local stack exactly as a developer would (Docker-only
+    # plugin build), then runs the end-to-end suites against it.
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Free disk space for DataHub images
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@v4
-      - name: Start stack
-        run: BUILD_IN_DOCKER=1 scripts/dev-up.sh
-      - name: Load example ontology and publish glossary
-        run: scripts/load-examples.sh
-      - name: Load the example workbook with the connectors container (through the REST API)
-        run: |
-          set -euo pipefail
-          scripts/veromesh-connect.sh spreadsheet template --example -o example.xlsx
-          scripts/veromesh-connect.sh spreadsheet import example.xlsx --source p2p | tee import.txt
-          grep -q "0 violations" import.txt && grep -q "Committed changeset" import.txt
-          scripts/veromesh-connect.sh sources | tee sources.txt
-          grep -q "^p2p " sources.txt
-          curl -fsS localhost:8700/api/v1/authorities/AssistantApprovalAuthority | tee auth.json; echo
-          grep -q '"holder":"InvoiceAssistant"' auth.json
-          curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' --data-urlencode \
-            'query=ASK { GRAPH <https://veromesh.ai/graph/source/p2p> { ?a a <https://veromesh.ai/ontology/org#AIAgent> } }' | grep -q true
-      - name: Bind a dataset and verify in both stores
-        run: |
-          set -euo pipefail
-          URN='urn:li:dataset:(urn:li:dataPlatform:snowflake,crm.public.customers,PROD)'
-          echo "--- custom model load status"
-          curl -fsS localhost:8080/config | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("models"), indent=1))'
-          echo "--- bind"
-          CODE=$(curl -sS -o bind.json -w '%{http_code}' -X POST localhost:8700/bindings \
-            -H 'Content-Type: application/json' \
-            -d "{\"datahub_urn\": \"$URN\", \"class_iri\": \"https://example.com/ontology/retail#Customer\"}")
-          cat bind.json; echo
-          test "$CODE" = 201
-          curl -fsS 'localhost:8700/classes/assets?class_iri=https://example.com/ontology/retail%23Party' | tee assets.json
-          echo
-          grep -q 'crm.public.customers' assets.json
-          ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$URN")
-          AUTH="Authorization: Bearer $(cat .build/datahub-token)"
-          ok=
-          for i in 1 2 3 4 5 6; do
-            curl -fsS -H "$AUTH" "localhost:8080/entitiesV2/$ENC" > entity.json
-            if grep -q 'retail#Customer' entity.json && grep -q 'urn:li:glossaryTerm:veromesh.' entity.json; then ok=1; break; fi
-            sleep 5
-          done
-          if [ -n "$ok" ]; then
-            echo "--- bind a second class to the same dataset; both must remain in DataHub"
-            curl -fsS -X POST localhost:8700/bindings -H 'Content-Type: application/json' \
-              -d "{\"datahub_urn\": \"$URN\", \"class_iri\": \"https://example.com/ontology/retail#LoyaltyMember\"}"
-            echo
-            curl -fsS -H "$AUTH" "localhost:8080/entitiesV2/$ENC" > entity2.json
-            python3 - <<'PY'
-          import json
-          aspects = json.load(open("entity2.json"))["aspects"]
-          classes = sorted(b["classIri"] for b in aspects["veromeshOntologyBindings"]["value"]["bindings"])
-          terms = aspects["glossaryTerms"]["value"]["terms"]
-          print("classes:", classes, "terms:", len(terms))
-          assert classes == ["https://example.com/ontology/retail#Customer",
-                             "https://example.com/ontology/retail#LoyaltyMember"], classes
-          assert len(terms) == 2, terms
-          PY
-          fi
-          echo "--- bindings stored in Fuseki, and still there after a Fuseki restart"
-          Q='PREFIX vm: <https://veromesh.ai/ontology/core#> SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?a vm:represents ?c } }'
-          count() { curl -fsS localhost:3030/veromesh/query -H 'Accept: application/sparql-results+json' \
-            --data-urlencode "query=$Q" | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"]["bindings"][0]["n"]["value"])'; }
-          BEFORE=$(count); echo "bindings before restart: $BEFORE"; test "$BEFORE" -ge 1
-          docker compose -f deploy/docker-compose.veromesh.yml restart fuseki
-          for i in $(seq 1 60); do curl -fs -o /dev/null localhost:3030/\$/ping && break; sleep 2; done
-          AFTER=$(count); echo "bindings after restart: $AFTER"; test "$AFTER" = "$BEFORE"
-          if [ -z "$ok" ]; then
-            python3 -m json.tool entity.json | head -80
-            echo "--- openapi v3 view"
-            curl -sS -H "$AUTH" "localhost:8080/openapi/v3/entity/dataset/$ENC" | head -c 4000; echo
-            echo "--- GMS lines mentioning the aspects"
-            docker logs "$(docker ps --format '{{.Names}}' | grep -m1 datahub-gms)" 2>&1 \
-              | grep -E 'veromeshOntologyBindings|glossaryTerms|ingestProposal|crm.public.customers' | grep -v '^\s*at ' | tail -40
-            exit 1
-          fi
+      - run: BUILD_IN_DOCKER=1 scripts/test.sh e2e --start-stack --strict
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-e2e
+          path: .build/test-results/
       - name: Diagnostics
         if: failure()
         run: |
@@ -209,5 +88,3 @@ jobs:
           docker logs "$GMS" 2>&1 | grep -i -E 'registry|plugin' | grep -v '^\s*at ' | tail -60
           echo "=== GMS errors"
           docker logs "$GMS" 2>&1 | grep -E 'ERROR|Exception|Caused by' | grep -v SsoManager | tail -60
-          echo "=== plugin files"
-          find ~/.datahub/plugins -maxdepth 5 -ls

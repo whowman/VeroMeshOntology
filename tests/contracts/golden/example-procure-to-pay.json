@@ -1,0 +1,29 @@
+{
+  "entities": {
+    "actions": 2,
+    "agents": 1,
+    "authorities": 3,
+    "capabilities": 1,
+    "co-approvals": 1,
+    "data-elements": 1,
+    "data-products": 2,
+    "impacts": 2,
+    "kpis": 2,
+    "objectives": 1,
+    "people": 2,
+    "policies": 2,
+    "processes": 1,
+    "roles": 3,
+    "systems": 2
+  },
+  "facts": 155,
+  "findings": [],
+  "summary": {
+    "deletes": 0,
+    "errors": 0,
+    "upserts": 26,
+    "violations": 0,
+    "warnings": 0
+  },
+  "valid": true
+}

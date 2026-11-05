@@ -1,0 +1,288 @@
+{
+  "DELETE /api/v1/changesets/{cs}": {
+    "params": [
+      "cs (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "DELETE /api/v1/{type_}/{rid}": {
+    "params": [
+      "rid (path)",
+      "source (query)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "DELETE /bindings": {
+    "body": {
+      "application/json": {
+        "class_iri": "string",
+        "datahub_urn": "string"
+      }
+    },
+    "params": [],
+    "status": [
+      "204",
+      "422"
+    ]
+  },
+  "GET /api/v1/changesets": {
+    "params": [
+      "limit? (query)",
+      "source? (query)",
+      "status? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/changesets/{cs}": {
+    "params": [
+      "cs (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/examples/procure-to-pay": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/schema": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/sources": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/{type_}": {
+    "params": [
+      "source? (query)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/{type_}/{rid}": {
+    "params": [
+      "rid (path)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /bindings": {
+    "params": [
+      "datahub_urn (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /classes": {
+    "params": [
+      "graph? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /classes/assets": {
+    "params": [
+      "class_iri (query)",
+      "include_subclasses? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /health": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /ontologies": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "POST /api/v1/changesets": {
+    "body": {
+      "application/json": {
+        "connector?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "description?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "file?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "kind?": "string",
+        "mode?": "string",
+        "source": "string"
+      }
+    },
+    "params": [],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/changesets/{cs}/commit": {
+    "params": [
+      "cs (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/changesets/{cs}/items": {
+    "body": {
+      "application/json": {
+        "items": {
+          "array": "object"
+        }
+      }
+    },
+    "params": [
+      "cs (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/changesets/{cs}/validate": {
+    "params": [
+      "cs (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/{type_}": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [
+      "source (query)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /bindings": {
+    "body": {
+      "application/json": {
+        "class_iri": "string",
+        "datahub_urn": "string"
+      }
+    },
+    "params": [],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /glossary/publish": {
+    "body": {
+      "application/json": {
+        "graph": "string",
+        "name?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /sparql": {
+    "body": {
+      "application/json": {
+        "query": "string"
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/{type_}/{rid}": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [
+      "rid (path)",
+      "source (query)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /ontologies": {
+    "body": {
+      "text/turtle": "string"
+    },
+    "params": [
+      "graph (query)",
+      "replace? (query)"
+    ],
+    "status": [
+      "204",
+      "422"
+    ]
+  }
+}
