@@ -3,6 +3,7 @@
 #
 #   scripts/dev-up.sh            # start everything
 #   SKIP_MODEL=1 scripts/dev-up.sh   # skip building the custom DataHub model
+#   SKIP_BRANDING=1 scripts/dev-up.sh  # stock DataHub look instead of the VeroMesh theme
 #
 # Requires Docker Compose >= 2.20 and ~8 GB RAM for Docker.
 set -euo pipefail
@@ -17,6 +18,14 @@ load_datahub_secrets
 # 2. Build + deploy the Veromesh custom aspect into ~/.datahub/plugins (mounted into GMS).
 if [[ -z "${SKIP_MODEL:-}" ]]; then
   "$ROOT/datahub-model/build.sh" --deploy
+fi
+
+# 2b. VeroMesh branding for the DataHub UI: theme and logos layered onto the
+#     official frontend image, selected through DataHub's own compose hooks.
+if [[ -z "${SKIP_BRANDING:-}" ]]; then
+  "$ROOT/branding/datahub/build.sh"
+  export DATAHUB_FRONTEND_IMAGE=veromesh/datahub-frontend-react
+  export DATAHUB_LOCAL_GMS_ENV="$ROOT/branding/datahub/gms.env"
 fi
 
 # 3. Start DataHub.

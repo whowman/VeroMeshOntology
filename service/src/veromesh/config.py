@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # repository's ontology/ folder; the Docker image sets /app/ontology.
     ontology_dir: str = str(Path(__file__).resolve().parents[3] / "ontology")
 
+    # Logos and palette for the API's docs pages. Defaults to the repository's
+    # branding/ folder; the Docker image sets /app/branding.
+    branding_dir: str = str(Path(__file__).resolve().parents[3] / "branding")
+
 
 @lru_cache
 def get_settings() -> Settings:

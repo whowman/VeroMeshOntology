@@ -61,7 +61,7 @@ SUITES: list[Suite] = [
         steps=(
             "cd service && ruff check . && ruff format --check .",
             "cd connectors && ruff check . && ruff format --check .",
-            "ruff check --config service/pyproject.toml tests && ruff format --config service/pyproject.toml --check tests",
+            "ruff check --config service/pyproject.toml tests branding && ruff format --config service/pyproject.toml --check tests branding",
         ),
     ),
     Suite(
@@ -92,6 +92,14 @@ SUITES: list[Suite] = [
         covers=("ontology/tests",),
     ),
     Suite(
+        name="branding",
+        component="branding",
+        tier="quick",
+        description="DataHub theme generator (palette mapping, contrast) and asset injector",
+        steps=(f"{PYTEST} branding/tests --junitxml={{results}}/branding.xml",),
+        covers=("branding/tests",),
+    ),
+    Suite(
         name="contracts",
         component="repo",
         tier="quick",
@@ -113,7 +121,7 @@ SUITES: list[Suite] = [
         where="host",
         description="Shell scripts parse (bash -n)",
         steps=(
-            'for f in scripts/*.sh datahub-model/build.sh tests/e2e/*.sh; do bash -n "$f" || exit 1; done',
+            'for f in scripts/*.sh datahub-model/build.sh tests/e2e/*.sh branding/datahub/*.sh; do bash -n "$f" || exit 1; done',
         ),
     ),
     Suite(
@@ -153,6 +161,15 @@ SUITES: list[Suite] = [
             "docker run --rm veromesh/connectors:test --version",
         ),
     ),
+    Suite(
+        name="datahub-frontend",
+        component="branding",
+        tier="integration",
+        where="host",
+        needs=frozenset({"docker"}),
+        description="VeroMesh-branded DataHub frontend image builds with the theme and logos in place",
+        steps=("branding/datahub/build.sh", "branding/datahub/verify_image.sh"),
+    ),
     # ------------------------------------------------------------------ build
     Suite(
         name="datahub-model",
@@ -175,6 +192,7 @@ SUITES: list[Suite] = [
             "VEROMESH_E2E_GMS": "{gms}",
             "VEROMESH_E2E_FUSEKI": "{fuseki_stack}",
             "VEROMESH_E2E_TOKEN_FILE": "{token_file}",
+            "VEROMESH_E2E_FRONTEND": "{frontend}",
         },
         steps=(f"{PYTEST} tests/e2e --junitxml={{results}}/e2e.xml",),
         covers=("tests/e2e",),
