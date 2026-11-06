@@ -1,6 +1,6 @@
 # Provenance model (design for review)
 
-Status: **draft for review**. Nothing here is built yet. The open decisions are listed at the end; the build starts once they are settled.
+Status: **reviewed design** (decisions of 6 November 2026 at the end). Nothing here is built yet.
 
 Every fact in the organizational model must answer four questions: **who says so**, **since when**, **for what period is it true**, and **has its owner confirmed it**. Agents rely on the answers before acting, and the decision log has to be able to show what was believed, and why, at the moment an agent acted.
 
@@ -80,7 +80,11 @@ For each entity and field, VeroMesh picks one source's values:
 | Delegated authority | erp > iam > spreadsheet |
 | Everything else | spreadsheet (the model's own home today) |
 
-Where a steward correction sits in that ranking is open decision 1.
+**Steward corrections** are configured per field (decision 1):
+
+- **Steward wins** where the system of record is often incomplete or is not where the business decides: owner and steward roles, criticality, classification and data category, descriptions and definitions, links between business entities (capability served, KPIs measured, data product inputs). The correction takes effect at once; the disagreement stays listed as a conflict until the source is fixed.
+- **Source wins** where a system of record is legally or operationally authoritative: a person's name, employee ID, email, reporting line and roles filled (HR); authority amounts, currencies and dates (ERP, IAM); system identifiers and lifecycle state (CMDB). A steward can dispute these, which flags them and notifies the source owner, but the value changes only when the source changes.
+- Customers can flip any field.
 
 The result is materialized in an **effective graph** (`https://veromesh.ai/graph/effective`), recomputed for the touched entities on every commit and attestation. Validation, impact queries, the agent gateway and DataHub publishing read the effective graph instead of the union, so a disagreement between sources is no longer a model violation. Instead it is a **conflict**: two sources assert different non-empty values for the same field. Conflicts are listed by the API and, from Phase 2, routed to the entity's owner.
 
@@ -90,7 +94,7 @@ Two times on every claim:
 - **observed at**: when we learned it (bitemporal transaction time);
 - **valid from / until**: when it holds in the world.
 
-Superseded claims are kept, not overwritten (scope is open decision 2). That allows reading the model **as of** a date: for each source, the claim that was current then and valid then, with the same precedence. The decision log records the claim IDs an agent's check relied on, so an audit can replay exactly what was believed.
+Superseded claims are kept indefinitely, not overwritten (decision 2). That allows reading the model **as of** a date: for each source, the claim that was current then and valid then, with the same precedence. The decision log records the claim IDs an agent's check relied on, so an audit can replay exactly what was believed.
 
 A delegation's own dates (`validFrom`, `validUntil` on Delegated authority) stay in the model: they are a property of the grant, not of what a source said about it.
 
@@ -117,7 +121,7 @@ Attester identity is taken from the request until single sign-on arrives in Phas
 - Every claim has exactly one source, changeset, observed time and value hash; valid until is not before valid from.
 - Every attestation names a person, a role, a verdict, a time and a pinned hash.
 - Warning: the attester does not hold the entity's owner or steward role.
-- Warning: a fact used for an authority check is unconfirmed or expired (open decision 3 sets whether this is a warning or a block).
+- Unconfirmed facts are usable everywhere and marked as such, except in an agent's authority check (decision 3): there the delegated authority, the role it hangs on, the person filling the role and the ownership of the affected KPIs must each be attested and not expired, or the check fails with the reason. Elsewhere this shows as a warning.
 
 ## Size
 
@@ -133,11 +137,13 @@ A migration creates one claim per entity per existing source, observed at that s
 | --- | --- |
 | Vocabulary and validation rules; claims and history on every commit; observed and valid times through the API and connectors; attestations and the derived status; the provenance, as-of, attestation, correction, conflict and source endpoints; default precedence and the effective graph; migration; tests and contract snapshots | Customer-configurable precedence rules; entity matching across sources (same person under employee ID and email, with confidence and manual review); conflicts routed to owners; attestation campaigns and reminders |
 
-## Decisions needed
+## Review decisions (6 November 2026)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 | --- | --- | --- |
-| 1 | A steward corrects a value that the authoritative system (e.g. HR) still states differently. Which wins? | The steward's correction wins, and the disagreement stays listed as a conflict until the source is fixed |
-| 2 | How much history to keep | All of it: as-of reads and audit replay depend on it; storage is small |
-| 3 | Can unconfirmed facts be used? | Everywhere, marked as unconfirmed; but authority and ownership facts used in an agent's check must be attested and current |
+| 1 | A steward corrects a value that the authoritative system still states differently | Configured per field: steward wins for ownership, classification, definitions and business links; the source wins for HR identity, authority amounts and dates, and CMDB identifiers; customers can flip any field |
+| 2 | How much history to keep | All of it, for as-of reads and audit replay |
+| 3 | Can unconfirmed facts be used? | Yes, marked as unconfirmed, except in an agent's authority check, where authority, role, person and KPI ownership must be attested and current |
 | 4 | How often facts must be re-confirmed | Per type: delegated authority 90 days; people, roles and ownership 180 days; everything else 365 days; customers can change them |
+
+Still open: the per-field defaults for decision 1 above are a proposal; adjust any before the build.
