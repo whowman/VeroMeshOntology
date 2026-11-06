@@ -1,6 +1,6 @@
 # Provenance model (design for review)
 
-Status: **reviewed design** (decisions of 6 November 2026 at the end). Nothing here is built yet.
+Status: **built** (PR #5), following the review decisions of 6 November 2026 at the end. Code: `service/src/veromesh/provenance.py`; vocabulary and rules: `ontology/veromesh-prov.ttl`, `ontology/shapes/veromesh-prov-shapes.ttl`.
 
 Every fact in the organizational model must answer four questions: **who says so**, **since when**, **for what period is it true**, and **has its owner confirmed it**. Agents rely on the answers before acting, and the decision log has to be able to show what was believed, and why, at the moment an agent acted.
 
@@ -109,6 +109,9 @@ Additions to `/api/v1` (existing endpoints unchanged):
 | `POST /{type}/{id}/attestations` | Confirm or dispute: `{fields?, verdict, note?, attester, role}` |
 | `POST /{type}/{id}/corrections` | Steward correction: new values, recorded as a claim from the `steward` source and attested in the same step |
 | `GET /attestations?status=unconfirmed&type=&ownerRole=` | Review queue for the steward screen (Phase 1) |
+| `GET /authorities/{id}/confirmation` | Whether an agent may rely on an authority: every fact behind it attested and current (decision 3), with the reasons when not |
+| `GET /governance` | The rankings, steward-correction policy and cadence in force |
+| `POST /effective/rebuild` | Recompute the effective model, e.g. after valid-until dates pass |
 | `GET /conflicts?type=` | Fields where sources disagree |
 | `PUT /sources/{name}` | Register a source: category, owner role, description |
 
@@ -133,9 +136,17 @@ A migration creates one claim per entity per existing source, observed at that s
 
 ## Build split
 
-| Now (PR after this review) | Phase 2, with the CMDB connector |
+| Built in PR #5 | Phase 2, with the CMDB connector |
 | --- | --- |
 | Vocabulary and validation rules; claims and history on every commit; observed and valid times through the API and connectors; attestations and the derived status; the provenance, as-of, attestation, correction, conflict and source endpoints; default precedence and the effective graph; migration; tests and contract snapshots | Customer-configurable precedence rules; entity matching across sources (same person under employee ID and email, with confidence and manual review); conflicts routed to owners; attestation campaigns and reminders |
+
+## Implementation notes
+
+- The effective graph is recomputed from the recorded claims on every commit, attestation and source registration. Facts outside their valid period drop out at the next recomputation; `POST /api/v1/effective/rebuild` forces one (run it daily, or after a batch of date changes).
+- Validation checks the effective model as it would be after the change, with valid periods ignored: a delegation that has expired is still a structurally valid fact.
+- Attestations are per field: each pins the hash of the value it covered, for one source. A change to another field leaves it standing.
+- Decimals are compared in one canonical form (50000.00 and 50000 are the same value), so an unchanged reload records no new claims.
+- Built alongside: re-saving an entity in merge mode no longer drops links that belong to other entities (renaming a role used to remove the authorities it holds).
 
 ## Review decisions (6 November 2026)
 

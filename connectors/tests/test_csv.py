@@ -123,3 +123,27 @@ def test_unknown_type_and_columns(http, tmp_path, capsys):
     write(tmp_path / "roles.csv", "ID,Name,Colour\nR1,One,red\n")
     assert run(http, "csv", "import", str(tmp_path / "roles.csv"), "--source", "x") == 1
     assert "unknown column 'Colour'" in capsys.readouterr().out
+
+
+def test_mapping_file_records_when_the_source_stated_each_record(http, tmp_path, capsys):
+    """Provenance: the record's own timestamp becomes the claim's observed time."""
+    hr = write(
+        tmp_path / "workers.csv",
+        """
+        Worker ID,Name,Last Modified
+        E-1,Dana Example,2026-10-01T09:30:00Z
+    """,
+    )
+    mapping = write(
+        tmp_path / "m.yaml",
+        """
+        rules:
+          - type: people
+            id: "{Worker ID}"
+            observedAt: "{Last Modified}"
+            fields: {name: "{Name}"}
+    """,
+    )
+    assert run(http, "csv", "import", str(hr), "--source", "hr", "--mapping", str(mapping)) == 0
+    claim = http.get("/api/v1/people/E-1/provenance").json()["claims"][0]
+    assert claim["source"] == "hr" and claim["observedAt"].startswith("2026-10-01T09:30:00")

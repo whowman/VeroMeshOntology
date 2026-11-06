@@ -179,7 +179,7 @@ def _path(g: Graph, node) -> str:
 def test_ontology_inventory():
     """Classes, properties and validation rules of the core vocabulary and the organizational meta-model."""
     out = {}
-    for rel in ("ontology/veromesh-core.ttl", "ontology/veromesh-org.ttl"):
+    for rel in ("ontology/veromesh-core.ttl", "ontology/veromesh-org.ttl", "ontology/veromesh-prov.ttl"):
         g = Graph().parse(ROOT / rel)
         classes = {
             _curie(g, c): sorted(_curie(g, p) for p in g.objects(c, RDFS.subClassOf) if isinstance(p, URIRef))
@@ -196,33 +196,34 @@ def test_ontology_inventory():
                 }
         out[rel] = {"classes": dict(sorted(classes.items())), "properties": dict(sorted(props.items()))}
 
-    g = Graph().parse(ROOT / "ontology/shapes/veromesh-org-shapes.ttl")
-    shapes = {}
-    for s in set(g.subjects(RDF.type, SH.NodeShape)):
-        rules = []
-        for ps in g.objects(s, SH.property):
-            rule = {
-                k: _curie(g, v) if isinstance(v, URIRef) else str(v)
-                for k, v in (
-                    ("path", Literal(_path(g, g.value(ps, SH.path)))),
-                    ("minCount", g.value(ps, SH.minCount)),
-                    ("maxCount", g.value(ps, SH.maxCount)),
-                    ("datatype", g.value(ps, SH.datatype)),
-                    ("class", g.value(ps, SH["class"])),
-                    ("severity", g.value(ps, SH.severity)),
-                )
-                if v is not None
+    for rel in ("ontology/shapes/veromesh-org-shapes.ttl", "ontology/shapes/veromesh-prov-shapes.ttl"):
+        g = Graph().parse(ROOT / rel)
+        shapes = {}
+        for s in set(g.subjects(RDF.type, SH.NodeShape)):
+            rules = []
+            for ps in g.objects(s, SH.property):
+                rule = {
+                    k: _curie(g, v) if isinstance(v, URIRef) else str(v)
+                    for k, v in (
+                        ("path", Literal(_path(g, g.value(ps, SH.path)))),
+                        ("minCount", g.value(ps, SH.minCount)),
+                        ("maxCount", g.value(ps, SH.maxCount)),
+                        ("datatype", g.value(ps, SH.datatype)),
+                        ("class", g.value(ps, SH["class"])),
+                        ("severity", g.value(ps, SH.severity)),
+                    )
+                    if v is not None
+                }
+                rules.append(rule)
+            sparql = len(list(g.objects(s, SH.sparql)))
+            shapes[_curie(g, s)] = {
+                "target": sorted(_curie(g, t) for t in g.objects(s, SH.targetClass)),
+                "closed": str(g.value(s, SH.closed) or "false"),
+                "severity": _curie(g, g.value(s, SH.severity)) if g.value(s, SH.severity) else "",
+                "properties": sorted(rules, key=lambda r: json.dumps(r, sort_keys=True)),
+                "sparqlRules": sparql,
             }
-            rules.append(rule)
-        sparql = len(list(g.objects(s, SH.sparql)))
-        shapes[_curie(g, s)] = {
-            "target": sorted(_curie(g, t) for t in g.objects(s, SH.targetClass)),
-            "closed": str(g.value(s, SH.closed) or "false"),
-            "severity": _curie(g, g.value(s, SH.severity)) if g.value(s, SH.severity) else "",
-            "properties": sorted(rules, key=lambda r: json.dumps(r, sort_keys=True)),
-            "sparqlRules": sparql,
-        }
-    out["ontology/shapes/veromesh-org-shapes.ttl"] = dict(sorted(shapes.items()))
+        out[rel] = dict(sorted(shapes.items()))
     check("ontology-inventory", out)
 
 
