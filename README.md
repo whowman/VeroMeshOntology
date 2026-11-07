@@ -17,7 +17,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
 | `branding/` | VeroMesh palette, logos, and the DataHub theme; see [branding/README.md](branding/README.md) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
-| `deploy/` | Pinned versions and the compose file for Veromesh services |
+| `deploy/` | Pinned versions, the compose file for Veromesh services, and the Helm charts for Kubernetes; see [deploy/helm/README.md](deploy/helm/README.md) |
 | `scripts/` | Local stack helpers, and `test.sh`, the regression test harness |
 | `tests/` | Regression harness, contract snapshots and end-to-end tests; see [docs/testing.md](docs/testing.md) |
 | `docs/` | Architecture, connectors, testing and licensing |
@@ -75,6 +75,10 @@ The wrapper runs the connectors in Docker; with Python 3.11+ you can `pip instal
 DataHub UI: http://localhost:9002 (login `datahub` / `datahub`), in the VeroMesh theme · VeroMesh API docs: http://localhost:8700/docs. `SKIP_BRANDING=1 scripts/dev-up.sh` gives the stock DataHub look.
 
 Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data).
+
+## Kubernetes
+
+Helm charts for a customer install are in [deploy/helm/](deploy/helm/README.md): the `veromesh` chart (service and Fuseki), plus overlays for DataHub's official charts that add the VeroMesh model plugin, theme and PostgreSQL. `deploy/helm/build-images.sh` builds every image the install needs.
 
 ## Testing
 

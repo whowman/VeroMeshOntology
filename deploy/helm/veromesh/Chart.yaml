@@ -1,0 +1,20 @@
+apiVersion: v2
+name: veromesh
+description: >-
+  VeroMesh organizational ontology: the VeroMesh service and its knowledge
+  graph (Apache Jena Fuseki). DataHub is installed alongside from its official
+  charts; see deploy/helm/README.md.
+type: application
+# Chart version: bump on any change to the chart.
+version: 0.1.0
+# The VeroMesh service version (service/pyproject.toml); the default image tag.
+appVersion: "0.1.0"
+home: https://github.com/whowman/VeroMeshOntology
+sources:
+  - https://github.com/whowman/VeroMeshOntology
+keywords:
+  - ontology
+  - knowledge-graph
+  - datahub
+maintainers:
+  - name: VeroMesh

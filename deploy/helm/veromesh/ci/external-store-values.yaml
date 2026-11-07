@@ -1,0 +1,5 @@
+# Bring your own SPARQL store: no Fuseki, no NetworkPolicy for it.
+fuseki:
+  enabled: false
+store:
+  url: fuseki:http://fuseki.graph.svc.cluster.local:3030/veromesh

@@ -1,0 +1,21 @@
+# Used by the k8s suite (tests/k8s/kind_smoke.sh): images loaded into kind,
+# small requests so it fits a CI runner, no DataHub in the cluster.
+api:
+  image:
+    tag: test
+    pullPolicy: Never
+  datahub:
+    gmsUrl: http://datahub-not-installed:8080
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+fuseki:
+  image:
+    tag: test
+    pullPolicy: Never
+  javaOpts: "-Xmx512m"
+  persistence:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1Gi}

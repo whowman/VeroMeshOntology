@@ -1,0 +1,27 @@
+# Overlay for DataHub's official prerequisites chart (datahub/datahub-prerequisites,
+# pinned in deploy/helm/versions.env). Same storage as the local stack:
+# PostgreSQL and OpenSearch. Kafka replaces pgQueue on Kubernetes, as the
+# reference architecture plans for production.
+#
+#   kubectl create secret generic postgresql-secrets \
+#     --from-literal=postgres-password=... --from-literal=replication-password=... --from-literal=password=...
+#   helm install prerequisites datahub/datahub-prerequisites \
+#     --version $DATAHUB_PREREQUISITES_CHART_VERSION -f deploy/helm/datahub/prerequisites-values.yaml
+#
+# This runs everything as single nodes, which suits a pilot. In production use
+# managed PostgreSQL, OpenSearch and Kafka instead and set enabled: false here.
+
+mysql:
+  enabled: false
+
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: postgresql-secrets
+
+opensearch:
+  enabled: true
+  singleNode: true
+
+kafka:
+  enabled: true
