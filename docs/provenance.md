@@ -1,6 +1,6 @@
-# Provenance model (design for review)
+# Provenance model
 
-Status: **built** (PR #5), following the review decisions of 6 November 2026 at the end. Code: `service/src/veromesh/provenance.py`; vocabulary and rules: `ontology/veromesh-prov.ttl`, `ontology/shapes/veromesh-prov-shapes.ttl`.
+Status: **built and merged** (PR #5, 7 November 2026), following the review decisions of 6 November 2026 at the end. Code: `service/src/veromesh/provenance.py`; vocabulary and rules: `ontology/veromesh-prov.ttl`, `ontology/shapes/veromesh-prov-shapes.ttl`.
 
 Every fact in the organizational model must answer four questions: **who says so**, **since when**, **for what period is it true**, and **has its owner confirmed it**. Agents rely on the answers before acting, and the decision log has to be able to show what was believed, and why, at the moment an agent acted.
 
@@ -157,4 +157,4 @@ A migration creates one claim per entity per existing source, observed at that s
 | 3 | Can unconfirmed facts be used? | Yes, marked as unconfirmed, except in an agent's authority check, where authority, role, person and KPI ownership must be attested and current |
 | 4 | How often facts must be re-confirmed | Per type: delegated authority 90 days; people, roles and ownership 180 days; everything else 365 days; customers can change them |
 
-Still open: the per-field defaults for decision 1 above are a proposal; adjust any before the build.
+The per-field defaults for decision 1 shipped as proposed; customers can flip any field.
