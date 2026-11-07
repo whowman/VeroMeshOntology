@@ -22,6 +22,9 @@ postgresql:
 opensearch:
   enabled: true
   singleNode: true
+  # The OpenSearch chart's templates read this key; its own defaults do not set it.
+  serviceMonitor:
+    enabled: false
 
 kafka:
   enabled: true

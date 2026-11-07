@@ -5,10 +5,11 @@ metadata:
   name: {{ include "veromesh.fullname" . }}-test
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
-    {{- include "veromesh.selectorLabels" (list . "test") | nindent 4 }}
+    app.kubernetes.io/component: test
   annotations:
     helm.sh/hook: test
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    # Kept after a run so `helm test --logs` can read it; replaced on the next run.
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   restartPolicy: Never
   automountServiceAccountToken: false
