@@ -1,0 +1,37 @@
+# The shape of a production install: token from an existing Secret, ingress
+# with TLS, a named storage class, a private registry.
+imagePullSecrets:
+  - name: registry-credentials
+api:
+  replicaCount: 2
+  image:
+    repository: registry.example.com/veromesh/service
+  datahub:
+    gmsUrl: http://datahub-datahub-gms.datahub.svc.cluster.local:8080
+    existingSecret: veromesh-datahub
+    existingSecretKey: token
+  instanceBase: "urn:veromesh:org:acme:"
+  env:
+    VEROMESH_GLOSSARY_ROOT_NAME: Acme Ontology
+  ingress:
+    enabled: true
+    className: nginx
+    host: veromesh.acme.example
+    tls:
+      - secretName: veromesh-tls
+        hosts: [veromesh.acme.example]
+fuseki:
+  image:
+    repository: registry.example.com/veromesh/fuseki
+  javaOpts: "-Xmx4g"
+  persistence:
+    size: 50Gi
+    storageClass: premium-rwo
+  resources:
+    requests: {cpu: "1", memory: 6Gi}
+    limits: {memory: 6Gi}
+networkPolicy:
+  fusekiAllowFrom:
+    - podSelector:
+        matchLabels:
+          app: fuseki-backup

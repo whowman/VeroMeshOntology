@@ -1,0 +1,27 @@
+VeroMesh {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Check it:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Reach the API from your machine:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "veromesh.apiName" . }} 8700:{{ .Values.api.service.port }}
+  open http://localhost:8700/docs
+{{- if .Values.api.ingress.enabled }}
+
+Through the ingress: http{{ if .Values.api.ingress.tls }}s{{ end }}://{{ .Values.api.ingress.host }}/docs
+{{- end }}
+
+Knowledge graph: {{ include "veromesh.rdfStore" . }}
+DataHub GMS:     {{ .Values.api.datahub.gmsUrl }}
+{{- if not (or .Values.api.datahub.token .Values.api.datahub.existingSecret) }}
+
+No DataHub token is set, so publishing to DataHub will fail until one is.
+Create a token in DataHub (Settings > Access Tokens), then:
+  kubectl -n {{ .Release.Namespace }} create secret generic veromesh-datahub --from-literal=token=<token>
+  helm upgrade {{ .Release.Name }} <chart> --reuse-values --set api.datahub.existingSecret=veromesh-datahub
+{{- end }}
+{{- if and .Values.fuseki.enabled .Values.fuseki.persistence.enabled }}
+
+The model is stored on the PersistentVolumeClaim data-{{ include "veromesh.fusekiName" . }}-0,
+which is kept when the release is uninstalled.
+{{- end }}

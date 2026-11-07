@@ -1,0 +1,83 @@
+# Overlay for DataHub's official chart (datahub/datahub, pinned in
+# deploy/helm/versions.env). DataHub itself stays unmodified; this only:
+#   - points it at PostgreSQL from the prerequisites chart,
+#   - loads the VeroMesh custom aspect (veromeshOntologyBindings) into GMS
+#     from the plugin image, the way scripts/dev-up.sh mounts it locally,
+#   - swaps in the VeroMesh-branded frontend image and theme settings,
+#   - keeps GMS and the UI inside the cluster (add your own ingress).
+#
+#   helm install datahub datahub/datahub --version $DATAHUB_CHART_VERSION \
+#     -f deploy/helm/datahub/datahub-values.yaml
+#
+# Images: veromesh/datahub-model-plugin and veromesh/datahub-frontend-react
+# are built by deploy/helm/build-images.sh; push them to your registry and set
+# the repositories below to match.
+
+global:
+  sql:
+    datasource:
+      host: "prerequisites-postgresql:5432"
+      hostForpostgresqlClient: "prerequisites-postgresql"
+      port: "5432"
+      url: "jdbc:postgresql://prerequisites-postgresql:5432/datahub"
+      driver: "org.postgresql.Driver"
+      database: "datahub"
+      username: "postgres"
+      password:
+        secretRef: postgresql-secrets
+        secretKey: postgres-password
+
+datahub-gms:
+  service:
+    type: ClusterIP
+  # The VeroMesh model plugin, copied into GMS's plugin folder before it starts.
+  extraInitContainers:
+    - name: veromesh-model-plugin
+      image: veromesh/datahub-model-plugin:0.1.0
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c", "cp -R /plugins/models/. /target/ && ls -R /target"]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: veromesh-plugins
+          mountPath: /target
+  extraVolumes:
+    - name: veromesh-plugins
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: veromesh-plugins
+      mountPath: /etc/datahub/plugins/models
+      readOnly: true
+  # Theme settings; GMS hands them to the UI (same as branding/datahub/datahub.env).
+  extraEnvs:
+    - name: REACT_APP_CUSTOM_THEME_ID
+      value: veromesh.theme.json
+    - name: REACT_APP_LOGO_URL
+      value: assets/veromesh/veromesh-mark.svg
+    - name: REACT_APP_FAVICON_URL
+      value: assets/veromesh/favicon.ico
+    - name: REACT_APP_TITLE
+      value: VeroMesh
+
+datahub-frontend:
+  image:
+    # From a private registry: registry: registry.example.com (the chart's
+    # default registry is docker.io).
+    repository: veromesh/datahub-frontend-react
+    tag: v1.8.0
+  service:
+    type: ClusterIP
+  extraEnvs:
+    - name: REACT_APP_CUSTOM_THEME_ID
+      value: veromesh.theme.json
+    - name: REACT_APP_LOGO_URL
+      value: assets/veromesh/veromesh-mark.svg
+    - name: REACT_APP_FAVICON_URL
+      value: assets/veromesh/favicon.ico
+    - name: REACT_APP_TITLE
+      value: VeroMesh

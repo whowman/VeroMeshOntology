@@ -1,0 +1,200 @@
+{{- $sel := include "veromesh.selectorLabels" (list . "api") -}}
+{{- if and .Values.api.datahub.token (not .Values.api.datahub.existingSecret) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "veromesh.tokenSecret" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+type: Opaque
+data:
+  token: {{ .Values.api.datahub.token | b64enc | quote }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "veromesh.apiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- $sel | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "veromesh.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        # Roll the pods when the token changes.
+        checksum/token: {{ .Values.api.datahub.token | sha256sum | trunc 16 }}
+        {{- with .Values.api.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "veromesh.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if .Values.fuseki.enabled }}
+      initContainers:
+        # Start serving only once the knowledge graph answers.
+        - name: wait-for-fuseki
+          image: {{ include "veromesh.apiImage" . | quote }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command:
+            - python
+            - -c
+            - |
+              import time, urllib.request
+              url = {{ include "veromesh.fusekiPing" . | quote }}
+              for _ in range(120):
+                  try:
+                      urllib.request.urlopen(url, timeout=3)
+                      break
+                  except Exception:
+                      time.sleep(5)
+              else:
+                  raise SystemExit("Fuseki did not answer at " + url)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "veromesh.apiImage" . | quote }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8700
+              protocol: TCP
+          env:
+            - name: VEROMESH_RDF_STORE
+              value: {{ include "veromesh.rdfStore" . | quote }}
+            - name: VEROMESH_DATAHUB_GMS_URL
+              value: {{ .Values.api.datahub.gmsUrl | quote }}
+            - name: VEROMESH_INSTANCE_BASE
+              value: {{ .Values.api.instanceBase | quote }}
+            {{- if or .Values.api.datahub.token .Values.api.datahub.existingSecret }}
+            - name: VEROMESH_DATAHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "veromesh.tokenSecret" . }}
+                  key: {{ include "veromesh.tokenSecretKey" . }}
+            {{- end }}
+            {{- range $k, $v := .Values.api.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "veromesh.apiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  selector:
+    {{- $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- if .Values.api.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "veromesh.apiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.api.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.api.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.api.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.api.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "veromesh.apiName" . }}
+                port:
+                  name: http
+{{- end }}

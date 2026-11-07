@@ -1,0 +1,43 @@
+# helm test <release>: the service answers, reads its schema, and reaches the knowledge graph.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "veromesh.fullname" . }}-test
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    # Kept after a run so `helm test --logs` can read it; replaced on the next run.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ include "veromesh.apiImage" . | quote }}
+      imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+      command:
+        - python
+        - -c
+        - |
+          import json, urllib.request
+          base = "http://{{ include "veromesh.apiName" . }}:{{ .Values.api.service.port }}"
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=30) as r:
+                  return json.load(r)
+          assert get("/health")["status"] == "ok"
+          assert any(t["type"] == "roles" for t in get("/api/v1/schema")), "schema has no roles"
+          # Reads the source registry from the knowledge graph.
+          print("sources:", get("/api/v1/sources"))
+          print("ok")
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
