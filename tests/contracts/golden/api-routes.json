@@ -32,6 +32,27 @@
       "422"
     ]
   },
+  "GET /api/v1/attestations": {
+    "params": [
+      "limit? (query)",
+      "ownerRole? (query)",
+      "status? (query)",
+      "type? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/authorities/{rid}/confirmation": {
+    "params": [
+      "rid (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/changesets": {
     "params": [
       "limit? (query)",
@@ -52,7 +73,22 @@
       "422"
     ]
   },
+  "GET /api/v1/conflicts": {
+    "params": [
+      "type? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/examples/procure-to-pay": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/governance": {
     "params": [],
     "status": [
       "200"
@@ -81,6 +117,17 @@
     ]
   },
   "GET /api/v1/{type_}/{rid}": {
+    "params": [
+      "asOf? (query)",
+      "rid (path)",
+      "type_ (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/{type_}/{rid}/provenance": {
     "params": [
       "rid (path)",
       "type_ (path)"
@@ -202,6 +249,12 @@
       "422"
     ]
   },
+  "POST /api/v1/effective/rebuild": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "POST /api/v1/{type_}": {
     "body": {
       "application/json": "object"
@@ -212,6 +265,66 @@
     ],
     "status": [
       "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/{type_}/{rid}/attestations": {
+    "body": {
+      "application/json": {
+        "attester": "string",
+        "fields?": {
+          "anyOf": [
+            {
+              "array": "string"
+            },
+            "null"
+          ]
+        },
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "role": "string",
+        "source?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": "string"
+      }
+    },
+    "params": [
+      "rid (path)",
+      "type_ (path)"
+    ],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/{type_}/{rid}/corrections": {
+    "body": {
+      "application/json": {
+        "attester": "string",
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "role": "string",
+        "values": "object"
+      }
+    },
+    "params": [
+      "rid (path)",
+      "type_ (path)"
+    ],
+    "status": [
+      "201",
       "422"
     ]
   },
@@ -253,6 +366,32 @@
       }
     },
     "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/sources/{name}": {
+    "body": {
+      "application/json": {
+        "category": "string",
+        "description?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerRole?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [
+      "name (path)"
+    ],
     "status": [
       "200",
       "422"

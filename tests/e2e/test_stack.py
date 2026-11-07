@@ -241,6 +241,18 @@ def test_org_model_through_the_spreadsheet_connector(api, tmp_path, capsys, clea
     assert main(["--api", API, "spreadsheet", "import", str(exported), "--source", SOURCE, "--dry-run"]) == 0
     assert "0 errors, 0 violations" in capsys.readouterr().out
 
+    # Provenance: every fact has a claim from this source; an owner can confirm it
+    prov = api.get(f"/api/v1/kpis/{PREFIX}OnTimePaymentRate/provenance").json()
+    assert prov["fields"]["ownerRole"]["source"] == SOURCE
+    assert prov["fields"]["ownerRole"]["status"] == "unconfirmed"
+    r = api.post(
+        f"/api/v1/kpis/{PREFIX}OnTimePaymentRate/attestations",
+        json={"verdict": "attested", "attester": f"{PREFIX}DanaExample", "role": f"{PREFIX}ApManager"},
+    )
+    assert r.status_code == 201 and r.json()["warnings"] == [], r.text
+    prov = api.get(f"/api/v1/kpis/{PREFIX}OnTimePaymentRate/provenance").json()
+    assert prov["fields"]["ownerRole"]["status"] == "attested"
+
     # A write that would break the model is refused, and nothing changes
     r = api.delete(f"/api/v1/roles/{PREFIX}Controller", params={"source": SOURCE})
     assert r.status_code == 422, r.text

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import __version__, branding, changesets, entities
+from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
 from .rdf_store import StoreRequestError, make_store
@@ -52,6 +53,28 @@ class ChangesetIn(BaseModel):
 
 class ItemsIn(BaseModel):
     items: list[dict]
+
+
+class SourceIn(BaseModel):
+    category: str
+    ownerRole: str | None = None
+    description: str | None = None
+
+
+class AttestationIn(BaseModel):
+    verdict: str  # attested | disputed
+    attester: str  # person ID (from single sign-on from Phase 1)
+    role: str  # role ID the person acts in
+    fields: list[str] | None = None
+    source: str | None = None
+    note: str | None = None
+
+
+class CorrectionIn(BaseModel):
+    values: dict
+    attester: str
+    role: str
+    note: str | None = None
 
 
 def build_service(settings: Settings, datahub: DataHubPort | None = None) -> VeromeshService:
@@ -259,14 +282,95 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
         return JSONResponse(status_code=status, content=report)
 
+    # ------------------------------------------------------------------ provenance and governance
+    # (declared before the per-type routes, which would otherwise match these paths)
+
+    @app.get("/api/v1/governance", tags=["governance"])
+    def governance() -> dict:
+        """Source rankings, which fields a steward may correct, and re-confirmation cadence."""
+        return prov.governance()
+
+    @app.put("/api/v1/sources/{name}", tags=["governance"])
+    def source_register(s: Svc, c: Cfg, name: str, body: SourceIn) -> dict:
+        """Register a source's category (hr, iam, cmdb, erp, catalog, spreadsheet), owner role and description."""
+        out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
+        prov.refresh_effective(s.store, c.instance_base)
+        return out
+
+    @app.get("/api/v1/conflicts", tags=["governance"])
+    def conflicts(s: Svc, type: str | None = None) -> list[dict]:
+        """Fields where sources state different values, with the value that wins."""
+        return prov.conflicts(s.store, type)
+
+    @app.get("/api/v1/attestations", tags=["governance"])
+    def review_queue(
+        s: Svc,
+        status: str = "unconfirmed",
+        type: str | None = None,
+        ownerRole: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Review queue: entities with fields in a status (unconfirmed, attested, disputed, expired)."""
+        return prov.review_queue(s.store, status=status, type_=type, owner_role=ownerRole, limit=limit)
+
+    @app.post("/api/v1/effective/rebuild", tags=["governance"])
+    def effective_rebuild(s: Svc, c: Cfg) -> dict:
+        """Recompute the effective model (e.g. after valid-until dates pass)."""
+        return prov.rebuild(s.store, c.instance_base)
+
+    @app.get("/api/v1/authorities/{rid}/confirmation", tags=["governance"])
+    def authority_confirmation(s: Svc, rid: str) -> dict:
+        """Whether an agent may rely on this authority: every fact behind it attested and current."""
+        return prov.authority_basis(s.store, rid)
+
+    @app.get("/api/v1/{type_}/{rid}/provenance", tags=["governance"])
+    def entity_provenance(s: Svc, type_: str, rid: str) -> dict:
+        """Why we believe this: per field, the winning source, its times and status, and every other claim."""
+        return prov.explain(s.store, type_, rid)
+
+    @app.post("/api/v1/{type_}/{rid}/attestations", status_code=201, tags=["governance"])
+    def entity_attest(s: Svc, c: Cfg, type_: str, rid: str, body: AttestationIn) -> dict:
+        """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values."""
+        return prov.attest(
+            s.store,
+            c.instance_base,
+            type_,
+            rid,
+            verdict=body.verdict,
+            attester=body.attester,
+            role=body.role,
+            fields=body.fields,
+            source=body.source,
+            note=body.note,
+        )
+
+    @app.post("/api/v1/{type_}/{rid}/corrections", status_code=201, tags=["governance"])
+    def entity_correct(s: Svc, c: Cfg, type_: str, rid: str, body: CorrectionIn):
+        """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested."""
+        try:
+            return prov.correct(
+                s.store,
+                c.instance_base,
+                c.ontology_dir,
+                type_,
+                rid,
+                values=body.values,
+                attester=body.attester,
+                role=body.role,
+                note=body.note,
+            )
+        except changesets.Conflict as exc:
+            return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
+
     @app.get("/api/v1/{type_}", tags=["entities"])
     def entity_list(s: Svc, c: Cfg, type_: str, source: str | None = None) -> list[dict]:
         """All entities of a type across the model, or in one source."""
         return changesets.list_entities(s.store, type_, c.instance_base, source)
 
     @app.get("/api/v1/{type_}/{rid}", tags=["entities"])
-    def entity_get(s: Svc, c: Cfg, type_: str, rid: str) -> dict:
-        return changesets.get_entity(s.store, type_, rid, c.instance_base)
+    def entity_get(s: Svc, c: Cfg, type_: str, rid: str, asOf: str | None = None) -> dict:
+        """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time."""
+        return changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf)
 
     @app.post("/api/v1/{type_}", tags=["entities"])
     def entity_create(s: Svc, c: Cfg, type_: str, source: str, entity: Annotated[dict, Body()]):

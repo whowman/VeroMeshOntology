@@ -21,6 +21,11 @@ the attestation workflow) writes through a changeset:
 
 Changesets and their items are stored in the RDF store, so they survive
 restarts and remain as an audit trail after commit.
+
+What the model believes is the *effective* model (provenance.py): per entity and
+field, one source's value by the precedence rules. Validation checks the
+effective model as it would be after the change, and commit records the
+source's claims (with history) and stores the new effective model.
 """
 
 from __future__ import annotations
@@ -37,9 +42,10 @@ from urllib.parse import quote
 
 from pyshacl import validate as shacl_validate
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
-from rdflib.namespace import RDF, XSD
+from rdflib.namespace import XSD
 
 from . import entities as E
+from . import provenance as P
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -112,35 +118,36 @@ def read_sources(store: RDFStore) -> dict[str, Graph]:
     return out
 
 
-def model_graph(store: RDFStore, source: str | None = None) -> Graph:
-    graphs = read_sources(store)
+def model_graph(store: RDFStore, source: str | None = None, *, base: str = "") -> Graph:
+    """One source's graph, or the effective model."""
     if source is not None:
-        return graphs.get(source_graph(source), Graph())
-    union = Graph()
-    for g in graphs.values():
-        union += g
-    return union
+        return read_sources(store).get(source_graph(source), Graph())
+    P.ensure_effective(store, base)
+    return P.effective_graph(store)
 
 
 def list_entities(store: RDFStore, type_: str, base: str, source: str | None = None) -> list[dict]:
     E.check_type(type_)
-    g = model_graph(store, source)
+    g = model_graph(store, source, base=base)
     return [E.to_entity(g, s, type_, base) for s in E.subjects_of_type(g, type_)]
 
 
-def get_entity(store: RDFStore, type_: str, rid: str, base: str) -> dict:
+def get_entity(store: RDFStore, type_: str, rid: str, base: str, as_of: str | None = None) -> dict:
     E.check_type(type_)
+    if as_of:
+        return P.as_of(store, type_, rid, as_of)
     subj = E.iri_for(base, rid)
-    graphs = read_sources(store)
-    union = Graph()
-    found_in = []
-    for iri, g in graphs.items():
-        if type_ in E.types_of(g, subj):
-            found_in.append(iri[len(SOURCE_GRAPH_BASE) :])
-        union += g
-    if not found_in:
+    g = model_graph(store, base=base)
+    if type_ not in E.types_of(g, subj):
         raise _not_found(f"No {type_} with ID '{rid}'.")
-    return {**E.to_entity(union, subj, type_, base), "sources": sorted(found_in)}
+    found_in = sorted({c.source for c in P.read_claims(store, entity=(type_, rid))})
+    if not found_in:  # claims not recorded yet (data from before provenance)
+        found_in = sorted(
+            iri[len(SOURCE_GRAPH_BASE) :]
+            for iri, sg in read_sources(store).items()
+            if type_ in E.types_of(sg, subj)
+        )
+    return {**E.to_entity(g, subj, type_, base), "sources": found_in}
 
 
 def source_version(store: RDFStore, source: str) -> str:
@@ -168,9 +175,14 @@ def list_sources(store: RDFStore) -> list[dict]:
         }} ORDER BY ?id
         """
     )
-    return [
+    reg = P.registry(store)
+    rows = [
         {
             "source": b["id"]["value"],
+            "category": reg.get(b["id"]["value"], {}).get("category")
+            or ("steward" if b["id"]["value"] == P.STEWARD_SOURCE else P.DEFAULT_CATEGORY),
+            "ownerRole": reg.get(b["id"]["value"], {}).get("ownerRole"),
+            "description": reg.get(b["id"]["value"], {}).get("description"),
             "kind": b["kind"]["value"],
             "graph": b["g"]["value"],
             "file": b.get("file", {}).get("value"),
@@ -181,6 +193,23 @@ def list_sources(store: RDFStore) -> list[dict]:
         }
         for b in res["results"]["bindings"]
     ]
+    loaded = {r["source"] for r in rows}
+    for name, info in sorted(reg.items()):
+        if name not in loaded:  # registered, nothing loaded yet
+            rows.append(
+                {
+                    "source": name,
+                    **info,
+                    "kind": None,
+                    "graph": source_graph(name),
+                    "file": None,
+                    "updatedAt": None,
+                    "facts": None,
+                    "changeset": None,
+                    "version": None,
+                }
+            )
+    return sorted(rows, key=lambda r: r["source"])
 
 
 # --------------------------------------------------------------------------- changeset storage
@@ -324,6 +353,30 @@ class Item:
     id: str
     op: str
     entity: dict
+    meta: dict | None = None  # observedAt, validFrom, validUntil
+
+
+TIME_KEYS = {"observedAt": "dateTime", "validFrom": "date", "validUntil": "date"}
+
+
+def _check_times(n: int, raw: dict) -> dict:
+    out = {}
+    for k, kind in TIME_KEYS.items():
+        v = raw.get(k)
+        if v in (None, ""):
+            continue
+        try:
+            if kind == "date":
+                datetime.fromisoformat(str(v)[:10])
+                out[k] = str(v)[:10]
+            else:
+                d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+                out[k] = (d if d.tzinfo else d.replace(tzinfo=UTC)).isoformat()
+        except ValueError as exc:
+            raise ValueError(f"Item {n}: {k} '{v}' is not an ISO {kind}.") from exc
+    if out.get("validFrom") and out.get("validUntil") and out["validUntil"] < out["validFrom"]:
+        raise ValueError(f"Item {n}: validUntil is before validFrom.")
+    return out
 
 
 def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
@@ -361,6 +414,9 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
         g.add((node, VM.itemId, Literal(rid)))
         g.add((node, VM.op, Literal(op)))
         g.add((node, VM.payload, Literal(json.dumps({**entity, "id": rid}, default=str))))
+        times = _check_times(n, raw)
+        if times:
+            g.add((node, VM.itemMeta, Literal(json.dumps(times))))
     if nodes:
         for i in range(0, len(nodes), 200):
             values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
@@ -375,11 +431,18 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
 
 def _load_items(store: RDFStore, cs: str) -> list[Item]:
     res = store.query(
-        f"""SELECT ?t ?i ?op ?p WHERE {{ GRAPH <{_items_graph(cs)}> {{
-              ?n <{VM.itemType}> ?t ; <{VM.itemId}> ?i ; <{VM.op}> ?op ; <{VM.payload}> ?p }} }}"""
+        f"""SELECT ?t ?i ?op ?p ?m WHERE {{ GRAPH <{_items_graph(cs)}> {{
+              ?n <{VM.itemType}> ?t ; <{VM.itemId}> ?i ; <{VM.op}> ?op ; <{VM.payload}> ?p
+              OPTIONAL {{ ?n <{VM.itemMeta}> ?m }} }} }}"""
     )
     return [
-        Item(b["t"]["value"], b["i"]["value"], b["op"]["value"], json.loads(b["p"]["value"]))
+        Item(
+            b["t"]["value"],
+            b["i"]["value"],
+            b["op"]["value"],
+            json.loads(b["p"]["value"]),
+            json.loads(b["m"]["value"]) if "m" in b else None,
+        )
         for b in res["results"]["bindings"]
     ]
 
@@ -433,6 +496,46 @@ class _Plan:
     target: Graph
     errors: list[dict]
     report: dict
+    effective: Graph | None = None
+    item_meta: dict | None = None
+
+
+def _effective(
+    graphs: dict[str, Graph],
+    base: str,
+    *,
+    stored: dict,
+    atts: list,
+    cats: dict[str, str],
+    target_source: str | None = None,
+    item_meta: dict | None = None,
+):
+    """The effective model for a set of source graphs. Claims keep their recorded times
+    when their values are unchanged; the changeset's items supply new ones."""
+    at = now()
+    claims = []
+    for iri, g in graphs.items():
+        source = iri[len(SOURCE_GRAPH_BASE) :]
+        for key, values in P.extract(g, base).items():
+            old = stored.get((source, *key))
+            m = (item_meta or {}).get(key, {}) if source == target_source else {}
+            same = old is not None and P.value_hash(old.values) == P.value_hash(values)
+            claims.append(
+                P.Claim(
+                    source=source,
+                    type=key[0],
+                    id=key[1],
+                    values=values,
+                    category=cats.get(source, P.DEFAULT_CATEGORY),
+                    observed_at=m.get("observedAt") or (old.observed_at if same else at),
+                    valid_from=m.get("validFrom", old.valid_from if same else None),
+                    valid_until=m.get("validUntil", old.valid_until if same else None),
+                )
+            )
+    # Validation checks structure, so facts outside their valid period still count here.
+    resolved = P.resolve(claims, atts, ignore_validity=True)
+    graph, errors = P.to_graph(resolved, base)
+    return graph, errors, resolved
 
 
 def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_dir: str) -> _Plan:
@@ -446,11 +549,15 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
     target = Graph()
     if meta["mode"] == "merge":
         target += current
-    # Remove the old state of every entity this changeset touches (merge mode).
+    # Remove the old state of every entity this changeset touches (merge mode). Triples
+    # with the entity as subject but an inverse field's property belong to the other
+    # entity (a role "holds" an authority: that link is the authority's holder field).
+    inverse_props = {c.prop for sh in E.TYPES.values() for c in sh.cols if c.inverse}
     for it in items:
         subj = E.iri_for(base, it.id)
         for t in list(target.triples((subj, None, None))):
-            target.remove(t)
+            if t[1] not in inverse_props:
+                target.remove(t)
         for col in E.TYPES[it.type].cols:
             if col.inverse:
                 for t in list(target.triples((None, col.prop, subj))):
@@ -485,36 +592,38 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
             )
         index[it.id] = it.type
 
+    partial = meta["source"] == P.STEWARD_SOURCE
     for it in upserts:
-        conv = E.to_triples(it.type, it.entity, base, index.get)
+        conv = E.to_triples(it.type, it.entity, base, index.get, partial=partial)
         errors.extend(e.as_dict() for e in conv.errors)
         for t in conv.triples:
             target.add(t)
 
-    after = others + target
-    # References to instances that no longer exist anywhere (e.g. a replace that
+    stored = {(c.source, c.type, c.id): c for c in P.read_claims(store)}
+    atts = P.read_attestations(store)
+    cats = P.categories(store)
+    item_meta = {(it.type, it.id): it.meta or {} for it in upserts}
+    after, ref_errors, resolved = _effective(
+        {**graphs, target_iri: target},
+        base,
+        stored=stored,
+        atts=atts,
+        cats=cats,
+        target_source=meta["source"],
+        item_meta=item_meta,
+    )
+    # References to instances that no longer exist in the model (e.g. a replace that
     # drops a role other sources still point at). Explicit deletes report below.
-    deleted = {E.iri_for(base, it.id) for it in deletes}
-    seen_dangling: set[tuple] = set()
-    for s, p, o in after:
-        if not isinstance(o, URIRef) or not str(o).startswith(base) or o in deleted or p == RDF.type:
+    deleted_ids = {it.id for it in deletes}
+    still_referenced: dict[str, list[dict]] = {}
+    for e in ref_errors:
+        m = re.search(r"No entity with ID '([^']*)'", e["message"])
+        if m and m.group(1) in deleted_ids:
+            still_referenced.setdefault(m.group(1), []).append(e)
             continue
-        if E.types_of(after, o) or (s, p, o) in seen_dangling:
-            continue
-        seen_dangling.add((s, p, o))
-        s_types = E.types_of(after, s)
-        key = next(
-            (E.field_key(c) for t in s_types for c in E.TYPES[t].cols if c.prop == p and not c.inverse),
-            E.local_id("", p),
-        )
-        errors.append(
-            E.FieldError(
-                s_types[0] if s_types else "entity",
-                E.local_id(base, s),
-                key,
-                f"References '{E.local_id(base, o)}', which no longer exists after this change.",
-            ).as_dict()
-        )
+        if m:
+            e = {**e, "message": f"References '{m.group(1)}', which no longer exists after this change."}
+        errors.append(e)
     for it in deletes if meta["mode"] == "merge" else []:
         subj = E.iri_for(base, it.id)
         if it.type not in E.types_of(current, subj):
@@ -526,14 +635,10 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
             continue
         if it.type in E.types_of(after, subj):
             continue  # still defined by another source
-        for s, p, _ in after.triples((None, None, subj)):
-            ref_types = E.types_of(after, s)
+        for e in still_referenced.get(it.id, []):
             errors.append(
                 E.FieldError(
-                    it.type,
-                    it.id,
-                    "id",
-                    f"Still referenced by {ref_types[0] if ref_types else 'entity'} '{E.local_id(base, s)}' ({E.local_id('', p)}).",
+                    it.type, it.id, "id", f"Still referenced by {e['type']} '{e['id']}' ({e['field']})."
                 ).as_dict()
             )
 
@@ -556,7 +661,8 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
         report["valid"] = False
         return _Plan(target, errors, report)
 
-    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(others + current, ontology_dir)}
+    before, _, _ = _effective({**graphs, target_iri: current}, base, stored=stored, atts=atts, cats=cats)
+    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir)}
     touched = {E.iri_for(base, it.id) for it in upserts}
 
     def describe(sev: str, focus, message: str) -> dict:
@@ -578,7 +684,8 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
         report[k].sort(key=lambda f: (f["type"] or "", f["id"], f["message"]))
         report["summary"][k] = len(report[k])
     report["valid"] = not report["violations"]
-    return _Plan(target, errors, report)
+    report["summary"]["conflicts"] = sum(len(r.conflicts) for r in resolved.values())
+    return _Plan(target, errors, report, effective=after, item_meta=item_meta)
 
 
 def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
@@ -644,7 +751,12 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
         }} }}
         """
     )
-    report = {**plan.report, "committed": True, "facts": len(plan.target), "version": cs}
+    claims = P.record_source(
+        store, meta["source"], P.extract(plan.target, base), plan.item_meta or {}, changeset=cs, at=at
+    )
+    P.migrate(store, base)  # sources loaded before provenance existed get their claims
+    P.refresh_effective(store, base)  # from the recorded claims, so valid times apply
+    report = {**plan.report, "committed": True, "facts": len(plan.target), "version": cs, "claims": claims}
     _set_status(store, cs, "committed", report, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
     return report
 

@@ -42,13 +42,25 @@ class Item:
     entity: dict
     op: str = "upsert"
     ref: str | None = None  # the record it came from
+    # Provenance (docs/provenance.md): when the source stated it, and when it holds.
+    observed_at: str | None = None
+    valid_from: str | None = None
+    valid_until: str | None = None
 
     @property
     def id(self) -> str:
         return str(self.entity.get("id", ""))
 
     def wire(self) -> dict:
-        return {"type": self.type, "op": self.op, "entity": self.entity}
+        out = {"type": self.type, "op": self.op, "entity": self.entity}
+        for key, value in (
+            ("observedAt", self.observed_at),
+            ("validFrom", self.valid_from),
+            ("validUntil", self.valid_until),
+        ):
+            if value:
+                out[key] = value
+        return out
 
 
 @dataclass

@@ -1,0 +1,56 @@
+@prefix vmp:  <https://veromesh.ai/ontology/provenance#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+# Provenance of facts in the organizational model (docs/provenance.md).
+# Aligned with W3C PROV-O; nothing is imported at runtime.
+
+<https://veromesh.ai/ontology/provenance> a owl:Ontology ;
+    rdfs:label "VeroMesh provenance" ;
+    dcterms:description "Claims, attestations and sources: who says what about the organizational model, since when, for what period, and whether its owner has confirmed it." ;
+    owl:versionInfo "1.0" .
+
+vmp:Claim a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Claim" ;
+    rdfs:comment "What one source says about one entity: its field values, when the source stated them and when they hold. Superseded claims are kept." .
+
+vmp:Attestation a owl:Class ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "Attestation" ;
+    rdfs:comment "A person, acting in a role, confirming or disputing fields of one source's claim. Pins a hash of each value it covered." .
+
+vmp:Source a owl:Class ;
+    rdfs:subClassOf prov:SoftwareAgent ;
+    rdfs:label "Source" ;
+    rdfs:comment "A system or channel that states facts (HR, IAM, CMDB, ERP, catalog, spreadsheet, steward), with a category used by the precedence rules." .
+
+vmp:source a owl:DatatypeProperty ; rdfs:label "source" ; rdfs:range xsd:string ;
+    rdfs:comment "Name of the source that stated the claim, or whose claim an attestation is about." .
+vmp:entityType a owl:DatatypeProperty ; rdfs:label "entity type" ; rdfs:range xsd:string .
+vmp:entityId a owl:DatatypeProperty ; rdfs:label "entity ID" ; rdfs:range xsd:string .
+vmp:entity a owl:ObjectProperty ; rdfs:label "entity" ; rdfs:domain vmp:Attestation .
+vmp:values a owl:DatatypeProperty ; rdfs:label "values" ; rdfs:domain vmp:Claim ; rdfs:range xsd:string ;
+    rdfs:comment "The asserted field values, canonical JSON." .
+vmp:valueHash a owl:DatatypeProperty ; rdfs:label "value hash" ; rdfs:domain vmp:Claim ; rdfs:range xsd:string .
+vmp:observedAt a owl:DatatypeProperty ; rdfs:label "observed at" ; rdfs:domain vmp:Claim ; rdfs:range xsd:dateTime ;
+    rdfs:comment "When the source last stated the claim (transaction time)." .
+vmp:validFrom a owl:DatatypeProperty ; rdfs:label "valid from" ; rdfs:domain vmp:Claim ; rdfs:range xsd:date .
+vmp:validUntil a owl:DatatypeProperty ; rdfs:label "valid until" ; rdfs:domain vmp:Claim ; rdfs:range xsd:date .
+vmp:fields a owl:DatatypeProperty ; rdfs:label "fields" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string .
+vmp:fieldHashes a owl:DatatypeProperty ; rdfs:label "field hashes" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string ;
+    rdfs:comment "JSON object: field name to the hash of the value that was confirmed or disputed." .
+vmp:verdict a owl:DatatypeProperty ; rdfs:label "verdict" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string .
+vmp:attestedBy a owl:DatatypeProperty ; rdfs:label "attested by" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string ;
+    rdfs:comment "ID of the person in the organizational model." .
+vmp:inRole a owl:DatatypeProperty ; rdfs:label "in role" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string ;
+    rdfs:comment "ID of the role the person acted in." .
+vmp:expiresAt a owl:DatatypeProperty ; rdfs:label "expires at" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:dateTime .
+vmp:note a owl:DatatypeProperty ; rdfs:label "note" ; rdfs:range xsd:string .
+vmp:name a owl:DatatypeProperty ; rdfs:label "name" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .
+vmp:category a owl:DatatypeProperty ; rdfs:label "category" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .
+vmp:ownerRole a owl:DatatypeProperty ; rdfs:label "owner role" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .
+vmp:description a owl:DatatypeProperty ; rdfs:label "description" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .

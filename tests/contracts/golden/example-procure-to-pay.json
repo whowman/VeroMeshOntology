@@ -19,6 +19,7 @@
   "facts": 155,
   "findings": [],
   "summary": {
+    "conflicts": 0,
     "deletes": 0,
     "errors": 0,
     "upserts": 26,

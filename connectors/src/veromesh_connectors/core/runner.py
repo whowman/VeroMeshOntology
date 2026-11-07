@@ -80,7 +80,7 @@ class Runner:
                 connector.name,
                 opts.source,
                 opts.mode,
-                sorted((i.type, i.op, json.dumps(i.entity, sort_keys=True)) for i in items),
+                sorted((i.type, i.op, json.dumps(i.wire(), sort_keys=True)) for i in items),
             ],
             sort_keys=True,
         )

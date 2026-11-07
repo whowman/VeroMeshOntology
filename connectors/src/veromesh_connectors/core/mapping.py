@@ -23,6 +23,9 @@ Two reusable mappers:
             name: "{Job Title}"
       values:
         systems.criticality: {"Tier 1": critical, "Tier 2": high}
+
+A rule may also say when the source stated the record and when it holds
+(provenance), e.g. ``observedAt: "{Last Modified}"``, ``validFrom``, ``validUntil``.
 """
 
 from __future__ import annotations
@@ -159,5 +162,19 @@ class DeclarativeMapper:
                 entity.setdefault(
                     "id", f"{entity.get(parent, 'row')}.{t['type']}.{ID_SAFE.sub('-', record.ref)}"
                 )
-            items.append(Item(type=t["type"], entity=entity, ref=record.ref))
+            times = {
+                k: self._render(rule[k], record.data, record.ref) or None
+                for k in ("observedAt", "validFrom", "validUntil")
+                if rule.get(k)
+            }
+            items.append(
+                Item(
+                    type=t["type"],
+                    entity=entity,
+                    ref=record.ref,
+                    observed_at=times.get("observedAt"),
+                    valid_from=times.get("validFrom"),
+                    valid_until=times.get("validUntil"),
+                )
+            )
         return items

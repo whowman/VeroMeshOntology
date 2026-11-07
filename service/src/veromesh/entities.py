@@ -533,8 +533,11 @@ def entity_id(type_: str, entity: dict) -> str:
     return str(rid or "")
 
 
-def to_triples(type_: str, entity: dict, base: str, resolve) -> Converted:
-    """Convert one JSON entity. ``resolve(id) -> type name | None`` checks references."""
+def to_triples(type_: str, entity: dict, base: str, resolve, *, partial: bool = False) -> Converted:
+    """Convert one JSON entity. ``resolve(id) -> type name | None`` checks references.
+
+    ``partial``: the entity states only some fields (a steward correction, one
+    source's view of a field-merged entity); missing required fields are not errors."""
     sheet = check_type(type_)
     rid = entity_id(type_, entity)
     subj = iri_for(base, rid) if rid else URIRef(base + "invalid")
@@ -563,7 +566,7 @@ def to_triples(type_: str, entity: dict, base: str, resolve) -> Converted:
             err(key, "Only one value allowed.")
             vals = vals[:1]
         if not vals:
-            if col.required:
+            if col.required and not partial:
                 err(key, "Required value missing.")
             continue
         for v in vals:
@@ -675,7 +678,8 @@ def to_entity(graph: Graph, subject, type_: str, base: str) -> dict:
         elif col.kind == "bool":
             out = [bool(v.toPython()) for v in vals]
         elif col.kind == "decimal":
-            out = sorted(str(v) for v in vals)
+            # One canonical form: stores may round-trip 50000.00 as 50000.
+            out = sorted(format(Decimal(str(v)).normalize(), "f") for v in vals)
         else:
             out = sorted(str(v) for v in vals)
         if col.multi:

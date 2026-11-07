@@ -484,6 +484,158 @@
       ]
     }
   },
+  "ontology/shapes/veromesh-prov-shapes.ttl": {
+    "vmps:AttestationShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "datatype": "xsd:dateTime",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "prov:endedAtTime"
+        },
+        {
+          "datatype": "xsd:dateTime",
+          "maxCount": "1",
+          "path": "vmp:expiresAt"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:attestedBy"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:entityId"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:entityType"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:fieldHashes"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:inRole"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:source"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:verdict"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmp:Attestation"
+      ]
+    },
+    "vmps:ClaimShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmp:validFrom"
+        },
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmp:validUntil"
+        },
+        {
+          "datatype": "xsd:dateTime",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "prov:generatedAtTime"
+        },
+        {
+          "datatype": "xsd:dateTime",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:observedAt"
+        },
+        {
+          "datatype": "xsd:dateTime",
+          "maxCount": "1",
+          "path": "prov:invalidatedAtTime"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:entityId"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:entityType"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:source"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:valueHash"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:values"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 1,
+      "target": [
+        "vmp:Claim"
+      ]
+    },
+    "vmps:SourceShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:name"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmp:category"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 0,
+      "target": [
+        "vmp:Source"
+      ]
+    }
+  },
   "ontology/veromesh-core.ttl": {
     "classes": {
       "vm:DataAsset": []
@@ -983,6 +1135,191 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:BusinessCapability"
+        ]
+      }
+    }
+  },
+  "ontology/veromesh-prov.ttl": {
+    "classes": {
+      "vmp:Attestation": [
+        "prov:Activity"
+      ],
+      "vmp:Claim": [
+        "prov:Entity"
+      ],
+      "vmp:Source": [
+        "prov:SoftwareAgent"
+      ]
+    },
+    "properties": {
+      "vmp:attestedBy": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:category": {
+        "domain": [
+          "vmp:Source"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:description": {
+        "domain": [
+          "vmp:Source"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:entity": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": []
+      },
+      "vmp:entityId": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:entityType": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:expiresAt": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:dateTime"
+        ]
+      },
+      "vmp:fieldHashes": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:fields": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:inRole": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:name": {
+        "domain": [
+          "vmp:Source"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:note": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:observedAt": {
+        "domain": [
+          "vmp:Claim"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:dateTime"
+        ]
+      },
+      "vmp:ownerRole": {
+        "domain": [
+          "vmp:Source"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:source": {
+        "domain": [],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:validFrom": {
+        "domain": [
+          "vmp:Claim"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
+      "vmp:validUntil": {
+        "domain": [
+          "vmp:Claim"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
+      "vmp:valueHash": {
+        "domain": [
+          "vmp:Claim"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:values": {
+        "domain": [
+          "vmp:Claim"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:verdict": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
         ]
       }
     }

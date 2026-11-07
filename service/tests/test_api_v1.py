@@ -211,3 +211,10 @@ def test_run_history(client, example):
     assert [r["status"] for r in runs] == ["committed", "committed"]
     assert runs[0]["mode"] == "merge" and runs[0]["baseVersion"] == runs[1]["id"]
     assert client.get(f"{API}/changesets", params={"status": "open"}).json() == []
+
+
+def test_updating_a_role_keeps_the_authorities_it_holds(client, example):
+    load(client, example)
+    r = client.put(f"{API}/roles/ApManager", params={"source": "p2p"}, json={"name": "AP manager"})
+    assert r.status_code == 200, r.json()
+    assert client.get(f"{API}/authorities/ApApprovalAuthority").json()["holder"] == "ApManager"

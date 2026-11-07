@@ -1,0 +1,51 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix vmp:  <https://veromesh.ai/ontology/provenance#> .
+@prefix vmps: <https://veromesh.ai/shapes/provenance#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# Validation rules for provenance records (docs/provenance.md).
+
+vmps:ClaimShape a sh:NodeShape ;
+    sh:targetClass vmp:Claim ;
+    sh:property [ sh:path vmp:source ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "A claim names exactly one source." ] ;
+    sh:property [ sh:path vmp:entityType ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:entityId ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:values ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:valueHash ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:observedAt ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ;
+                  sh:message "A claim records exactly one observed time." ] ;
+    sh:property [ sh:path prov:generatedAtTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path prov:invalidatedAtTime ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path vmp:validFrom ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:property [ sh:path vmp:validUntil ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:sparql [
+        sh:message "Valid until is before valid from." ;
+        sh:select """
+            PREFIX vmp: <https://veromesh.ai/ontology/provenance#>
+            SELECT $this WHERE { $this vmp:validFrom ?f ; vmp:validUntil ?u . FILTER(?u < ?f) }
+        """
+    ] .
+
+vmps:AttestationShape a sh:NodeShape ;
+    sh:targetClass vmp:Attestation ;
+    sh:property [ sh:path vmp:entityType ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:entityId ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:source ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:fieldHashes ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "An attestation pins the hash of each value it covers." ] ;
+    sh:property [ sh:path vmp:verdict ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( "attested" "disputed" ) ] ;
+    sh:property [ sh:path prov:endedAtTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path vmp:attestedBy ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "An attestation names the person who made it." ] ;
+    sh:property [ sh:path vmp:inRole ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "An attestation names the role the person acted in." ] ;
+    sh:property [ sh:path vmp:expiresAt ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] .
+
+vmps:SourceShape a sh:NodeShape ;
+    sh:targetClass vmp:Source ;
+    sh:property [ sh:path vmp:name ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:category ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:in ( "hr" "iam" "cmdb" "erp" "catalog" "spreadsheet" "steward" ) ;
+                  sh:message "Unknown source category." ] .
