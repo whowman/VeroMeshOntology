@@ -1,0 +1,5 @@
+# Replication off: one Fuseki takes reads and writes, no Kafka needed (the
+# shape of the local stack; fine for a trial).
+fuseki:
+  replication:
+    enabled: false

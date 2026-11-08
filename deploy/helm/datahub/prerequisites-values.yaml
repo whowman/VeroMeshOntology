@@ -1,7 +1,9 @@
 # Overlay for DataHub's official prerequisites chart (datahub/datahub-prerequisites,
 # pinned in deploy/helm/versions.env). Same storage as the local stack:
 # PostgreSQL and OpenSearch. Kafka replaces pgQueue on Kubernetes, as the
-# reference architecture plans for production.
+# reference architecture plans for production; it also carries the VeroMesh
+# knowledge graph's change log (topic veromesh.graph) from the writer Fuseki to
+# its read replicas.
 #
 #   kubectl create secret generic postgresql-secrets \
 #     --from-literal=postgres-password=... --from-literal=replication-password=... --from-literal=password=...
@@ -28,3 +30,14 @@ opensearch:
 
 kafka:
   enabled: true
+  controller:
+    # The chart's single-node settings, restated (this string replaces the
+    # chart's), plus what Kafka transactions need on one broker: the VeroMesh
+    # writer publishes each commit in a transaction.
+    extraConfig: |
+      default.replication.factor=1
+      offsets.topic.replication.factor=1
+      transaction.state.log.replication.factor=1
+      transaction.state.log.min.isr=1
+      min.insync.replicas=1
+      message.max.bytes=5242880

@@ -13,16 +13,28 @@ Backends share the ``RDFStore`` protocol:
     fuseki:http://fuseki:3030/veromesh     (base URL of the Fuseki dataset)
     oxigraph:http://oxigraph:7878
 
+``VEROMESH_RDF_STORE_READ_FALLBACK`` (optional) is a second Fuseki dataset URL
+for reads only: the read replicas of a replicated install. Reads go to the main
+store, which has every write the service has made; only when it is unreachable
+or unavailable (for example while the writer Fuseki restarts) are they sent to
+the fallback, which may be a moment behind. Writes never fall back.
+
 Query results are always returned as SPARQL 1.1 JSON results (``dict``).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Protocol
 
 import httpx
 import pyoxigraph as ox
+
+log = logging.getLogger(__name__)
+
+# Responses meaning "the server is not available right now", as opposed to "bad request".
+UNAVAILABLE = frozenset({502, 503, 504})
 
 LIST_GRAPHS_QUERY = "SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g"
 
@@ -87,10 +99,12 @@ class SparqlHttpStore:
         update_url: str,
         graph_store_url: str,
         client: httpx.Client | None = None,
+        fallback_query_url: str | None = None,
     ) -> None:
         self.query_url = query_url
         self.update_url = update_url
         self.graph_store_url = graph_store_url
+        self.fallback_query_url = fallback_query_url
         self._http = client or httpx.Client(timeout=30.0)
 
     @staticmethod
@@ -112,14 +126,33 @@ class SparqlHttpStore:
         self._check(resp)
 
     def query(self, sparql: str) -> dict[str, Any]:
-        resp = self._http.post(
-            self.query_url,
+        if not self.fallback_query_url:
+            return self._query(self.query_url, sparql)
+        try:
+            resp = self._post_query(self.query_url, sparql)
+        except httpx.TransportError as e:
+            log.warning("RDF store unreachable (%s); reading from %s", e, self.fallback_query_url)
+            return self._query(self.fallback_query_url, sparql)
+        if resp.status_code in UNAVAILABLE:
+            log.warning(
+                "RDF store unavailable (%s); reading from %s", resp.status_code, self.fallback_query_url
+            )
+            return self._query(self.fallback_query_url, sparql)
+        self._check(resp)
+        return resp.json()
+
+    def _post_query(self, url: str, sparql: str) -> httpx.Response:
+        return self._http.post(
+            url,
             content=sparql.encode("utf-8"),
             headers={
                 "Content-Type": "application/sparql-query",
                 "Accept": "application/sparql-results+json",
             },
         )
+
+    def _query(self, url: str, sparql: str) -> dict[str, Any]:
+        resp = self._post_query(url, sparql)
         self._check(resp)
         return resp.json()
 
@@ -135,14 +168,21 @@ class SparqlHttpStore:
         return _graph_names(self.query(LIST_GRAPHS_QUERY))
 
 
-def fuseki_store(dataset_url: str, *, client: httpx.Client | None = None) -> SparqlHttpStore:
-    """Apache Jena Fuseki dataset, e.g. ``http://fuseki:3030/veromesh``."""
+def fuseki_store(
+    dataset_url: str, *, client: httpx.Client | None = None, read_fallback: str | None = None
+) -> SparqlHttpStore:
+    """Apache Jena Fuseki dataset, e.g. ``http://fuseki:3030/veromesh``.
+
+    ``read_fallback``: another Fuseki dataset URL (a read replica) for queries
+    when this one is unavailable.
+    """
     base = dataset_url.rstrip("/")
     return SparqlHttpStore(
         query_url=f"{base}/query",
         update_url=f"{base}/update",
         graph_store_url=f"{base}/data",
         client=client,
+        fallback_query_url=f"{read_fallback.rstrip('/')}/query" if read_fallback else None,
     )
 
 
@@ -157,13 +197,18 @@ def oxigraph_store(base_url: str, *, client: httpx.Client | None = None) -> Spar
     )
 
 
-def make_store(spec: str) -> RDFStore:
+def make_store(spec: str, read_fallback: str | None = None) -> RDFStore:
+    if read_fallback and not read_fallback.startswith(("http://", "https://")):
+        raise ValueError(
+            f"Unsupported VEROMESH_RDF_STORE_READ_FALLBACK value {read_fallback!r}; "
+            "expected a Fuseki dataset URL (http:// or https://)"
+        )
     if spec == "memory":
         return MemoryStore()
     kind, _, url = spec.partition(":")
     if url.startswith(("http://", "https://")):
         if kind == "fuseki":
-            return fuseki_store(url)
+            return fuseki_store(url, read_fallback=read_fallback or None)
         if kind == "oxigraph":
             return oxigraph_store(url)
     raise ValueError(

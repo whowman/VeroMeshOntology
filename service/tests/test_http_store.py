@@ -122,3 +122,71 @@ def test_changesets_against_real_fuseki():
     r = client.put("/api/v1/roles/Treasurer", params={"source": "p2p-fuseki"}, json={"name": "Treasurer"})
     assert r.status_code == 200, r.json()
     assert client.get("/api/v1/changesets/" + cs).json()["status"] == "committed"
+
+
+# ---------------------------------------------------------------------------- read fallback
+
+
+def fallback_store(primary):
+    """A Fuseki store with a read replica; ``primary`` answers the main store's requests."""
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        calls.append((host, request.url.path))
+        if host == "writer":
+            return primary(request)
+        return httpx.Response(200, json=RESULTS)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    store = fuseki_store(
+        "http://writer:3030/veromesh", client=client, read_fallback="http://replicas:3030/veromesh/"
+    )
+    return store, calls
+
+
+def test_reads_use_the_writer_while_it_is_up():
+    store, calls = fallback_store(lambda r: httpx.Response(200, json=RESULTS))
+    assert store.list_graphs() == ["x:g"]
+    assert calls == [("writer", "/veromesh/query")]
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_reads_fall_back_to_the_replicas_when_the_writer_is_unavailable(status):
+    store, calls = fallback_store(lambda r: httpx.Response(status, text="restarting"))
+    assert store.list_graphs() == ["x:g"]
+    assert calls == [("writer", "/veromesh/query"), ("replicas", "/veromesh/query")]
+
+
+def test_reads_fall_back_to_the_replicas_when_the_writer_is_unreachable():
+    def refuse(request):
+        raise httpx.ConnectError("connection refused", request=request)
+
+    store, calls = fallback_store(refuse)
+    assert store.list_graphs() == ["x:g"]
+    assert calls[-1] == ("replicas", "/veromesh/query")
+
+
+def test_bad_queries_do_not_fall_back():
+    store, calls = fallback_store(lambda r: httpx.Response(400, text="Parse error"))
+    with pytest.raises(StoreRequestError):
+        store.query("SELEC nonsense")
+    assert calls == [("writer", "/veromesh/query")]
+
+
+def test_writes_never_fall_back():
+    store, calls = fallback_store(lambda r: httpx.Response(503, text="restarting"))
+    with pytest.raises(httpx.HTTPStatusError):
+        store.update("INSERT DATA { <a:s> <a:p> <a:o> }")
+    with pytest.raises(httpx.HTTPStatusError):
+        store.load_turtle("<a:s> <a:p> <a:o> .", "https://example.com/g")
+    assert {host for host, _ in calls} == {"writer"}
+
+
+def test_make_store_takes_a_read_fallback():
+    store = make_store("fuseki:http://writer:3030/veromesh", "http://replicas:3030/veromesh")
+    assert isinstance(store, SparqlHttpStore)
+    assert store.fallback_query_url == "http://replicas:3030/veromesh/query"
+    assert make_store("fuseki:http://writer:3030/veromesh").fallback_query_url is None
+    with pytest.raises(ValueError, match="READ_FALLBACK"):
+        make_store("fuseki:http://writer:3030/veromesh", "replicas:3030")

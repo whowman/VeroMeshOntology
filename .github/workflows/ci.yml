@@ -34,11 +34,12 @@ jobs:
       - run: scripts/test.sh quick --local --strict
 
   integration:
-    # Service and connector suites on a real Fuseki; container images.
+    # Service and connector suites on a real Fuseki; container images; the
+    # Fuseki writer module's own tests.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test.sh fuseki images datahub-frontend --strict
+      - run: scripts/test.sh fuseki-replication fuseki images datahub-frontend --strict
       - uses: actions/upload-artifact@v4
         if: always()
         with:

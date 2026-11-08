@@ -317,6 +317,8 @@ def start_fuseki(run: Run) -> str | None:
             "-q",
             "--build-arg",
             f"JENA_VERSION={env.get('JENA_VERSION', '')}",
+            "--build-arg",
+            f"FUSEKI_KAFKA_VERSION={env.get('FUSEKI_KAFKA_VERSION', '')}",
             "-t",
             tag,
             str(ROOT / "deploy/fuseki"),

@@ -1,5 +1,6 @@
 # Used by the k8s suite (tests/k8s/kind_smoke.sh): images loaded into kind,
-# small requests so it fits a CI runner, no DataHub in the cluster.
+# small requests so it fits a CI runner, no DataHub in the cluster. Replication
+# goes through the single-node Kafka the smoke test starts (service "kafka").
 api:
   image:
     tag: test
@@ -19,3 +20,8 @@ fuseki:
   resources:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 1Gi}
+  replication:
+    replicas: 2
+    kafka:
+      bootstrapServers: kafka:9092
+      replicationFactor: 1

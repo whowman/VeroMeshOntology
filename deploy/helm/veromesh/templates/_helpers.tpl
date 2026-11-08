@@ -24,6 +24,19 @@
 {{- printf "%s-fuseki" (include "veromesh.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "veromesh.fusekiReplicaName" -}}
+{{- printf "%s-fuseki-replica" (include "veromesh.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/* Service in front of the read replicas */}}
+{{- define "veromesh.fusekiReplicasService" -}}
+{{- printf "%s-fuseki-replicas" (include "veromesh.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "veromesh.replicated" -}}
+{{- if and .Values.fuseki.enabled .Values.fuseki.replication.enabled }}true{{ end }}
+{{- end }}
+
 {{- define "veromesh.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
 {{- default (include "veromesh.fullname" .) .Values.serviceAccount.name }}
@@ -57,6 +70,11 @@ fuseki:http://{{ include "veromesh.fusekiName" . }}:3030/{{ .Values.fuseki.datas
 {{- else -}}
 {{- required "store.url is required when fuseki.enabled is false" .Values.store.url -}}
 {{- end -}}
+{{- end }}
+
+{{/* Read replicas, for the service's reads while the writer is unavailable (VEROMESH_RDF_STORE_READ_FALLBACK) */}}
+{{- define "veromesh.readFallback" -}}
+http://{{ include "veromesh.fusekiReplicasService" . }}:3030/{{ .Values.fuseki.dataset }}
 {{- end }}
 
 {{/* Fuseki ping URL for the service's wait-for-store init container */}}

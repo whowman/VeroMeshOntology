@@ -20,8 +20,16 @@ Create a token in DataHub (Settings > Access Tokens), then:
   kubectl -n {{ .Release.Namespace }} create secret generic veromesh-datahub --from-literal=token=<token>
   helm upgrade {{ .Release.Name }} <chart> --reuse-values --set api.datahub.existingSecret=veromesh-datahub
 {{- end }}
+{{- if include "veromesh.replicated" . }}
+Read replicas:   {{ include "veromesh.readFallback" . }} ({{ .Values.fuseki.replication.replicas }}, used while the writer is unavailable)
+Change log:      Kafka topic {{ .Values.fuseki.replication.kafka.topic }} at {{ .Values.fuseki.replication.kafka.bootstrapServers }}
+{{- end }}
 {{- if and .Values.fuseki.enabled .Values.fuseki.persistence.enabled }}
 
 The model is stored on the PersistentVolumeClaim data-{{ include "veromesh.fusekiName" . }}-0,
 which is kept when the release is uninstalled.
+{{- if include "veromesh.replicated" . }}
+Each replica keeps a copy on data-{{ include "veromesh.fusekiReplicaName" . }}-<n>; delete one to have that
+replica rebuild from the Kafka topic. The topic is the record of every change: keep it.
+{{- end }}
 {{- end }}

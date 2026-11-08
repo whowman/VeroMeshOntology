@@ -132,7 +132,7 @@ SUITES: list[Suite] = [
         where="host",
         description="Shell scripts parse (bash -n)",
         steps=(
-            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh branding/datahub/*.sh deploy/helm/*.sh; do bash -n "$f" || exit 1; done',
+            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh branding/datahub/*.sh deploy/helm/*.sh deploy/fuseki/*.sh; do bash -n "$f" || exit 1; done',
         ),
     ),
     Suite(
@@ -173,6 +173,19 @@ SUITES: list[Suite] = [
         ),
     ),
     Suite(
+        name="fuseki-replication",
+        component="deploy",
+        tier="integration",
+        where="host",
+        needs=frozenset({"docker"}),
+        description="Fuseki writer module (publishes commits to Kafka): compiles and passes its tests in the image build",
+        steps=(
+            "source deploy/versions.env && docker build --progress=plain --target build"
+            ' --build-arg JENA_VERSION="$JENA_VERSION" --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION"'
+            " -t veromesh/fuseki-build:test deploy/fuseki 2>&1 | grep -E 'Tests run:|BUILD|ERROR|FAIL'",
+        ),
+    ),
+    Suite(
         name="datahub-frontend",
         component="branding",
         tier="integration",
@@ -187,7 +200,7 @@ SUITES: list[Suite] = [
         tier="integration",
         where="host",
         needs=frozenset({"docker", "kind"}),
-        description="Helm chart installed in a throwaway kind cluster: helm test, example load, restart, NetworkPolicy",
+        description="Helm chart in a throwaway kind cluster with Kafka: helm test, example load, replicas match the writer, reads while the writer restarts, replica rebuild, NetworkPolicy",
         steps=("tests/k8s/kind_smoke.sh {results}",),
     ),
     # ------------------------------------------------------------------ build

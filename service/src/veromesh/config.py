@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # or "oxigraph:<server URL>".
     rdf_store: str = "memory"
 
+    # Optional Fuseki dataset URL used for reads when rdf_store is unavailable:
+    # the read replicas of a replicated install (Helm chart sets it).
+    rdf_store_read_fallback: str | None = None
+
     # Named graph that holds asset-to-class bindings.
     bindings_graph: str = "https://veromesh.ai/graph/bindings"
 

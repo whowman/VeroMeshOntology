@@ -67,6 +67,9 @@ api:
   affinity: {}
 
 # ---------------------------------------------------------------------------- knowledge graph
+# One Fuseki takes all writes (the writer); with replication on, read replicas
+# follow it through Kafka and serve the service's reads while the writer is
+# down or restarting. See deploy/helm/README.md, "Replication".
 fuseki:
   # Set to false to use a store you run yourself (see store.url).
   enabled: true
@@ -96,7 +99,27 @@ fuseki:
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []
+  # Empty: with replication on, the writer and replicas prefer different nodes.
   affinity: {}
+
+  replication:
+    # Off: a single Fuseki, as in the local stack.
+    enabled: true
+    # Read replicas besides the writer. Each holds a full copy of the model and
+    # uses fuseki.persistence, fuseki.resources and fuseki.javaOpts like the writer.
+    replicas: 2
+    kafka:
+      # DataHub's prerequisites chart (release "prerequisites", same namespace)
+      # runs Kafka here. It must allow transactions; see deploy/helm/README.md.
+      bootstrapServers: prerequisites-kafka:9092
+      # Carries every change to the model. The writer creates it with one
+      # partition and no retention limit (replicas rebuild from its start).
+      topic: veromesh.graph
+      # Replication factor when the writer creates the topic; 0: the broker's default.
+      replicationFactor: 0
+      # Secret with a key kafka.properties of Kafka client settings (TLS, SASL),
+      # used by the writer and the replicas. Empty: plain connection.
+      existingSecret: ""
 
 # A SPARQL store outside this chart, used when fuseki.enabled is false, in the
 # service's own notation: "fuseki:<dataset URL>", e.g.
@@ -106,7 +129,8 @@ store:
 
 # ---------------------------------------------------------------------------- network
 networkPolicy:
-  # Fuseki has no authentication, so only the VeroMesh service may reach it.
+  # Fuseki has no authentication, so only the VeroMesh service may reach the
+  # writer and the replicas.
   # Needs a CNI that enforces NetworkPolicy (Calico, Cilium, cloud CNIs).
   enabled: true
   # Further pods allowed to reach Fuseki, e.g. a backup job:
