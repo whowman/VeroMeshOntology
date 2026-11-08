@@ -60,6 +60,13 @@
       <version>${jena.version}</version>
       <scope>provided</scope>
     </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- Shipped in target/lib: the replicas' Fuseki-Kafka module, and the Kafka client both use. -->
     <dependency>
       <groupId>org.apache.kafka</groupId>
