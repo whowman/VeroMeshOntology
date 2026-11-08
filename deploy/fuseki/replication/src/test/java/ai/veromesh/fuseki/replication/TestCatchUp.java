@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import org.apache.jena.sparql.core.DatasetGraph;
 import org.apache.jena.sparql.core.Quad;
@@ -27,7 +28,10 @@ class TestCatchUp {
 
     DatasetGraph dsg;
     StateFile state;
-    MockConsumer<byte[], byte[]> consumer;
+    /** The mock topic: committed messages by offset, and the partition's start and end offsets. */
+    final TreeMap<Long, byte[]> records = new TreeMap<>();
+    long beginning = 0;
+    long end = 0;
     Producers producers;
     PatchPublisher publisher;
 
@@ -36,28 +40,29 @@ class TestCatchUp {
         CatchUp.stallLimit = java.time.Duration.ofSeconds(3);
         dsg = newDataset();
         state = new StateFile(dir.resolve("writer.state"), TOPIC);
-        consumer = newConsumer();
         producers = new Producers();
         publisher = publisher(producers, 512 * 1024, dir);
     }
 
-    private static MockConsumer<byte[], byte[]> newConsumer() {
+    /** A fresh consumer over the mock topic, as each Kafka consumer reads the same topic. */
+    private MockConsumer<byte[], byte[]> newConsumer() {
         MockConsumer<byte[], byte[]> c = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
         c.assign(List.of(TP));
-        c.updateBeginningOffsets(Map.of(TP, 0L));
-        c.updateEndOffsets(Map.of(TP, 0L));
+        c.updateBeginningOffsets(Map.of(TP, beginning));
+        c.updateEndOffsets(Map.of(TP, end));
+        records.forEach((off, value) -> c.addRecord(new ConsumerRecord<>(TOPIC, 0, off, null, value)));
         return c;
     }
 
     /** Put messages on the mock topic at offsets 0, 1, ... */
     private void topic(byte[]... values) {
         for (int i = 0; i < values.length; i++)
-            consumer.addRecord(new ConsumerRecord<>(TOPIC, 0, i, null, values[i]));
-        consumer.updateEndOffsets(Map.of(TP, (long) values.length));
+            records.put((long) i, values[i]);
+        end = values.length;
     }
 
     private CatchUp.Result run() {
-        return CatchUp.run(dsg, () -> consumer, TOPIC, state, publisher);
+        return CatchUp.run(dsg, this::newConsumer, TOPIC, state, publisher);
     }
 
     @Test
@@ -91,8 +96,6 @@ class TestCatchUp {
         long before = size(dsg);
         // The state file lagged (written after the local commit): the last two are replayed on the next start.
         state.write(0);
-        consumer = newConsumer();
-        topic(changes);
         run();
         assertEquals(before, size(dsg));
         assertTrue(contains(dsg, a) && contains(dsg, b));
@@ -158,10 +161,10 @@ class TestCatchUp {
 
     @Test
     void refusesToRebuildFromATopicThatLostItsStart() {
-        consumer.updateBeginningOffsets(Map.of(TP, 3L));
+        beginning = 3;
         for (long off = 3; off < 5; off++)
-            consumer.addRecord(new ConsumerRecord<>(TOPIC, 0, off, null, patch(c -> add(c, quad("a", "1")))));
-        consumer.updateEndOffsets(Map.of(TP, 5L));
+            records.put(off, patch(c -> add(c, quad("a", "1"))));
+        end = 5;
         IllegalStateException e = assertThrows(IllegalStateException.class, this::run);
         assertTrue(e.getMessage().contains("no longer starts at offset 0"), e.getMessage());
     }
@@ -185,8 +188,8 @@ class TestCatchUp {
 
     @Test
     void refusesWhenTheNeededChangesHaveBeenDeleted() {
-        consumer.updateBeginningOffsets(Map.of(TP, 5L));
-        consumer.updateEndOffsets(Map.of(TP, 8L));
+        beginning = 5;
+        end = 8;
         state.write(2);
         IllegalStateException e = assertThrows(IllegalStateException.class, this::run);
         assertTrue(e.getMessage().contains("retention.ms=-1"), e.getMessage());

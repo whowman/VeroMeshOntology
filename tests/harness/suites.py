@@ -183,7 +183,8 @@ SUITES: list[Suite] = [
             "source deploy/versions.env && log={results}/fuseki-replication-build.log"
             " && { docker build --progress=plain --target build"
             ' --build-arg JENA_VERSION="$JENA_VERSION" --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION"'
-            ' -t veromesh/fuseki-build:test deploy/fuseki >"$log" 2>&1 || { tail -80 "$log"; exit 1; }; }'
+            ' -t veromesh/fuseki-build:test deploy/fuseki >"$log" 2>&1'
+            " || { grep -E 'Tests run:|FAIL|<<<|expected|Exception|ERROR. ' \"$log\" | head -100; exit 1; }; }"
             " && { grep -E 'Tests run:.*Fail' \"$log\" | tail -1"
             " || echo 'unchanged since an earlier build of the same sources, whose tests passed'; }",
         ),

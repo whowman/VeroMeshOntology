@@ -70,7 +70,7 @@ final class CatchUp {
                 from = offset + 1;
             } else {
                 boolean empty = dsg.calculateRead(dsg::isEmpty);
-                boolean topicHasChanges = hasRecords(consumer, tp, beginning, end);
+                boolean topicHasChanges = !empty && hasRecords(consumers, tp, beginning, end);
                 if (!empty && !topicHasChanges) {
                     state.write(-1);
                     long offset = publisher.publishSnapshot(dsg);
@@ -103,19 +103,25 @@ final class CatchUp {
         }
     }
 
-    /** Whether any committed message lies in [beginning, end). */
-    private static boolean hasRecords(Consumer<byte[], byte[]> consumer, TopicPartition tp, long beginning,
-                                      long end) {
+    /**
+     * Whether any committed message lies in [beginning, end). Offsets alone cannot tell: aborted transactions
+     * and transaction markers take offsets too. Uses a consumer of its own.
+     */
+    private static boolean hasRecords(Supplier<Consumer<byte[], byte[]>> consumers, TopicPartition tp,
+                                      long beginning, long end) {
         if (beginning >= end)
             return false;
-        consumer.seek(tp, beginning);
-        long deadline = System.nanoTime() + stallLimit.toNanos();
-        while (consumer.position(tp) < end) {
-            if (!consumer.poll(Duration.ofSeconds(1)).isEmpty())
-                return true;
-            checkDeadline(deadline, tp);
+        try (Consumer<byte[], byte[]> probe = consumers.get()) {
+            probe.assign(List.of(tp));
+            probe.seek(tp, beginning);
+            long deadline = System.nanoTime() + stallLimit.toNanos();
+            while (probe.position(tp) < end) {
+                if (!probe.poll(Duration.ofSeconds(1)).isEmpty())
+                    return true;
+                checkDeadline(deadline, tp);
+            }
+            return false;
         }
-        return false;
     }
 
     private static long apply(DatasetGraph dsg, Consumer<byte[], byte[]> consumer, TopicPartition tp, long from,
