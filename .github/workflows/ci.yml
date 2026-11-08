@@ -45,6 +45,27 @@ jobs:
           name: results-integration
           path: .build/test-results/
 
+  k8s:
+    # The Helm chart installed into a throwaway kind cluster (tests/k8s/kind_smoke.sh).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind (pinned in deploy/versions.env)
+        run: |
+          source deploy/versions.env
+          base="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION"
+          curl -fsSLo kind "$base/kind-linux-amd64"
+          echo "$(curl -fsSL "$base/kind-linux-amd64.sha256sum" | cut -d' ' -f1)  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+          kind version && helm version --short && kubectl version --client
+      - run: scripts/test.sh k8s --strict
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-k8s
+          path: .build/test-results/
+
   datahub-model:
     # Compiles the custom aspect inside DataHub's Gradle build at the pinned tag.
     runs-on: ubuntu-latest

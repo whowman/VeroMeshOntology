@@ -16,7 +16,9 @@ Fields
                   {api} {gms} {fuseki_stack} {token_file}   the running stack (needs="stack")
     where       runner  - inside the test-runner (Docker image, or the --local venv)
                 host    - on your machine (docker, git, bash)
-    needs       extra things the suite requires: docker, fuseki, stack, jdk25-or-docker
+    needs       extra things the suite requires: docker, fuseki, stack, jdk25-or-docker,
+                helm (in the test-runner image; --local needs it on PATH),
+                kind (kind, kubectl and Helm on PATH)
     env         extra environment for the steps
 """
 
@@ -29,7 +31,7 @@ from dataclasses import dataclass, field
 TIERS = ("quick", "integration", "build", "e2e")
 TIER_HELP = {
     "quick": "lint, unit and contract tests: no servers needed (about 2 minutes)",
-    "integration": "quick + real Apache Jena Fuseki and the container images",
+    "integration": "quick + real Apache Jena Fuseki, the container images and a kind cluster",
     "build": "integration + the DataHub custom-model plugin build (slow, ~10 minutes)",
     "e2e": "end-to-end against the running local stack (scripts/dev-up.sh)",
     "all": "every suite, including e2e",
@@ -115,13 +117,22 @@ SUITES: list[Suite] = [
         steps=("python tests/harness/check_licenses.py {results}/python-licenses.md",),
     ),
     Suite(
+        name="helm",
+        component="deploy",
+        tier="quick",
+        needs=frozenset({"helm"}),
+        description="Helm chart: lint, schema, rendered manifests, Kubernetes schemas, DataHub overlays",
+        steps=(f"{PYTEST} tests/helm --junitxml={{results}}/helm.xml",),
+        covers=("tests/helm",),
+    ),
+    Suite(
         name="scripts",
         component="deploy",
         tier="quick",
         where="host",
         description="Shell scripts parse (bash -n)",
         steps=(
-            'for f in scripts/*.sh datahub-model/build.sh tests/e2e/*.sh branding/datahub/*.sh; do bash -n "$f" || exit 1; done',
+            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh branding/datahub/*.sh deploy/helm/*.sh; do bash -n "$f" || exit 1; done',
         ),
     ),
     Suite(
@@ -169,6 +180,15 @@ SUITES: list[Suite] = [
         needs=frozenset({"docker"}),
         description="VeroMesh-branded DataHub frontend image builds with the theme and logos in place",
         steps=("branding/datahub/build.sh", "branding/datahub/verify_image.sh"),
+    ),
+    Suite(
+        name="k8s",
+        component="deploy",
+        tier="integration",
+        where="host",
+        needs=frozenset({"docker", "kind"}),
+        description="Helm chart installed in a throwaway kind cluster: helm test, example load, restart, NetworkPolicy",
+        steps=("tests/k8s/kind_smoke.sh {results}",),
     ),
     # ------------------------------------------------------------------ build
     Suite(

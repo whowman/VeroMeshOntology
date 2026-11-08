@@ -207,6 +207,7 @@ def runner_image_tag() -> str:
         "tests/runner/requirements.py",
         "service/pyproject.toml",
         "connectors/pyproject.toml",
+        "deploy/versions.env",
     ):
         h.update((ROOT / p).read_bytes())
     return f"{RUNNER_IMAGE}:{h.hexdigest()[:12]}"
@@ -222,7 +223,12 @@ def prepare_runner(run: Run) -> str | None:
             say(color(f">> Building the test runner image {tag} (only when dependencies change)", DIM))
             ctx = BUILD / "test-runner-context"
             shutil.rmtree(ctx, ignore_errors=True)
-            for p in ("service/pyproject.toml", "connectors/pyproject.toml", "tests/runner/requirements.py"):
+            for p in (
+                "service/pyproject.toml",
+                "connectors/pyproject.toml",
+                "tests/runner/requirements.py",
+                "deploy/versions.env",
+            ):
                 (ctx / p).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROOT / p, ctx / p)
             r = subprocess.run(
@@ -480,6 +486,13 @@ def blocked_reason(run: Run, suite: Suite) -> str | None:
         return "Docker is not running"
     if "jdk25-or-docker" in suite.needs and not (run.docker or java_major() >= 25):
         return "needs JDK 25 or Docker"
+    # The test-runner image ships Helm and kubeconform; --local needs them on PATH.
+    if "helm" in suite.needs and run.mode != "docker" and not shutil.which("helm"):
+        return "needs Helm on PATH (or Docker, whose test runner has it)"
+    if "kind" in suite.needs:
+        missing = [t for t in ("kind", "kubectl", "helm") if not shutil.which(t)]
+        if missing:
+            return "needs " + ", ".join(missing) + " on PATH"
     if suite.where == "runner":
         err = prepare_runner(run)
         if err:

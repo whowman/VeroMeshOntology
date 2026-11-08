@@ -1,0 +1,114 @@
+# VeroMesh on Kubernetes: the VeroMesh service (REST API, validation,
+# provenance) and its knowledge graph (Apache Jena Fuseki, TDB2).
+#
+# DataHub is not part of this chart. Install it from its official charts with
+# the overlays in deploy/helm/datahub/, then point api.datahub.gmsUrl at it.
+# Every value is checked against values.schema.json at install time.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Pull secrets for a private registry, e.g. [{name: my-registry}]
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name when empty.
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------- VeroMesh service
+api:
+  replicaCount: 1
+  image:
+    repository: veromesh/service
+    # Defaults to the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  datahub:
+    # DataHub GMS inside the cluster. With the official chart installed as
+    # release "datahub" in the same namespace, this is the default.
+    gmsUrl: http://datahub-datahub-gms:8080
+    # DataHub personal access token. Prefer existingSecret in production;
+    # a token given here is stored in a Secret created by this chart.
+    token: ""
+    existingSecret: ""
+    existingSecretKey: token
+
+  # Instance IRIs for model entities loaded from workbooks, one per customer install.
+  instanceBase: "urn:veromesh:org:"
+
+  # Extra environment variables for the service, as name: value.
+  env: {}
+
+  service:
+    type: ClusterIP
+    port: 8700
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: veromesh.example.com
+    # e.g. [{secretName: veromesh-tls, hosts: [veromesh.example.com]}]
+    tls: []
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------- knowledge graph
+fuseki:
+  # Set to false to use a store you run yourself (see store.url).
+  enabled: true
+  image:
+    repository: veromesh/fuseki
+    tag: "6.2.0"
+    pullPolicy: IfNotPresent
+  # TDB2 dataset name; the service reads and writes /<dataset>.
+  dataset: veromesh
+  javaOpts: "-Xmx1g"
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    # Empty: the cluster's default storage class.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1536Mi
+    limits:
+      memory: 2Gi
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# A SPARQL store outside this chart, used when fuseki.enabled is false, in the
+# service's own notation: "fuseki:<dataset URL>", e.g.
+# fuseki:http://fuseki.graph.svc:3030/veromesh
+store:
+  url: ""
+
+# ---------------------------------------------------------------------------- network
+networkPolicy:
+  # Fuseki has no authentication, so only the VeroMesh service may reach it.
+  # Needs a CNI that enforces NetworkPolicy (Calico, Cilium, cloud CNIs).
+  enabled: true
+  # Further pods allowed to reach Fuseki, e.g. a backup job:
+  # [{podSelector: {matchLabels: {app: fuseki-backup}}}]
+  fusekiAllowFrom: []

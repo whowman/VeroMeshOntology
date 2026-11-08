@@ -1,0 +1,179 @@
+{{- if .Values.fuseki.enabled }}
+{{- $sel := include "veromesh.selectorLabels" (list . "fuseki") -}}
+# Apache Jena Fuseki with a persistent TDB2 dataset. One replica: replication
+# with RDF Delta is a separate Phase 0 item of the delivery plan.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  replicas: 1
+  serviceName: {{ include "veromesh.fusekiName" . }}-headless
+  selector:
+    matchLabels:
+      {{- $sel | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "veromesh.labels" . | nindent 8 }}
+        app.kubernetes.io/component: fuseki
+      {{- with .Values.fuseki.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        runAsGroup: 10002
+        fsGroup: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      # TDB2 holds a lock on its folder; let the old pod stop cleanly first.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: fuseki
+          image: "{{ .Values.fuseki.image.repository }}:{{ .Values.fuseki.image.tag }}"
+          imagePullPolicy: {{ .Values.fuseki.image.pullPolicy }}
+          env:
+            - name: FUSEKI_DATASET
+              value: {{ .Values.fuseki.dataset | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.fuseki.javaOpts | quote }}
+          ports:
+            - name: http
+              containerPort: 3030
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /$/ping
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /$/ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /$/ping
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /fuseki/databases
+          resources:
+            {{- toYaml .Values.fuseki.resources | nindent 12 }}
+      {{- if not .Values.fuseki.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+      {{- with .Values.fuseki.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.fuseki.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.fuseki.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.fuseki.persistence.enabled }}
+  # Kept when the release is uninstalled: delete the PVC to discard the model.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- $sel | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.fuseki.persistence.accessModes | nindent 10 }}
+        {{- with .Values.fuseki.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.fuseki.persistence.size | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  type: ClusterIP
+  selector:
+    {{- $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: 3030
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}-headless
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  clusterIP: None
+  selector:
+    {{- $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: 3030
+      targetPort: http
+      protocol: TCP
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  podSelector:
+    matchLabels:
+      {{- $sel | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "veromesh.selectorLabels" (list . "api") | nindent 14 }}
+        {{- with .Values.networkPolicy.fusekiAllowFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 3030
+          protocol: TCP
+{{- end }}
+{{- end }}

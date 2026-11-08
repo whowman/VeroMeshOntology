@@ -4,13 +4,13 @@ One command runs every component's tests and prints one summary:
 
 ```bash
 scripts/test.sh                     # quick tier: lint, unit, contract snapshots (about 2 minutes)
-scripts/test.sh integration         # + real Apache Jena Fuseki and the container images
+scripts/test.sh integration         # + real Apache Jena Fuseki, the container images and a kind cluster
 scripts/test.sh build               # + the DataHub custom-model plugin build (slow)
 scripts/test.sh e2e                 # end-to-end against the running stack
 scripts/test.sh all --start-stack   # everything; starts the stack first if it is not running
 ```
 
-You need Docker (Docker Desktop on a Mac) and any `python3`; the tests run inside a test-runner image built from the components' declared dependencies, so nothing else needs installing. The image is rebuilt only when a `pyproject.toml` changes. To run without Docker, add `--local`: the tests then run in a virtualenv under `.build/test-venv` (needs Python 3.11+; your conda environment works).
+You need Docker (Docker Desktop on a Mac) and any `python3`; the tests run inside a test-runner image built from the components' declared dependencies, so nothing else needs installing. The image (which also carries Helm and kubeconform for the chart suite) is rebuilt only when a `pyproject.toml` or `deploy/versions.env` changes. To run without Docker, add `--local`: the tests then run in a virtualenv under `.build/test-venv` (needs Python 3.11+; your conda environment works).
 
 CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on your machine means the same checks as a green PR.
 
@@ -25,10 +25,12 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | quick | `branding` | `branding/` | DataHub theme generator (palette mapping, contrast) and asset injector |
 | quick | `contracts` | interfaces | golden snapshots (below) |
 | quick | `licenses` | dependencies | no GPL / AGPL / SSPL / Elastic License package; report in the results folder |
+| quick | `helm` | `deploy/helm/` | the chart lints and renders for every value set in `ci/`; bad values are refused by the schema; services, selectors and the Fuseki NetworkPolicy line up; every container runs unprivileged with limits; manifests pass Kubernetes schemas (kubeconform); the DataHub overlays render against DataHub's official charts at the pinned versions and load the plugin, brand and PostgreSQL |
 | quick | `scripts`, `compose` | `scripts/`, `deploy/` | shell scripts parse; compose file is valid |
 | integration | `fuseki` | `service/`, `connectors/` | the whole service and connector suites again, on a real Fuseki |
 | integration | `images` | Dockerfiles | service and connector images build, start, and carry their license files |
 | integration | `datahub-frontend` | `branding/datahub/` | the VeroMesh-branded DataHub frontend image builds with the theme and logos in place |
+| integration | `k8s` | `deploy/helm/` | the chart installs into a throwaway kind cluster; `helm test` passes; the worked example loads through the API; the model survives a Fuseki pod restart; a pod other than the service cannot reach Fuseki (needs kind, kubectl and Helm) |
 | build | `datahub-model` | `datahub-model/` | the custom aspect compiles inside DataHub's Gradle build |
 | e2e | `e2e` | the running stack | health and plugin loaded; DataHub serves the VeroMesh theme, logos and favicon; ontologies load and publish to the DataHub glossary; bindings reach Fuseki and DataHub and are removed again; the worked example loads through the spreadsheet connector, re-runs as a no-op, exports and re-imports, and a breaking delete is refused |
 | e2e | `stack-scripts` | developer scripts | `load-examples.sh` and `veromesh-connect.sh` work against the stack |

@@ -1,0 +1,9 @@
+# Token given inline: the chart creates the Secret.
+api:
+  datahub:
+    token: test-token-not-real
+fuseki:
+  persistence:
+    enabled: false
+networkPolicy:
+  enabled: false
