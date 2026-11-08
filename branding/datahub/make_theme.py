@@ -1,12 +1,15 @@
-"""Generate the VeroMesh theme for the DataHub UI.
+"""Generate the VeroMesh theme for the DataHub UI: dark, in the assessment's colours.
 
 DataHub (v1.8+) loads a JSON theme at runtime when GMS has
 REACT_APP_CUSTOM_THEME_ID=<name>.json and the frontend serves
 assets/conf/theme/<name>.json. A JSON theme replaces the colour tokens as a
-whole, so this script starts from DataHub's own light theme at the pinned
-version (src/conf/theme/colorThemes/{color,light}.ts and themeV2.ts) and
-swaps in the VeroMesh palette. Every token DataHub defines stays defined,
-and upgrading DataHub regenerates the theme from the new token set.
+whole, so this script starts from DataHub's own dark theme at the pinned
+version (src/conf/theme/colorThemes/{color,dark}.ts, themeV2.ts and
+themeV2Dark.ts) and swaps in the VeroMesh palette: near-black surfaces, a
+teal primary accent and a purple secondary one, as in the governance
+assessment. Every token DataHub defines stays defined, and upgrading DataHub
+regenerates the theme from the new token set. A custom theme takes precedence
+over DataHub's light/dark switch, so the UI is always dark.
 
     python3 branding/datahub/make_theme.py <datahub source checkout> <out.json>
 
@@ -100,9 +103,9 @@ def parse_tokens(text: str) -> dict[str, tuple[str, str]]:
         if m:
             out[m.group(1)] = ("ref", m.group(2)) if m.group(2) else ("lit", m.group(3))
         elif KEY_LIKE.match(line) and "ColorTheme" not in line:
-            raise ThemeSourceError(f"light.ts: unexpected line {line.strip()!r}")
+            raise ThemeSourceError(f"dark.ts: unexpected line {line.strip()!r}")
     if len(out) < 50:
-        raise ThemeSourceError(f"light.ts: only {len(out)} tokens found")
+        raise ThemeSourceError(f"dark.ts: only {len(out)} tokens found")
     return out
 
 
@@ -114,7 +117,7 @@ def parse_styles(text: str) -> dict[str, str]:
         if m:
             out[m.group(1)] = m.group(2)
         elif KEY_LIKE.match(line):
-            raise ThemeSourceError(f"themeV2.ts styles: unexpected line {line.strip()!r}")
+            raise ThemeSourceError(f"theme styles: unexpected line {line.strip()!r}")
     return out
 
 
@@ -125,41 +128,58 @@ def load_palette(path: Path = HERE.parent / "palette.json") -> dict[str, str]:
     return {k: v["hex"].upper() for k, v in json.loads(path.read_text()).items()}
 
 
-def brand_palette(base: dict[str, str], p: dict[str, str]) -> dict[str, str]:
-    """DataHub's palette with the brand (violet) scale and the neutrals replaced."""
-    out = dict(base)
-    white = "#FFFFFF"
-    brand = {
-        "violet0": mix(white, p["deepBlue"], 0.05),  # selected rows, brand surfaces
-        "violet100": mix(white, p["deepBlue"], 0.10),  # active background, avatar borders
-        "violet200": mix(white, p["deepBlue"], 0.22),  # brand hover surfaces, tag borders
-        "violet300": mix(white, p["purple"], 0.45),  # hover borders
-        "violet400": p["purple"],  # focus, selected and input borders
-        "violet500": p["purple"],  # brand, hover and selected icons
-        "violet600": p["deepBlue"],  # buttons, links, brand text
-        "violet700": p["navy"],  # active text
-        "violet800": p["navy"],  # button hover
-        "violet900": mix(p["navy"], "#000000", 0.15),
-        "violet1000": mix(p["navy"], "#000000", 0.30),
-        "violet1100": mix(p["navy"], "#000000", 0.45),
-        "violet1200": mix(p["navy"], "#000000", 0.60),
+def brand_scale(p: dict[str, str]) -> dict[str, str]:
+    """DataHub's violet brand scale, re-made in teal."""
+    white, teal, deep = "#FFFFFF", p["teal"], p["tealDeep"]
+    return {
+        "violet0": mix(white, teal, 0.12),
+        "violet100": mix(white, teal, 0.25),
+        "violet200": mix(white, teal, 0.45),
+        "violet300": mix(teal, white, 0.30),  # brand text, links, active text
+        "violet400": teal,  # brand icons, hover
+        "violet500": teal,  # primary buttons, active borders
+        "violet600": deep,  # brand borders, hover borders
+        "violet700": mix(deep, p["ink"], 0.20),
+        "violet800": mix(deep, p["ink"], 0.35),
+        "violet900": mix(deep, p["ink"], 0.50),
+        "violet1000": mix(p["raised"], teal, 0.18),  # active, secondary hover
+        "violet1100": mix(p["surface"], teal, 0.12),  # selected rows
+        "violet1200": mix(p["ink"], teal, 0.08),  # brand surfaces
     }
-    for k, v in brand.items():
+
+
+def brand_palette(base: dict[str, str], p: dict[str, str]) -> dict[str, str]:
+    """DataHub's palette with the brand (violet) scale made teal and the neutrals made the assessment's."""
+    out = dict(base)
+    for k, v in brand_scale(p).items():
         if k in out:
             out[k] = v
     for k in [k for k in out if re.fullmatch(r"gray\d+", k)]:
         if k != "gray0":
-            out[k] = retint(out[k], p["midGray"])
-    out["gray200"] = p["lightGray"]
-    out["gray600"] = p["midGray"]
+            out[k] = retint(out[k], p["textSecondary"])
+    # The dark ladder, darkest first: page, cards, raised, borders; then muted, secondary, primary text.
+    neutrals = {
+        "gray1200": p["ink"],
+        "gray1100": p["surface"],
+        "gray1000": p["raised"],
+        "gray900": p["line"],
+        "gray700": p["textMuted"],  # disabled fills, scrollbars
+        "gray600": mix(p["textSecondary"], p["textMuted"], 0.6),  # icons, disabled text
+        "gray500": mix(p["textSecondary"], p["textMuted"], 0.3),  # tertiary text, placeholders
+        "gray400": p["textSecondary"],  # secondary text
+        "gray300": p["text"],  # body text
+    }
+    for k, v in neutrals.items():
+        if k in out:
+            out[k] = v
     return out
 
 
 RGBA_SWAPS = {  # DataHub's violet-tinted shadows and selections -> palette
-    "83, 63, 209": "deepBlue",
-    "108, 71, 255": "purple",
-    "33, 23, 95": "navy",
-    "9, 1, 61": "navy",
+    "83, 63, 209": "teal",
+    "108, 71, 255": "teal",
+    "33, 23, 95": "ink",
+    "9, 1, 61": "ink",
 }
 
 
@@ -204,15 +224,17 @@ def swap_hex(value: str, base: dict[str, str], brand: dict[str, str]) -> str:
 def build_theme(src: Path, p: dict[str, str], *, api_docs_url: str = "http://localhost:8700/docs") -> dict:
     conf = src / "datahub-web-react/src/conf/theme"
     base = parse_palette((conf / "colorThemes/color.ts").read_text())
-    tokens = parse_tokens((conf / "colorThemes/light.ts").read_text())
+    tokens = parse_tokens((conf / "colorThemes/dark.ts").read_text())
     styles = parse_styles((conf / "themeV2.ts").read_text())
+    styles.update(parse_styles((conf / "themeV2Dark.ts").read_text()))
     pal = brand_palette(base, p)
+    shade = brand_scale(p)
 
     colors = {}
     for token, (kind, value) in tokens.items():
         if kind == "ref":
             if value not in pal:
-                raise ThemeSourceError(f"light.ts: {token} uses unknown palette colour {value}")
+                raise ThemeSourceError(f"dark.ts: {token} uses unknown palette colour {value}")
             colors[token] = pal[value]
         else:
             colors[token] = swap_hex(swap_rgba(value, p), base, pal)
@@ -231,20 +253,43 @@ def build_theme(src: Path, p: dict[str, str], *, api_docs_url: str = "http://loc
     if leftover:
         raise ThemeSourceError(f"DataHub violet left in: {', '.join(leftover)}")
 
-    navy_rgb = ", ".join(str(c) for c in hex_to_rgb(p["navy"]))
+    # Roles the scale alone cannot express, as the assessment draws them.
+    overrides = {
+        "textOnFillBrand": p["onTeal"],  # dark text on teal buttons; white on teal is unreadable
+        "iconOnFillBrand": p["onTeal"],
+        "buttonSurfaceBrandHover": p["tealHover"],
+        "borderBrandFocused": p["purple"],  # focus rings in the secondary accent
+        "borderInputFocus": p["purple"],
+        "tagsBrandBg": shade["violet1000"],
+        "tagsBrandBorder": p["tealDeep"],
+        "tagsBrandText": shade["violet300"],
+    }
+    for token, value in overrides.items():
+        if token in colors:
+            colors[token] = value
+
     styles.update(
         {
-            "primary-color": p["deepBlue"],
-            "primary-color-dark": p["navy"],
-            "primary-color-light": mix("#FFFFFF", p["deepBlue"], 0.08),
-            "layout-header-color": p["navy"],
-            "heading-color": p["navy"],
-            "border-color-base": p["lightGray"],
-            "homepage-background-upper-fade": mix("#FFFFFF", p["lightGray"], 0.6),
-            "homepage-background-lower-fade": "#FFFFFF",
-            "homepage-text-color": p["navy"],
-            "box-shadow-navbar-redesign": f"0 0 6px 0px rgba({navy_rgb}, 0.20)",
-            "highlight-color": mix("#FFFFFF", p["purple"], 0.12),
+            "primary-color": p["teal"],
+            "primary-color-dark": p["tealDeep"],
+            "primary-color-light": shade["violet1100"],
+            "layout-header-color": p["text"],
+            "layout-header-background": p["surface"],
+            "layout-body-background": p["ink"],
+            "component-background": p["surface"],
+            "body-background": p["ink"],
+            "text-color": p["text"],
+            "text-color-secondary": p["textSecondary"],
+            "heading-color": p["text"],
+            "border-color-base": p["line"],
+            "divider-color": p["line"],
+            "background-color-light": p["raised"],
+            "disabled-color": p["textMuted"],
+            "steps-nav-arrow-color": p["textSecondary"],
+            "homepage-background-upper-fade": p["surface"],
+            "homepage-background-lower-fade": p["ink"],
+            "homepage-text-color": p["text"],
+            "highlight-color": mix(p["ink"], p["purple"], 0.25),
             "highlight-border-color": p["teal"],
         }
     )
@@ -280,14 +325,20 @@ def build_theme(src: Path, p: dict[str, str], *, api_docs_url: str = "http://loc
 def check_theme(theme: dict) -> list[str]:
     """Readability checks (WCAG AA) on the tokens that carry text and controls."""
     c, problems = theme["colors"], []
-    white = "#FFFFFF"
-    rules = [
-        ("text", c.get("bg", white), 7.0),
-        ("textSecondary", c.get("bg", white), 4.5),
-        ("textBrand", c.get("bg", white), 4.5),
-        ("hyperlinks", c.get("bg", white), 4.5),
-        ("textOnFillBrand", c.get("buttonFillBrand", "#000000"), 4.5),
-        ("iconBrand", c.get("bg", white), 3.0),
+    rules = []
+    for surface in ("bg", "bgSurface"):  # content cards and the page around them
+        ground = c.get(surface, "#000000")
+        rules += [
+            ("text", ground, 7.0),
+            ("textSecondary", ground, 4.5),
+            ("textBrand", ground, 4.5),
+            ("hyperlinks", ground, 4.5),
+            ("iconBrand", ground, 3.0),
+        ]
+    rules += [
+        ("textOnFillBrand", c.get("buttonFillBrand", "#FFFFFF"), 4.5),
+        ("textOnFillBrand", c.get("buttonSurfaceBrandHover", "#FFFFFF"), 4.5),
+        ("tagsBrandText", c.get("tagsBrandBg", "#000000"), 4.5),
     ]
     for token, against, minimum in rules:
         value = c.get(token)
