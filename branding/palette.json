@@ -1,8 +1,16 @@
 {
-  "navy": {"hex": "#1A2A44", "role": "Primary dark navy: hover and active states, headings, dark surfaces"},
-  "deepBlue": {"hex": "#23395D", "role": "Deep blue: primary buttons, links, brand text"},
-  "purple": {"hex": "#7B72E9", "role": "Purple accent: brand icons, focus and selected borders"},
-  "teal": {"hex": "#4ECBA0", "role": "Soft teal accent: highlight edges, secondary accents"},
-  "lightGray": {"hex": "#E8EAF0", "role": "Light gray: borders, subtle backgrounds"},
-  "midGray": {"hex": "#8B90A0", "role": "Mid gray: secondary icons, muted text; neutral tint for all grays"}
+  "ink": {"hex": "#0D0F14", "role": "Page background; text on light pages"},
+  "surface": {"hex": "#13161E", "role": "Cards, panels, navigation and header"},
+  "raised": {"hex": "#1A1E28", "role": "Raised surfaces, hover and selected rows; buttons on light pages"},
+  "line": {"hex": "#32343B", "role": "Borders and dividers: the assessment's white at 13% over the surface colour"},
+  "text": {"hex": "#E8EAF0", "role": "Primary text on dark surfaces; borders on light pages"},
+  "textSecondary": {"hex": "#8B90A0", "role": "Secondary text and icons; neutral tint for all grays"},
+  "textMuted": {"hex": "#555A6A", "role": "Disabled text, scrollbars, faint labels"},
+  "teal": {"hex": "#4ECBA0", "role": "Primary accent: primary buttons, links, brand icons, completed states"},
+  "tealHover": {"hex": "#5DDCB0", "role": "Primary button hover"},
+  "tealDeep": {"hex": "#2A9E75", "role": "Brand borders, pressed states, the highest maturity level"},
+  "onTeal": {"hex": "#061A10", "role": "Text and icons on teal fills"},
+  "purple": {"hex": "#7B72E9", "role": "Secondary accent: focus rings, secondary links, progress gradients"},
+  "warn": {"hex": "#E8A84A", "role": "Warnings"},
+  "danger": {"hex": "#E8604A", "role": "Errors and destructive actions"}
 }

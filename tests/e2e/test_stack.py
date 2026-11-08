@@ -106,7 +106,7 @@ def test_datahub_ui_uses_the_veromesh_theme(api, gms):
     with httpx.Client(base_url=FRONTEND, timeout=30) as ui:
         theme = ui.get("/assets/conf/theme/veromesh.theme.json")
         assert theme.status_code == 200, "the frontend does not serve the VeroMesh theme"
-        assert theme.json()["styles"]["primary-color"] == "#23395D"
+        assert theme.json()["styles"]["primary-color"] == "#4ECBA0"
         for url in (visual["logoUrl"], theme.json()["assets"]["logoUrl"]):
             r = ui.get("/" + url.lstrip("/"))
             assert r.status_code == 200 and r.content == (logos / url.rsplit("/", 1)[-1]).read_bytes(), url
