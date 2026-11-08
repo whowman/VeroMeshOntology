@@ -60,7 +60,8 @@ jobs:
           echo "$(curl -fsSL "$base/kind-linux-amd64.sha256sum" | cut -d' ' -f1)  kind" | sha256sum -c -
           sudo install -m 0755 kind /usr/local/bin/kind && rm kind
           kind version && helm version --short && kubectl version --client
-      - run: scripts/test.sh k8s --strict
+      # -v: the smoke test's steps appear in the job log.
+      - run: scripts/test.sh k8s --strict -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:
