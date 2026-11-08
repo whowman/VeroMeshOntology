@@ -6,9 +6,15 @@
   Kafka topic as an RDF Patch, so replica Fusekis (running Telicent's
   Fuseki-Kafka module) apply the same changes. See README.md.
 
-  Built inside deploy/fuseki/Dockerfile. `mvn package` also copies the Fuseki
-  server jar and the Fuseki-Kafka module into target/lib, pinned below and
-  overridden from deploy/versions.env by the Docker build.
+  Built inside deploy/fuseki/Dockerfile. `mvn package` also gathers what the
+  image needs, at the versions pinned below (the Docker build overrides them
+  from deploy/versions.env):
+    target/server/jena-fuseki-server.jar   the Fuseki server (all of Jena)
+    target/lib/*.jar                       Fuseki-Kafka and its dependencies
+                                           (Kafka client, ...), without Jena
+    target/generated-sources/license/THIRD-PARTY.txt   their licenses
+  Telicent publish the Fuseki-Kafka module, not its bundled jar, to Maven
+  Central, so the jars are collected here rather than downloaded as one.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -34,14 +40,14 @@
     <!-- Overridden by the Docker build from deploy/versions.env. -->
     <jena.version>6.2.0</jena.version>
     <fuseki-kafka.version>3.4.3</fuseki-kafka.version>
-    <!-- Must match the kafka-clients bundled in jena-fmod-kafka, which supplies it at run time. -->
+    <!-- The version Fuseki-Kafka is built with (its dependency.kafka). -->
     <kafka.version>3.9.2</kafka.version>
     <junit.version>5.11.4</junit.version>
     <slf4j.version>2.0.17</slf4j.version>
   </properties>
 
   <dependencies>
-    <!-- All provided at run time: Jena by the Fuseki server jar, Kafka by jena-fmod-kafka. -->
+    <!-- Provided at run time by the Fuseki server jar. -->
     <dependency>
       <groupId>org.apache.jena</groupId>
       <artifactId>jena-arq</artifactId>
@@ -54,11 +60,36 @@
       <version>${jena.version}</version>
       <scope>provided</scope>
     </dependency>
+    <!-- Shipped in target/lib: the replicas' Fuseki-Kafka module, and the Kafka client both use. -->
     <dependency>
       <groupId>org.apache.kafka</groupId>
       <artifactId>kafka-clients</artifactId>
       <version>${kafka.version}</version>
-      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.telicent.jena</groupId>
+      <artifactId>jena-fuseki-kafka-module</artifactId>
+      <version>${fuseki-kafka.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <!-- Provided by the Fuseki server jar, at the pinned Jena version. -->
+        <exclusion>
+          <groupId>org.apache.jena</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>ch.qos.logback</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
@@ -99,13 +130,13 @@
         <version>3.8.1</version>
         <executions>
           <execution>
-            <id>runtime-jars</id>
+            <id>fuseki-server</id>
             <phase>package</phase>
             <goals>
               <goal>copy</goal>
             </goals>
             <configuration>
-              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <outputDirectory>${project.build.directory}/server</outputDirectory>
               <stripVersion>true</stripVersion>
               <artifactItems>
                 <artifactItem>
@@ -113,12 +144,36 @@
                   <artifactId>jena-fuseki-server</artifactId>
                   <version>${jena.version}</version>
                 </artifactItem>
-                <artifactItem>
-                  <groupId>io.telicent.jena</groupId>
-                  <artifactId>jena-fmod-kafka</artifactId>
-                  <version>${fuseki-kafka.version}</version>
-                </artifactItem>
               </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>module-jars</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <!-- License report for the jars in target/lib (shipped in the image). -->
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <version>2.4.0</version>
+        <executions>
+          <execution>
+            <id>third-party</id>
+            <phase>package</phase>
+            <goals>
+              <goal>add-third-party</goal>
+            </goals>
+            <configuration>
+              <excludedScopes>provided,test,system</excludedScopes>
             </configuration>
           </execution>
         </executions>

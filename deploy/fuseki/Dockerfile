@@ -21,11 +21,19 @@ COPY replication/pom.xml ./
 RUN mvn -B -q --strict-checksums -Djena.version="$JENA_VERSION" -Dfuseki-kafka.version="$FUSEKI_KAFKA_VERSION" \
       dependency:go-offline
 COPY replication/src ./src
-# Compiles and runs the module's tests, then copies the Fuseki server jar and
-# the Fuseki-Kafka module (checksums verified) into target/lib.
+# Compiles and runs the module's tests, then gathers the Fuseki server jar,
+# Fuseki-Kafka with its dependencies, and their license report (checksums
+# verified). Fails on a copyleft or source-available license, unless the
+# component is also offered under a permissive one (dual licensing).
 RUN mvn -B --strict-checksums -Djena.version="$JENA_VERSION" -Dfuseki-kafka.version="$FUSEKI_KAFKA_VERSION" \
       package \
- && ls -l target/lib target/*.jar
+ && ls -l target/server target/lib target/*.jar \
+ && cp target/generated-sources/license/THIRD-PARTY.txt target/THIRD-PARTY.txt \
+ && cat target/THIRD-PARTY.txt \
+ && if grep -iE 'GPL|General Public|SSPL|Elastic License|Business Source|Commons Clause' target/THIRD-PARTY.txt \
+         | grep -viE 'LGPL|Lesser|Library General|Classpath|CPE|EPL|Eclipse Public|CDDL|Apache|MIT|BSD'; then \
+      echo "Copyleft or source-available license in the Fuseki modules; review before shipping" >&2; exit 1; \
+    fi
 
 # ---------------------------------------------------------------- runtime
 FROM eclipse-temurin:21-jre
@@ -35,10 +43,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/fuseki/lib /opt/fuseki/licenses /fuseki/databases
-COPY --from=build /src/target/lib/jena-fuseki-server.jar /opt/fuseki/fuseki-server.jar
-# Fuseki modules, loaded only in writer and replica modes.
-COPY --from=build /src/target/lib/jena-fmod-kafka.jar /opt/fuseki/lib/
+COPY --from=build /src/target/server/jena-fuseki-server.jar /opt/fuseki/fuseki-server.jar
+# Fuseki modules and their dependencies, loaded only in writer and replica modes.
+COPY --from=build /src/target/lib/ /opt/fuseki/lib/
 COPY --from=build /src/target/veromesh-fuseki-replication.jar /opt/fuseki/lib/
+COPY --from=build /src/target/THIRD-PARTY.txt /opt/fuseki/licenses/THIRD-PARTY-modules.txt
 
 # Jena's LICENSE and NOTICE, taken from the jena-${JENA_VERSION} source tag
 # (the shaded server jar drops LICENSE). Kept in sync with third_party/jena/.
