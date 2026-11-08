@@ -38,6 +38,12 @@ public final class ReplicationVocab {
     public static final Property pChunkBytes = prop("chunkBytes");
     /** Replication factor for a topic this writer creates. Default: the broker's. */
     public static final Property pReplicationFactor = prop("replicationFactor");
+    /**
+     * When the writer cannot be sure its dataset matches the topic (Kafka did not confirm a commit, or the local
+     * commit failed after publishing), exit so it is restarted and catches up. Default true; false only refuses
+     * further writes until someone restarts it.
+     */
+    public static final Property pExitToRecover = prop("exitToRecover");
     /** Optional Kafka client properties file (TLS, SASL). Ignored when blank or missing. */
     public static final Property pConfigFile = prop("configFile");
 

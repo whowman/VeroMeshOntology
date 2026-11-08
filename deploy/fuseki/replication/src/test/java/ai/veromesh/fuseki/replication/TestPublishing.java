@@ -103,7 +103,7 @@ class TestPublishing {
 
     @Test
     void aWriteThatCannotBePublishedIsNotCommitted() {
-        producers.last().commitTransactionException = new KafkaException("broker unavailable");
+        producers.last().sendException = new KafkaException("broker unavailable");
         Quad a = quad("a", "1");
         assertThrows(JenaTransactionException.class, () -> writer.executeWrite(() -> writer.add(a)));
         assertFalse(contains(base, a));
@@ -111,12 +111,53 @@ class TestPublishing {
         assertTrue(state.read().isEmpty());
 
         // Kafka is back: the next write goes through.
-        producers.made.forEach(p -> p.commitTransactionException = null);
+        producers.made.forEach(p -> p.sendException = null);
         Quad b = quad("b", "2");
         writer.executeWrite(() -> writer.add(b));
         assertTrue(contains(base, b));
         assertEquals(1, producers.sent().size());
         assertEquals(0, spoolFiles());
+    }
+
+    @Test
+    void anUnconfirmedKafkaCommitStopsWritesAndAsksForARestart() {
+        // A timeout inside commitTransaction: Kafka may still commit it, so the local write is refused and the
+        // writer restarts to catch up from Kafka rather than carry on with a dataset that may be behind.
+        PatchPublisher p = publisher(producers, 512 * 1024, dir);
+        int[] restarts = {0};
+        p.onRestart(() -> restarts[0]++);
+        ReplicatedDatasetGraph w = new ReplicatedDatasetGraph(base, p, state);
+        producers.last().commitTransactionException = new org.apache.kafka.common.errors.TimeoutException("slow");
+        assertThrows(JenaTransactionException.class, () -> w.executeWrite(() -> w.add(quad("a", "1"))));
+        assertEquals(0, size(base));
+        assertEquals(1, restarts[0]);
+        assertTrue(p.isHalted());
+        assertThrows(JenaTransactionException.class, () -> w.executeWrite(() -> w.add(quad("b", "2"))));
+    }
+
+    @Test
+    void clearingTheWholeDatasetReachesTheReplicas() {
+        Quad a = quad("a", "1"), b = quad("b", "2");
+        writer.executeWrite(() -> {
+            writer.add(a);
+            writer.add(b);
+        });
+        writer.executeWrite(writer::clear);
+        assertEquals(0, size(base));
+        DatasetGraph replica = newDataset();
+        applyTo(replica, producers.sent());
+        assertEquals(0, size(replica), "the clear was published as deletes");
+    }
+
+    @Test
+    void termsThatUtf8CannotCarryAreRefused() {
+        Quad bad = Quad.create(G, uri("https://example.com/s"), uri("https://example.com/p"),
+                               NodeFactory.createLiteralString("broken \uD800 surrogate"));
+        assertThrows(JenaTransactionException.class, () -> writer.executeWrite(() -> writer.add(bad)));
+        assertEquals(0, size(base));
+        assertTrue(producers.sent().isEmpty());
+        assertTrue(PatchPublisher.isWellFormed("emoji \uD83D\uDE00 ok"));
+        assertFalse(PatchPublisher.isWellFormed("\uDE00"));
     }
 
     @Test

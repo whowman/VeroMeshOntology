@@ -64,6 +64,8 @@ final class KafkaClients {
         p.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         p.put(ProducerConfig.ACKS_CONFIG, "all");
         p.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip");
+        // Room for seeding a large dataset in one Kafka transaction (the brokers' default maximum).
+        p.putIfAbsent(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, 15 * 60 * 1000);
         // Room for one chunk plus headers.
         p.putIfAbsent(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, Math.max(1 << 20, chunkBytes + (64 << 10)));
         p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
@@ -121,15 +123,22 @@ final class KafkaClients {
     private static void keepForever(Admin admin, String topic) throws ExecutionException {
         ConfigResource res = new ConfigResource(ConfigResource.Type.TOPIC, topic);
         Config config = get(admin.describeConfigs(List.of(res)).all()).get(res);
-        ConfigEntry retention = config.get(TopicConfig.RETENTION_MS_CONFIG);
-        if (retention != null && "-1".equals(retention.value()))
-            return;
-        LOG.warn("Topic '{}' has retention.ms={}; setting it to -1 so changes are never deleted", topic,
-                 retention == null ? "(default)" : retention.value());
-        get(admin.incrementalAlterConfigs(Map.of(res, List.of(
-                new AlterConfigOp(new ConfigEntry(TopicConfig.RETENTION_MS_CONFIG, "-1"), AlterConfigOp.OpType.SET),
-                new AlterConfigOp(new ConfigEntry(TopicConfig.RETENTION_BYTES_CONFIG, "-1"), AlterConfigOp.OpType.SET)
-        ))).all());
+        ConfigEntry policy = config.get(TopicConfig.CLEANUP_POLICY_CONFIG);
+        if (policy != null && policy.value() != null && policy.value().contains(TopicConfig.CLEANUP_POLICY_COMPACT))
+            throw new IllegalStateException("Topic '" + topic + "' has cleanup.policy=" + policy.value()
+                    + "; replication needs cleanup.policy=delete with no retention limit (compaction would drop "
+                    + "changes, and keyless messages are refused). Recreate the topic or let the writer create it.");
+        List<AlterConfigOp> ops = new java.util.ArrayList<>();
+        for (String key : List.of(TopicConfig.RETENTION_MS_CONFIG, TopicConfig.RETENTION_BYTES_CONFIG)) {
+            ConfigEntry e = config.get(key);
+            if (e != null && "-1".equals(e.value()))
+                continue;
+            LOG.warn("Topic '{}' has {}={}; setting it to -1 so changes are never deleted", topic, key,
+                     e == null ? "(default)" : e.value());
+            ops.add(new AlterConfigOp(new ConfigEntry(key, "-1"), AlterConfigOp.OpType.SET));
+        }
+        if (!ops.isEmpty())
+            get(admin.incrementalAlterConfigs(Map.of(res, ops)).all());
     }
 
     private static TopicDescription describe(Admin admin, String topic) throws ExecutionException {

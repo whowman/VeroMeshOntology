@@ -33,6 +33,7 @@ class TestCatchUp {
 
     @BeforeEach
     void setUp() {
+        CatchUp.stallLimit = java.time.Duration.ofSeconds(3);
         dsg = newDataset();
         state = new StateFile(dir.resolve("writer.state"), TOPIC);
         consumer = newConsumer();
@@ -115,7 +116,54 @@ class TestCatchUp {
         DatasetGraph replica = newDataset();
         applyTo(replica, producers.last().history());
         assertEquals(2, size(replica));
-        assertTrue(state.read().isPresent());
+        assertTrue(state.read().getAsLong() >= 0);
+    }
+
+    @Test
+    void aFreshInstallRecordsItsStateBeforeServing() {
+        assertEquals(CatchUp.Result.UP_TO_DATE, run());
+        assertEquals(-1L, state.read().getAsLong());
+    }
+
+    @Test
+    void recoversAFirstWritePublishedJustBeforeACrash() {
+        // Fresh install (state -1); the first write was published and committed, the state file not yet updated.
+        Quad a = quad("a", "1");
+        state.write(-1);
+        dsg.executeWrite(() -> dsg.add(a));
+        topic(patch(c -> add(c, a)));
+        assertEquals(CatchUp.Result.REPLAYED, run());
+        assertEquals(1, size(dsg));
+        assertEquals(0L, state.read().getAsLong());
+    }
+
+    @Test
+    void resumesASeedThatWasPublishedBeforeACrash() {
+        Quad a = quad("a", "1");
+        dsg.executeWrite(() -> dsg.add(a));
+        state.write(-1);  // written before seeding
+        topic(patch(c -> add(c, a)));  // the snapshot made it to Kafka
+        assertEquals(CatchUp.Result.REPLAYED, run());
+        assertEquals(1, size(dsg));
+        assertTrue(producers.sent().isEmpty(), "not seeded twice");
+    }
+
+    @Test
+    void seedsAgainIfTheSeedNeverReachedKafka() {
+        dsg.executeWrite(() -> dsg.add(quad("a", "1")));
+        state.write(-1);
+        assertEquals(CatchUp.Result.SEEDED, run());
+        assertEquals(1, producers.sent().size());
+    }
+
+    @Test
+    void refusesToRebuildFromATopicThatLostItsStart() {
+        consumer.updateBeginningOffsets(Map.of(TP, 3L));
+        for (long off = 3; off < 5; off++)
+            consumer.addRecord(new ConsumerRecord<>(TOPIC, 0, off, null, patch(c -> add(c, quad("a", "1")))));
+        consumer.updateEndOffsets(Map.of(TP, 5L));
+        IllegalStateException e = assertThrows(IllegalStateException.class, this::run);
+        assertTrue(e.getMessage().contains("no longer starts at offset 0"), e.getMessage());
     }
 
     @Test

@@ -32,6 +32,7 @@ public class PublishingDatasetAssembler extends DatasetAssembler {
         int chunkBytes = Integer.parseInt(optional(root, pChunkBytes, Integer.toString(DEFAULT_CHUNK_BYTES)));
         int replicationFactor = Integer.parseInt(optional(root, pReplicationFactor, "0"));
         String configFile = optional(root, pConfigFile, null);
+        boolean exitToRecover = Boolean.parseBoolean(optional(root, pExitToRecover, "true"));
         if (chunkBytes < 1024)
             throw new AssemblerException(root, "vmr:chunkBytes must be at least 1024");
 
@@ -45,6 +46,24 @@ public class PublishingDatasetAssembler extends DatasetAssembler {
 
         PatchPublisher publisher = new PatchPublisher(() -> kafka.producer(txnId, chunkBytes), topic, chunkBytes,
                                                       spoolDir);
+        if (exitToRecover) {
+            // Recovery after an unknown publish outcome or a failed local commit is a restart (which catches up
+            // from Kafka). Exit shortly, off the request thread, so the orchestrator restarts this Fuseki.
+            publisher.onRestart(() -> {
+                Thread t = new Thread(() -> {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    LOG.error("Exiting so this Fuseki restarts and catches up from Kafka");
+                    Runtime.getRuntime().halt(70);
+                }, "veromesh-replication-restart");
+                t.setDaemon(true);
+                t.start();
+            });
+        }
+        publisher.clearSpool();
         publisher.connect();
         CatchUp.Result result = CatchUp.run(base, kafka::consumer, topic, state, publisher);
         LOG.info("Writer ready ({})", result);

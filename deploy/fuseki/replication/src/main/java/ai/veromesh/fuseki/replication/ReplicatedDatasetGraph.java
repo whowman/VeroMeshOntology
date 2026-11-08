@@ -1,5 +1,6 @@
 package ai.veromesh.fuseki.replication;
 
+import org.apache.jena.graph.Node;
 import org.apache.jena.rdfpatch.system.DatasetGraphChanges;
 import org.apache.jena.sparql.core.DatasetGraph;
 import org.slf4j.Logger;
@@ -30,8 +31,8 @@ final class ReplicatedDatasetGraph extends DatasetGraphChanges {
             if (published != null) {
                 // Published but not committed here: the replicas have a change this writer lacks. The next start
                 // replays it from Kafka; until then, refuse writes rather than build on a stale dataset.
-                publisher.halt("the local commit failed after the change was published (offset " + published
-                        + "); restart this Fuseki to recover it from Kafka");
+                publisher.haltAndRestart("the local commit failed after the change was published (offset "
+                        + published + "); restarting to recover it from Kafka");
             }
             throw e;
         }
@@ -50,6 +51,16 @@ final class ReplicatedDatasetGraph extends DatasetGraphChanges {
     public void abort() {
         super.abort();
         publisher.takePendingOffset();
+    }
+
+    /**
+     * Clearing the whole dataset (e.g. a Graph Store Protocol PUT without {@code ?graph=}) goes through the
+     * change monitor too: {@link DatasetGraphChanges} does not intercept {@code clear()}, which would otherwise
+     * empty this dataset without telling the replicas.
+     */
+    @Override
+    public void clear() {
+        deleteAny(Node.ANY, Node.ANY, Node.ANY, Node.ANY);
     }
 
     /** A write transaction ended without commit or abort is aborted: drop its collected changes. */
