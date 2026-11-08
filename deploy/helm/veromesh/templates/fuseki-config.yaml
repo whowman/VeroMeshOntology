@@ -1,0 +1,80 @@
+{{- if include "veromesh.replicated" . }}
+{{- $r := .Values.fuseki.replication -}}
+{{- $ds := .Values.fuseki.dataset -}}
+# Fuseki configuration for the writer and the read replicas (FUSEKI_CONFIG).
+# Both keep the same TDB2 dataset at /fuseki/databases/<dataset>, the location a
+# single-node install uses, so switching replication on keeps an existing model.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}-config
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+data:
+  # Takes every write; publishes each commit to Kafka before committing it.
+  writer.ttl: |
+    PREFIX fuseki: <http://jena.apache.org/fuseki#>
+    PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX tdb2:   <http://jena.apache.org/2016/tdb#>
+    PREFIX vmr:    <https://veromesh.ai/ns/fuseki-replication#>
+
+    [] rdf:type fuseki:Server .
+
+    <#service> rdf:type fuseki:Service ;
+        fuseki:name {{ $ds | quote }} ;
+        fuseki:endpoint [ fuseki:operation fuseki:query ;  fuseki:name "query" ] ;
+        fuseki:endpoint [ fuseki:operation fuseki:update ; fuseki:name "update" ] ;
+        fuseki:endpoint [ fuseki:operation fuseki:gsp-rw ; fuseki:name "data" ] ;
+        fuseki:dataset <#dataset> .
+
+    <#dataset> rdf:type vmr:PublishingDataset ;
+        vmr:dataset           <#tdb2> ;
+        vmr:bootstrapServers  {{ $r.kafka.bootstrapServers | quote }} ;
+        vmr:topic             {{ $r.kafka.topic | quote }} ;
+        vmr:transactionalId   {{ printf "%s-%s" (include "veromesh.fusekiName" .) $r.kafka.topic | quote }} ;
+        vmr:replicationFactor "{{ $r.kafka.replicationFactor }}" ;
+        {{- if $r.kafka.existingSecret }}
+        vmr:configFile        "/etc/fuseki/kafka/kafka.properties" ;
+        {{- end }}
+        vmr:stateFile         "/fuseki/databases/writer.state" .
+
+    <#tdb2> rdf:type tdb2:DatasetTDB2 ;
+        tdb2:location "/fuseki/databases/{{ $ds }}" .
+
+  # Read-only; applies the writer's changes from Kafka (Fuseki-Kafka).
+  replica.ttl: |
+    PREFIX fuseki: <http://jena.apache.org/fuseki#>
+    PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX tdb2:   <http://jena.apache.org/2016/tdb#>
+    PREFIX fk:     <http://jena.apache.org/fuseki/kafka#>
+
+    [] rdf:type fuseki:Server .
+
+    <#service> rdf:type fuseki:Service ;
+        fuseki:name {{ $ds | quote }} ;
+        fuseki:endpoint [ fuseki:operation fuseki:query ; fuseki:name "query" ] ;
+        fuseki:endpoint [ fuseki:operation fuseki:gsp-r ; fuseki:name "data" ] ;
+        fuseki:dataset <#tdb2> .
+
+    <#tdb2> rdf:type tdb2:DatasetTDB2 ;
+        tdb2:location "/fuseki/databases/{{ $ds }}" .
+
+    <#connector> rdf:type fk:Connector ;
+        fk:bootstrapServers  {{ $r.kafka.bootstrapServers | quote }} ;
+        fk:topic             {{ $r.kafka.topic | quote }} ;
+        fk:fusekiServiceName "/{{ $ds }}" ;
+        # One consumer group per replica volume (run.sh sets it).
+        fk:groupId           "env:{VEROMESH_KAFKA_GROUP_ID}" ;
+        fk:stateFile         "/fuseki/databases/replica.state" ;
+        fk:syncTopic         true ;
+        fk:replayTopic       false ;
+        {{- if $r.kafka.existingSecret }}
+        fk:configFile        "/etc/fuseki/kafka/kafka.properties" ;
+        {{- end }}
+        # Only whole writer transactions; a new volume starts from the beginning;
+        # never let a consumer create the topic with the broker's defaults.
+        fk:config ( "isolation.level" "read_committed" ) ;
+        fk:config ( "auto.offset.reset" "earliest" ) ;
+        fk:config ( "allow.auto.create.topics" "false" ) .
+{{- end }}

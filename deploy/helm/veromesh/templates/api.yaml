@@ -91,6 +91,10 @@ spec:
           env:
             - name: VEROMESH_RDF_STORE
               value: {{ include "veromesh.rdfStore" . | quote }}
+            {{- if include "veromesh.replicated" . }}
+            - name: VEROMESH_RDF_STORE_READ_FALLBACK
+              value: {{ include "veromesh.readFallback" . | quote }}
+            {{- end }}
             - name: VEROMESH_DATAHUB_GMS_URL
               value: {{ .Values.api.datahub.gmsUrl | quote }}
             - name: VEROMESH_INSTANCE_BASE

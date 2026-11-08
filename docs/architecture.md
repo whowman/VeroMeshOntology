@@ -41,4 +41,4 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 2. **Reasoning.** Add an OWL 2 RL materialization step (e.g. owlrl, W3C-licensed) or plug in a reasoner when ontologies need more than subclass closure.
 3. **Auth.** Put the API behind the same SSO as DataHub; pass the caller's DataHub token through instead of a service token.
 4. **Ontology versioning.** Store `owl:versionInfo` on bindings and add a diff/impact endpoint ("which assets are affected if this class changes").
-5. **Production deploy.** DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with RDF Delta for Fuseki high availability.
+5. **Production deploy.** DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with Fuseki replicated through Kafka (one writer, read replicas; see deploy/helm/README.md).

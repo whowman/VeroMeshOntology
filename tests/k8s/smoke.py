@@ -2,6 +2,8 @@
 
     python tests/k8s/smoke.py <api-url> load    # commit the example as source k8s-smoke
     python tests/k8s/smoke.py <api-url> check   # the committed model is still there
+    python tests/k8s/smoke.py <api-url> note    # one more small write (a new changeset)
+    python tests/k8s/smoke.py <fuseki-dataset-url> count   # quads in one Fuseki
 
 Standard library only, so it runs anywhere Python does.
 """
@@ -46,6 +48,25 @@ def check(base: str) -> None:
     print(f"model present: {source['facts']} facts from {SOURCE}")
 
 
+def note(base: str) -> None:
+    """A second, small write: open a changeset (recorded in the knowledge graph)."""
+    cs = call(base, "POST", "/api/v1/changesets", {"source": SOURCE + "-2"})["id"]
+    print(f"opened changeset {cs}")
+
+
+def count(dataset: str) -> None:
+    """Number of quads in a Fuseki dataset (writer or replica), straight from its query endpoint."""
+    q = "SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } }"
+    req = urllib.request.Request(
+        dataset + "/query",
+        data=q.encode(),
+        method="POST",
+        headers={"Content-Type": "application/sparql-query", "Accept": "application/sparql-results+json"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        print(json.load(r)["results"]["bindings"][0]["n"]["value"])
+
+
 if __name__ == "__main__":
     base, what = sys.argv[1].rstrip("/"), sys.argv[2]
-    {"load": load, "check": check}[what](base)
+    {"load": load, "check": check, "note": note, "count": count}[what](base)

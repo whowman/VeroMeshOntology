@@ -78,7 +78,7 @@ Stop with `scripts/dev-down.sh` (add `--volumes` to wipe data).
 
 ## Kubernetes
 
-Helm charts for a customer install are in [deploy/helm/](deploy/helm/README.md): the `veromesh` chart (service and Fuseki), plus overlays for DataHub's official charts that add the VeroMesh model plugin, theme and PostgreSQL. `deploy/helm/build-images.sh` builds every image the install needs.
+Helm charts for a customer install are in [deploy/helm/](deploy/helm/README.md): the `veromesh` chart (the service, and Fuseki as a writer plus read replicas kept in step through Kafka), plus overlays for DataHub's official charts that add the VeroMesh model plugin, theme and PostgreSQL. `deploy/helm/build-images.sh` builds every image the install needs.
 
 ## Testing
 

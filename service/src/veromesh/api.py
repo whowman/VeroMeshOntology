@@ -79,7 +79,7 @@ class CorrectionIn(BaseModel):
 
 def build_service(settings: Settings, datahub: DataHubPort | None = None) -> VeromeshService:
     return VeromeshService(
-        make_store(settings.rdf_store),
+        make_store(settings.rdf_store, settings.rdf_store_read_fallback),
         datahub or DataHubSdkPort(settings.datahub_gms_url, settings.datahub_token),
         bindings_graph=settings.bindings_graph,
         glossary_root_name=settings.glossary_root_name,

@@ -1,29 +1,49 @@
 {{- if .Values.fuseki.enabled }}
+{{- $replicated := include "veromesh.replicated" . -}}
+{{- $r := .Values.fuseki.replication -}}
 {{- $sel := include "veromesh.selectorLabels" (list . "fuseki") -}}
-# Apache Jena Fuseki with a persistent TDB2 dataset. One replica: replication
-# with RDF Delta is a separate Phase 0 item of the delivery plan.
+{{- $replicaSel := include "veromesh.selectorLabels" (list . "fuseki-replica") -}}
+{{- /*
+  Apache Jena Fuseki with a persistent TDB2 dataset.
+  Single node (replication off): one Fuseki takes reads and writes.
+  Replicated: this StatefulSet is the writer; the read replicas below follow it
+  through Kafka. The writer keeps its name, so its volume (the model) is the
+  same in both setups.
+*/}}
+{{- range $role := (ternary (list "writer" "replica") (list "writer") (eq $replicated "true")) }}
+{{- $isReplica := eq $role "replica" }}
+{{- with $ }}
+{{- $name := ternary (include "veromesh.fusekiReplicaName" .) (include "veromesh.fusekiName" .) $isReplica }}
+{{- $component := ternary "fuseki-replica" "fuseki" $isReplica }}
+{{- $s := ternary $replicaSel $sel $isReplica }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "veromesh.fusekiName" . }}
+  name: {{ $name }}
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
-    app.kubernetes.io/component: fuseki
+    app.kubernetes.io/component: {{ $component }}
 spec:
-  replicas: 1
-  serviceName: {{ include "veromesh.fusekiName" . }}-headless
+  replicas: {{ ternary $r.replicas 1 $isReplica }}
+  serviceName: {{ $name }}-headless
+  # Replicas start together; each catches up from Kafka on its own.
+  podManagementPolicy: {{ ternary "Parallel" "OrderedReady" $isReplica }}
   selector:
     matchLabels:
-      {{- $sel | nindent 6 }}
+      {{- $s | nindent 6 }}
   template:
     metadata:
       labels:
         {{- include "veromesh.labels" . | nindent 8 }}
-        app.kubernetes.io/component: fuseki
-      {{- with .Values.fuseki.podAnnotations }}
+        app.kubernetes.io/component: {{ $component }}
       annotations:
+        {{- if $replicated }}
+        # Restart when the Fuseki configuration changes.
+        checksum/config: {{ include (print $.Template.BasePath "/fuseki-config.yaml") . | sha256sum | trunc 16 }}
+        {{- end }}
+        {{- with .Values.fuseki.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
@@ -48,6 +68,14 @@ spec:
               value: {{ .Values.fuseki.dataset | quote }}
             - name: JAVA_OPTS
               value: {{ .Values.fuseki.javaOpts | quote }}
+            {{- if $replicated }}
+            - name: FUSEKI_CONFIG
+              value: /etc/fuseki/{{ $role }}.ttl
+            {{- end }}
+            {{- if $isReplica }}
+            - name: REPLICA_ID_FILE
+              value: /fuseki/databases/replica-id
+            {{- end }}
           ports:
             - name: http
               containerPort: 3030
@@ -57,7 +85,8 @@ spec:
               path: /$/ping
               port: http
             periodSeconds: 5
-            failureThreshold: 36
+            # A writer or a new replica first catches up with Kafka.
+            failureThreshold: {{ ternary 180 36 (eq $replicated "true") }}
           readinessProbe:
             httpGet:
               path: /$/ping
@@ -76,12 +105,37 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /fuseki/databases
+            {{- if $replicated }}
+            - name: config
+              mountPath: /etc/fuseki
+              readOnly: true
+            {{- if $r.kafka.existingSecret }}
+            - name: kafka
+              mountPath: /etc/fuseki/kafka
+              readOnly: true
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.fuseki.resources | nindent 12 }}
-      {{- if not .Values.fuseki.persistence.enabled }}
+      {{- if or (not .Values.fuseki.persistence.enabled) $replicated }}
       volumes:
+        {{- if not .Values.fuseki.persistence.enabled }}
         - name: data
           emptyDir: {}
+        {{- end }}
+        {{- if $replicated }}
+        - name: config
+          configMap:
+            name: {{ include "veromesh.fusekiName" . }}-config
+        {{- if $r.kafka.existingSecret }}
+        - name: kafka
+          secret:
+            secretName: {{ $r.kafka.existingSecret }}
+            items:
+              - key: kafka.properties
+                path: kafka.properties
+        {{- end }}
+        {{- end }}
       {{- end }}
       {{- with .Values.fuseki.nodeSelector }}
       nodeSelector:
@@ -91,9 +145,26 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.fuseki.affinity }}
+      {{- if .Values.fuseki.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.fuseki.affinity | nindent 8 }}
+      {{- else if $replicated }}
+      # Prefer spreading the writer and replicas over nodes, so one node going down
+      # leaves a copy to read from.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/instance
+                      operator: In
+                      values: [{{ .Release.Name | quote }}]
+                    - key: app.kubernetes.io/component
+                      operator: In
+                      values: ["fuseki", "fuseki-replica"]
       {{- end }}
   {{- if .Values.fuseki.persistence.enabled }}
   # Kept when the release is uninstalled: delete the PVC to discard the model.
@@ -104,7 +175,7 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- $sel | nindent 10 }}
+          {{- $s | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.fuseki.persistence.accessModes | nindent 10 }}
@@ -119,14 +190,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "veromesh.fusekiName" . }}
+  name: {{ ternary (include "veromesh.fusekiReplicasService" .) (include "veromesh.fusekiName" .) $isReplica }}
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
-    app.kubernetes.io/component: fuseki
+    app.kubernetes.io/component: {{ $component }}
 spec:
   type: ClusterIP
   selector:
-    {{- $sel | nindent 4 }}
+    {{- $s | nindent 4 }}
   ports:
     - name: http
       port: 3030
@@ -136,21 +207,41 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "veromesh.fusekiName" . }}-headless
+  name: {{ $name }}-headless
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
-    app.kubernetes.io/component: fuseki
+    app.kubernetes.io/component: {{ $component }}
 spec:
   clusterIP: None
   selector:
-    {{- $sel | nindent 4 }}
+    {{- $s | nindent 4 }}
   ports:
     - name: http
       port: 3030
       targetPort: http
       protocol: TCP
-{{- if .Values.networkPolicy.enabled }}
 ---
+{{- end }}
+{{- end }}
+{{- if and $replicated (ge (int $r.replicas) 2) }}
+# Keep at least one read replica up through node drains and upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "veromesh.fusekiReplicaName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki-replica
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- $replicaSel | nindent 6 }}
+---
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+# Fuseki has no authentication: only the VeroMesh service may reach the writer
+# or the replicas. (The replicas reach Kafka; this policy limits ingress only.)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -161,7 +252,12 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- $sel | nindent 6 }}
+      app.kubernetes.io/name: {{ include "veromesh.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["fuseki", "fuseki-replica"]
   policyTypes:
     - Ingress
   ingress:

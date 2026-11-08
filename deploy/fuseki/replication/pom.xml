@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VeroMesh Fuseki replication: the writer side.
+
+  A Jena module that publishes every committed write on the writer Fuseki to a
+  Kafka topic as an RDF Patch, so replica Fusekis (running Telicent's
+  Fuseki-Kafka module) apply the same changes. See README.md.
+
+  Built inside deploy/fuseki/Dockerfile. `mvn package` also gathers what the
+  image needs, at the versions pinned below (the Docker build overrides them
+  from deploy/versions.env):
+    target/server/jena-fuseki-server.jar   the Fuseki server (all of Jena)
+    target/lib/*.jar                       Fuseki-Kafka and its dependencies
+                                           (Kafka client, ...), without Jena
+    target/generated-sources/license/THIRD-PARTY.txt   their licenses
+  Telicent publish the Fuseki-Kafka module, not its bundled jar, to Maven
+  Central, so the jars are collected here rather than downloaded as one.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>ai.veromesh</groupId>
+  <artifactId>veromesh-fuseki-replication</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>VeroMesh Fuseki replication (writer)</name>
+
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+    </license>
+  </licenses>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+    <!-- Overridden by the Docker build from deploy/versions.env. -->
+    <jena.version>6.2.0</jena.version>
+    <fuseki-kafka.version>3.4.3</fuseki-kafka.version>
+    <!-- The version Fuseki-Kafka is built with (its dependency.kafka). -->
+    <kafka.version>3.9.2</kafka.version>
+    <junit.version>5.11.4</junit.version>
+    <slf4j.version>2.0.17</slf4j.version>
+  </properties>
+
+  <dependencies>
+    <!-- Provided at run time by the Fuseki server jar. -->
+    <dependency>
+      <groupId>org.apache.jena</groupId>
+      <artifactId>jena-arq</artifactId>
+      <version>${jena.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jena</groupId>
+      <artifactId>jena-rdfpatch</artifactId>
+      <version>${jena.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Shipped in target/lib: the replicas' Fuseki-Kafka module, and the Kafka client both use. -->
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <version>${kafka.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.telicent.jena</groupId>
+      <artifactId>jena-fuseki-kafka-module</artifactId>
+      <version>${fuseki-kafka.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <!-- Provided by the Fuseki server jar, at the pinned Jena version. -->
+        <exclusion>
+          <groupId>org.apache.jena</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>ch.qos.logback</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>${slf4j.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>${project.artifactId}</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all,-processing</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>fuseki-server</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/server</outputDirectory>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.apache.jena</groupId>
+                  <artifactId>jena-fuseki-server</artifactId>
+                  <version>${jena.version}</version>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+          <execution>
+            <id>module-jars</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <!-- License report for the jars in target/lib (shipped in the image). -->
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <version>2.4.0</version>
+        <executions>
+          <execution>
+            <id>third-party</id>
+            <phase>package</phase>
+            <goals>
+              <goal>add-third-party</goal>
+            </goals>
+            <configuration>
+              <excludedScopes>provided,test,system</excludedScopes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

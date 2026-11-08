@@ -78,6 +78,26 @@ def env_of(container: dict) -> dict[str, dict]:
     return {e["name"]: e for e in container.get("env", [])}
 
 
+def selects(selector: dict, labels: dict) -> bool:
+    """Whether a Kubernetes label selector (matchLabels + matchExpressions) matches these labels."""
+    if not selector.get("matchLabels", {}).items() <= labels.items():
+        return False
+    for e in selector.get("matchExpressions", []):
+        if e["operator"] == "In" and labels.get(e["key"]) not in e["values"]:
+            return False
+        if e["operator"] == "NotIn" and labels.get(e["key"]) in e["values"]:
+            return False
+    return True
+
+
+def pod_labels(workload: dict) -> dict:
+    return workload["spec"]["template"]["metadata"]["labels"]
+
+
+WRITER = "veromesh-fuseki"
+REPLICA = "veromesh-fuseki-replica"
+
+
 def pod_specs(docs: list[dict]) -> list[tuple[str, dict]]:
     out = []
     for d in docs:
@@ -111,6 +131,10 @@ def test_lint(variant):
         "api.image.pullPolicy=Sometimes",
         "store.url=http://no-scheme-prefix:3030/ds",
         "api.datahub.gmsUrl=datahub:8080",
+        "fuseki.replication.replicas=0",
+        "fuseki.replication.kafka.bootstrapServers=kafka",
+        "fuseki.replication.kafka.topic=bad topic",
+        "fuseki.replication.kafka.replicationFactor=-1",
     ],
 )
 def test_schema_rejects_bad_values(bad):
@@ -131,14 +155,19 @@ def test_default_install_resources():
     docs = render()
     kinds = sorted(f"{d['kind']}/{d['metadata']['name']}" for d in docs)
     assert kinds == [
+        "ConfigMap/veromesh-fuseki-config",
         "Deployment/veromesh-api",
         "NetworkPolicy/veromesh-fuseki",
         "Pod/veromesh-test",
+        "PodDisruptionBudget/veromesh-fuseki-replica",
         "Service/veromesh-api",
         "Service/veromesh-fuseki",
         "Service/veromesh-fuseki-headless",
+        "Service/veromesh-fuseki-replica-headless",
+        "Service/veromesh-fuseki-replicas",
         "ServiceAccount/veromesh",
         "StatefulSet/veromesh-fuseki",
+        "StatefulSet/veromesh-fuseki-replica",
     ], kinds
 
 
@@ -149,6 +178,9 @@ def test_service_finds_fuseki_and_datahub():
     fuseki_svc = one(docs, "Service", "veromesh-fuseki")
     assert env["VEROMESH_RDF_STORE"]["value"] == "fuseki:http://veromesh-fuseki:3030/veromesh"
     assert fuseki_svc["spec"]["ports"][0]["port"] == 3030
+    # Writes go to the writer; reads fall back to the replicas while it is down.
+    assert env["VEROMESH_RDF_STORE_READ_FALLBACK"]["value"] == "http://veromesh-fuseki-replicas:3030/veromesh"
+    assert one(docs, "Service", "veromesh-fuseki-replicas")["spec"]["ports"][0]["port"] == 3030
     assert env["VEROMESH_DATAHUB_GMS_URL"]["value"] == "http://datahub-datahub-gms:8080"
     # No token given: no Secret, no token variable
     assert "VEROMESH_DATAHUB_TOKEN" not in env
@@ -160,11 +192,12 @@ def test_service_finds_fuseki_and_datahub():
 
 def test_selectors_match_their_pods():
     docs = render()
-    for kind in ("Deployment", "StatefulSet"):
-        d = one(docs, kind)
+    workloads = by_kind(docs, "Deployment") + by_kind(docs, "StatefulSet")
+    assert len(workloads) == 3
+    for d in workloads:
         want = d["spec"]["selector"]["matchLabels"]
         have = d["spec"]["template"]["metadata"]["labels"]
-        assert want.items() <= have.items(), (kind, want, have)
+        assert want.items() <= have.items(), (d["metadata"]["name"], want, have)
     for svc in by_kind(docs, "Service"):
         targets = [
             d
@@ -172,17 +205,23 @@ def test_selectors_match_their_pods():
             if svc["spec"]["selector"].items() <= d["spec"]["template"]["metadata"]["labels"].items()
         ]
         assert len(targets) == 1, f"Service {svc['metadata']['name']} selects {len(targets)} workloads"
-    sts = one(docs, "StatefulSet")
-    assert sts["spec"]["serviceName"] == "veromesh-fuseki-headless"
+    assert one(docs, "StatefulSet", WRITER)["spec"]["serviceName"] == "veromesh-fuseki-headless"
+    assert one(docs, "StatefulSet", REPLICA)["spec"]["serviceName"] == "veromesh-fuseki-replica-headless"
+    pdb = one(docs, "PodDisruptionBudget")
+    assert pdb["spec"]["maxUnavailable"] == 1
+    assert selects(pdb["spec"]["selector"], pod_labels(one(docs, "StatefulSet", REPLICA)))
+    assert not selects(pdb["spec"]["selector"], pod_labels(one(docs, "StatefulSet", WRITER)))
 
 
 def test_only_the_service_may_reach_fuseki():
     docs = render()
     policy = one(docs, "NetworkPolicy")
-    fuseki_labels = one(docs, "StatefulSet")["spec"]["template"]["metadata"]["labels"]
     api_labels = one(docs, "Deployment")["spec"]["template"]["metadata"]["labels"]
     test_labels = one(docs, "Pod")["metadata"]["labels"]
-    assert policy["spec"]["podSelector"]["matchLabels"].items() <= fuseki_labels.items()
+    # Covers the writer and every replica, and nothing else.
+    for sts in by_kind(docs, "StatefulSet"):
+        assert selects(policy["spec"]["podSelector"], pod_labels(sts)), sts["metadata"]["name"]
+    assert not selects(policy["spec"]["podSelector"], api_labels)
     assert policy["spec"]["policyTypes"] == ["Ingress"]
     (rule,) = policy["spec"]["ingress"]
     selectors = [p["podSelector"]["matchLabels"] for p in rule["from"]]
@@ -191,8 +230,9 @@ def test_only_the_service_may_reach_fuseki():
     assert rule["ports"] == [{"port": 3030, "protocol": "TCP"}]
 
 
-def test_model_survives_pod_restarts_and_uninstall():
-    sts = one(render(), "StatefulSet")
+@pytest.mark.parametrize("name", [WRITER, REPLICA])
+def test_model_survives_pod_restarts_and_uninstall(name):
+    sts = one(render(), "StatefulSet", name)
     (claim,) = sts["spec"]["volumeClaimTemplates"]
     assert claim["metadata"]["name"] == "data"
     assert claim["spec"]["resources"]["requests"]["storage"] == "10Gi"
@@ -223,9 +263,10 @@ def test_every_container_runs_unprivileged(variant):
 def test_images_default_to_the_pinned_versions():
     docs = render()
     api = one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0]
-    fuseki = one(docs, "StatefulSet")["spec"]["template"]["spec"]["containers"][0]
     assert api["image"] == f"veromesh/service:{project_version('service')}"
-    assert fuseki["image"] == f"veromesh/fuseki:{versions()['JENA_VERSION']}"
+    for sts in by_kind(docs, "StatefulSet"):
+        fuseki = sts["spec"]["template"]["spec"]["containers"][0]
+        assert fuseki["image"] == f"veromesh/fuseki:{versions()['JENA_VERSION']}"
 
 
 def test_chart_app_version_is_the_service_version():
@@ -255,10 +296,10 @@ def test_inline_token_creates_a_secret():
         "VEROMESH_DATAHUB_TOKEN"
     ]
     assert ref["valueFrom"]["secretKeyRef"] == {"name": "veromesh-datahub", "key": "token"}
-    # Persistence off: an emptyDir, no claim
-    sts = one(docs, "StatefulSet")
-    assert "volumeClaimTemplates" not in sts["spec"]
-    assert {"name": "data", "emptyDir": {}} in sts["spec"]["template"]["spec"]["volumes"]
+    # Persistence off: an emptyDir, no claim (a restarted Fuseki rebuilds from Kafka)
+    for sts in by_kind(docs, "StatefulSet"):
+        assert "volumeClaimTemplates" not in sts["spec"]
+        assert {"name": "data", "emptyDir": {}} in sts["spec"]["template"]["spec"]["volumes"]
     assert not by_kind(docs, "NetworkPolicy")
 
 
@@ -281,10 +322,164 @@ def test_production_shape():
     assert ing["spec"]["ingressClassName"] == "nginx"
     assert ing["spec"]["tls"][0]["secretName"] == "veromesh-tls"
     assert ing["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["name"] == "prod-veromesh-api"
-    claim = one(docs, "StatefulSet")["spec"]["volumeClaimTemplates"][0]["spec"]
-    assert claim["storageClassName"] == "premium-rwo" and claim["resources"]["requests"]["storage"] == "50Gi"
+    for sts in by_kind(docs, "StatefulSet"):
+        claim = sts["spec"]["volumeClaimTemplates"][0]["spec"]
+        assert claim["storageClassName"] == "premium-rwo"
+        assert claim["resources"]["requests"]["storage"] == "50Gi"
     froms = one(docs, "NetworkPolicy")["spec"]["ingress"][0]["from"]
     assert {"podSelector": {"matchLabels": {"app": "fuseki-backup"}}} in froms
+    # Replication over a managed Kafka with TLS/SASL settings from a Secret
+    assert one(docs, "StatefulSet", "prod-veromesh-fuseki-replica")["spec"]["replicas"] == 3
+    for sts in by_kind(docs, "StatefulSet"):
+        spec = sts["spec"]["template"]["spec"]
+        assert {
+            "name": "kafka",
+            "secret": {
+                "secretName": "veromesh-kafka",
+                "items": [{"key": "kafka.properties", "path": "kafka.properties"}],
+            },
+        } in spec["volumes"]
+        assert {"name": "kafka", "mountPath": "/etc/fuseki/kafka", "readOnly": True} in spec["containers"][0][
+            "volumeMounts"
+        ]
+    config = one(docs, "ConfigMap")["data"]
+    for f in ("writer.ttl", "replica.ttl"):
+        assert '"/etc/fuseki/kafka/kafka.properties"' in config[f]
+        assert '"b-1.kafka.acme.example:9094,b-2.kafka.acme.example:9094"' in config[f]
+        assert '"acme.veromesh.graph"' in config[f]
+    assert 'vmr:replicationFactor "3"' in config["writer.ttl"]
+
+
+# ---------------------------------------------------------------------------- replication
+
+VMR = "https://veromesh.ai/ns/fuseki-replication#"
+FK = "http://jena.apache.org/fuseki/kafka#"
+FUSEKI = "http://jena.apache.org/fuseki#"
+TDB2 = "http://jena.apache.org/2016/tdb#"
+
+
+def fuseki_config(docs: list[dict], name: str):
+    """One of the rendered Fuseki configuration files, parsed."""
+    rdflib = pytest.importorskip("rdflib")
+    g = rdflib.Graph()
+    g.parse(data=one(docs, "ConfigMap")["data"][name], format="turtle", publicID="file:///etc/fuseki/x")
+    return g, rdflib
+
+
+def values_of(g, rdflib, prop: str) -> set[str]:
+    return {str(o) for o in g.objects(None, rdflib.URIRef(prop))}
+
+
+def endpoints(g, rdflib) -> set[tuple[str, str]]:
+    out = set()
+    for ep in g.objects(None, rdflib.URIRef(FUSEKI + "endpoint")):
+        op = g.value(ep, rdflib.URIRef(FUSEKI + "operation"))
+        name = g.value(ep, rdflib.URIRef(FUSEKI + "name"))
+        out.add((str(op).removeprefix(FUSEKI), str(name)))
+    return out
+
+
+def test_writer_takes_writes_and_publishes_them_to_kafka():
+    docs = render()
+    g, rdflib = fuseki_config(docs, "writer.ttl")
+    assert values_of(g, rdflib, FUSEKI + "name") >= {"veromesh"}
+    # The endpoints the service uses: query, update, Graph Store read/write
+    assert endpoints(g, rdflib) == {("query", "query"), ("update", "update"), ("gsp-rw", "data")}
+    assert (None, rdflib.RDF.type, rdflib.URIRef(VMR + "PublishingDataset")) in g
+    assert values_of(g, rdflib, VMR + "bootstrapServers") == {"prerequisites-kafka:9092"}
+    assert values_of(g, rdflib, VMR + "topic") == {"veromesh.graph"}
+    assert values_of(g, rdflib, VMR + "stateFile") == {"/fuseki/databases/writer.state"}
+    assert values_of(g, rdflib, VMR + "transactionalId") == {"veromesh-fuseki-veromesh.graph"}
+    assert not values_of(g, rdflib, VMR + "configFile"), "no Kafka properties Secret by default"
+    # The single-node dataset location, so switching replication on keeps an existing model.
+    assert values_of(g, rdflib, TDB2 + "location") == {"/fuseki/databases/veromesh"}
+    run_sh = (ROOT / "deploy/fuseki/run.sh").read_text()
+    assert '--loc "$DB/$FUSEKI_DATASET"' in run_sh and "DB=/fuseki/databases" in run_sh
+
+
+def test_replicas_are_read_only_and_follow_the_topic():
+    docs = render()
+    g, rdflib = fuseki_config(docs, "replica.ttl")
+    assert endpoints(g, rdflib) == {("query", "query"), ("gsp-r", "data")}, "no update endpoint"
+    assert values_of(g, rdflib, TDB2 + "location") == {"/fuseki/databases/veromesh"}
+    assert values_of(g, rdflib, FK + "topic") == {"veromesh.graph"}
+    assert values_of(g, rdflib, FK + "bootstrapServers") == {"prerequisites-kafka:9092"}
+    assert values_of(g, rdflib, FK + "fusekiServiceName") == {"/veromesh"}
+    assert values_of(g, rdflib, FK + "groupId") == {"env:{VEROMESH_KAFKA_GROUP_ID}"}
+    assert values_of(g, rdflib, FK + "stateFile") == {"/fuseki/databases/replica.state"}
+    # Kafka settings, as (key value) lists
+    from rdflib.collection import Collection
+
+    pairs = {}
+    for lst in g.objects(None, rdflib.URIRef(FK + "config")):
+        k, v = (str(x) for x in Collection(g, lst))
+        pairs[k] = v
+    assert pairs == {
+        "isolation.level": "read_committed",
+        "auto.offset.reset": "earliest",
+        "allow.auto.create.topics": "false",
+    }
+
+
+def test_writer_and_replicas_run_their_configuration():
+    docs = render()
+    cm = one(docs, "ConfigMap")
+    for name, role in ((WRITER, "writer"), (REPLICA, "replica")):
+        sts = one(docs, "StatefulSet", name)
+        spec = sts["spec"]["template"]["spec"]
+        c = spec["containers"][0]
+        env = env_of(c)
+        assert env["FUSEKI_CONFIG"]["value"] == f"/etc/fuseki/{role}.ttl"
+        assert ("REPLICA_ID_FILE" in env) == (role == "replica")
+        assert {"name": "config", "mountPath": "/etc/fuseki", "readOnly": True} in c["volumeMounts"]
+        assert {"name": "config", "configMap": {"name": cm["metadata"]["name"]}} in spec["volumes"]
+        assert "checksum/config" in sts["spec"]["template"]["metadata"]["annotations"]
+        # Catching up with Kafka can take a while before Fuseki answers.
+        assert c["startupProbe"]["failureThreshold"] * c["startupProbe"]["periodSeconds"] >= 600
+        # Spread over nodes by default
+        terms = spec["affinity"]["podAntiAffinity"]["preferredDuringSchedulingIgnoredDuringExecution"]
+        assert terms[0]["podAffinityTerm"]["topologyKey"] == "kubernetes.io/hostname"
+    assert one(docs, "StatefulSet", WRITER)["spec"]["replicas"] == 1
+    assert one(docs, "StatefulSet", REPLICA)["spec"]["replicas"] == 2
+    assert one(docs, "StatefulSet", REPLICA)["spec"]["podManagementPolicy"] == "Parallel"
+
+
+def test_replica_count_and_custom_affinity():
+    docs = render(sets=("fuseki.replication.replicas=1", "fuseki.affinity.nodeAffinity.x=y"))
+    assert one(docs, "StatefulSet", REPLICA)["spec"]["replicas"] == 1
+    assert not by_kind(docs, "PodDisruptionBudget"), "a PDB on one replica would block node drains"
+    for sts in by_kind(docs, "StatefulSet"):
+        assert sts["spec"]["template"]["spec"]["affinity"] == {"nodeAffinity": {"x": "y"}}
+
+
+def test_single_node_without_replication():
+    docs = render("single-node-values.yaml")
+    (sts,) = by_kind(docs, "StatefulSet")
+    assert sts["metadata"]["name"] == WRITER
+    assert not by_kind(docs, "ConfigMap") and not by_kind(docs, "PodDisruptionBudget")
+    c = sts["spec"]["template"]["spec"]["containers"][0]
+    assert "FUSEKI_CONFIG" not in env_of(c)
+    assert c["startupProbe"]["failureThreshold"] == 36
+    assert "affinity" not in sts["spec"]["template"]["spec"]
+    api = env_of(one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert "VEROMESH_RDF_STORE_READ_FALLBACK" not in api
+    assert {s["metadata"]["name"] for s in by_kind(docs, "Service")} == {
+        "veromesh-api",
+        "veromesh-fuseki",
+        "veromesh-fuseki-headless",
+    }
+
+
+def test_replication_versions_agree():
+    v = versions()
+    dockerfile = (ROOT / "deploy/fuseki/Dockerfile").read_text()
+    assert f"ARG JENA_VERSION={v['JENA_VERSION']}" in dockerfile
+    assert f"ARG FUSEKI_KAFKA_VERSION={v['FUSEKI_KAFKA_VERSION']}" in dockerfile
+    pom = (ROOT / "deploy/fuseki/replication/pom.xml").read_text()
+    assert f"<jena.version>{v['JENA_VERSION']}</jena.version>" in pom
+    assert f"<fuseki-kafka.version>{v['FUSEKI_KAFKA_VERSION']}</fuseki-kafka.version>" in pom
+    compose = (ROOT / "deploy/docker-compose.veromesh.yml").read_text()
+    assert f"FUSEKI_KAFKA_VERSION:-{v['FUSEKI_KAFKA_VERSION']}" in compose
 
 
 # ---------------------------------------------------------------------------- Kubernetes schemas
@@ -378,3 +573,7 @@ def test_prerequisites_overlay_matches_the_local_stack():
     assert not any("mysql" in n for n in names), names
     assert any("opensearch" in n for n in names), names
     assert any("kafka" in n for n in names), names
+    # One broker that allows transactions (the VeroMesh writer publishes in transactions)
+    rendered = yaml.safe_dump_all(docs)
+    for setting in ("transaction.state.log.replication.factor=1", "transaction.state.log.min.isr=1"):
+        assert setting in rendered, setting

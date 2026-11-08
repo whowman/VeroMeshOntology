@@ -1,5 +1,5 @@
 # The shape of a production install: token from an existing Secret, ingress
-# with TLS, a named storage class, a private registry.
+# with TLS, a named storage class, a private registry, a managed Kafka over TLS.
 imagePullSecrets:
   - name: registry-credentials
 api:
@@ -30,6 +30,13 @@ fuseki:
   resources:
     requests: {cpu: "1", memory: 6Gi}
     limits: {memory: 6Gi}
+  replication:
+    replicas: 3
+    kafka:
+      bootstrapServers: b-1.kafka.acme.example:9094,b-2.kafka.acme.example:9094
+      topic: acme.veromesh.graph
+      replicationFactor: 3
+      existingSecret: veromesh-kafka
 networkPolicy:
   fusekiAllowFrom:
     - podSelector:

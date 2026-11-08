@@ -107,7 +107,26 @@
         "podAnnotations": {"type": "object"},
         "nodeSelector": {"type": "object"},
         "tolerations": {"type": "array"},
-        "affinity": {"type": "object"}
+        "affinity": {"type": "object"},
+        "replication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "replicas": {"type": "integer", "minimum": 1, "maximum": 9},
+            "kafka": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bootstrapServers", "topic"],
+              "properties": {
+                "bootstrapServers": {"type": "string", "pattern": "^[^\\s,]+:[0-9]+(,[^\\s,]+:[0-9]+)*$"},
+                "topic": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,249}$"},
+                "replicationFactor": {"type": "integer", "minimum": 0, "maximum": 32},
+                "existingSecret": {"type": "string"}
+              }
+            }
+          }
+        }
       }
     },
     "store": {

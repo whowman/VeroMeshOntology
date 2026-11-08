@@ -8,6 +8,7 @@ services:
       context: fuseki
       args:
         JENA_VERSION: ${JENA_VERSION:-6.2.0}
+        FUSEKI_KAFKA_VERSION: ${FUSEKI_KAFKA_VERSION:-3.4.3}
     image: veromesh/fuseki:${JENA_VERSION:-6.2.0}
     environment:
       FUSEKI_DATASET: veromesh

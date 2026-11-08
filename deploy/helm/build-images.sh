@@ -7,7 +7,7 @@
 #
 # Images
 #   veromesh/service                  the VeroMesh service          (chart: api.image)
-#   veromesh/fuseki                   Apache Jena Fuseki            (chart: fuseki.image)
+#   veromesh/fuseki                   Apache Jena Fuseki, writer and replicas (chart: fuseki.image)
 #   veromesh/connectors               connector CLI, for jobs       (run with kubectl)
 #   veromesh/datahub-frontend-react   branded DataHub UI            (datahub-values.yaml)
 #   veromesh/datahub-model-plugin     custom DataHub aspect         (datahub-values.yaml)
@@ -41,7 +41,8 @@ build() {  # build <name> <version> <docker build args...>
 }
 
 build service "$SERVICE_VERSION" -f "$ROOT/service/Dockerfile" "$ROOT"
-build fuseki "$JENA_VERSION" --build-arg JENA_VERSION="$JENA_VERSION" "$ROOT/deploy/fuseki"
+build fuseki "$JENA_VERSION" --build-arg JENA_VERSION="$JENA_VERSION" \
+  --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" "$ROOT/deploy/fuseki"
 build connectors "$CONNECTORS_VERSION" "$ROOT/connectors"
 
 if [[ -z "${SKIP_DATAHUB:-}" ]]; then
