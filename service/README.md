@@ -20,6 +20,32 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 
 | `VEROMESH_INSTANCE_BASE` | `urn:veromesh:org:` | IRI prefix for model rows imported from workbooks |
 | `VEROMESH_ONTOLOGY_DIR` | repo `ontology/` (image: `/app/ontology`) | Meta-model, validation rules and examples |
+| `VEROMESH_OIDC_ISSUER` | – | Identity provider issuer. Entra ID: `https://login.microsoftonline.com/<tenant ID>/v2.0`; Keycloak: `https://<host>/realms/<realm>` |
+| `VEROMESH_OIDC_AUDIENCE` | – | What tokens are issued for: the API's application (client) ID or Application ID URI; several comma-separated |
+| `VEROMESH_OIDC_ROLES_CLAIM` | `roles` | Claim with the caller's roles; dotted for nested claims (`realm_access.roles` in Keycloak) |
+| `VEROMESH_OIDC_ROLE_PREFIX` | – | Prefix stripped from role names, e.g. `VeroMesh.` for Entra app roles `VeroMesh.Admin` |
+| `VEROMESH_OIDC_JWKS_URL` | from discovery | Signing keys, when the issuer's discovery document is not reachable |
+| `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
+
+## Sign-in
+
+Every route except `/health` and the docs pages needs `Authorization: Bearer <access token>` from the customer's OpenID Connect provider: Entra ID first (Copilot agents sign in there), Keycloak for customers without Microsoft, or the customer's own provider. The service checks the token's signature against the provider's published keys, its issuer, audience and expiry, and reads the caller's roles from one claim (`src/veromesh/auth.py`). It refuses to start with sign-in neither configured nor turned off.
+
+| Role | May |
+| --- | --- |
+| `admin` | Everything, including `POST /sparql`, loading ontologies, publishing the glossary, registering sources and rebuilding the effective model |
+| `steward` | Read everything, including personal details; review queue, conflicts, provenance, attestations and corrections; bindings |
+| `connector` | Write changesets and single entities (the spreadsheet and CSV connectors, HR and CMDB feeds); read personal details |
+| `reader` | Read the model on a need-to-know basis (below) |
+| `agent` | An AI agent: reads like a reader. The decision check comes next |
+
+A token without any of these roles gets 403.
+
+**Need to know.** Readers and agents get what acting within an authority needs: roles, authorities and their limits, scopes and dates, co-approvals, owners, actions, KPIs, and who fills which role. They do not get personal details: fields the schema marks `"personal": true` (a person's email, employee ID and reporting line) are left out of every entity answer, including `?asOf=` and `?source=`, and their names are listed under `withheld`. Stewards, connectors and administrators get the whole record. Raw SPARQL, which could read anything, stays with administrators.
+
+**Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
+
+**Connectors** send a token with `--token` / `VEROMESH_TOKEN`, or get one themselves with client credentials (`VEROMESH_TOKEN_URL`, `VEROMESH_CLIENT_ID`, `VEROMESH_CLIENT_SECRET`, `VEROMESH_SCOPE`; for Entra ID the scope is `<Application ID URI>/.default`).
 
 ## Model API
 

@@ -20,6 +20,9 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+
+# The suites exercise the API itself; sign-in has its own suite (service/tests/test_auth.py).
+os.environ.setdefault("VEROMESH_AUTH_DISABLED", "true")
 from fastapi.testclient import TestClient
 from rdflib import OWL, RDF, RDFS, Graph, Literal, Namespace, URIRef
 from veromesh.api import create_app

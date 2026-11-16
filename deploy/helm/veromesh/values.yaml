@@ -39,6 +39,25 @@ api:
   # Instance IRIs for model entities loaded from workbooks, one per customer install.
   instanceBase: "urn:veromesh:org:"
 
+  # Sign-in (OpenID Connect). Every route but /health and the docs needs a
+  # bearer token from this issuer; the service will not start without it.
+  # Entra ID: issuer https://login.microsoftonline.com/<tenant ID>/v2.0 (the
+  # API's app registration set to v2 access tokens), audience the API's
+  # application (client) ID or Application ID URI, roles from app roles
+  # (rolesClaim "roles", rolePrefix e.g. "VeroMesh."). Keycloak: issuer
+  # https://<host>/realms/<realm>, rolesClaim "realm_access.roles".
+  # Roles: admin, steward, connector, reader, agent (see service/README.md).
+  auth:
+    issuer: ""
+    # One or more, comma-separated.
+    audience: ""
+    rolesClaim: roles
+    rolePrefix: ""
+    # Default: from the issuer's discovery document.
+    jwksUrl: ""
+    # Development and CI only: no sign-in, every request acts as an administrator.
+    disabled: false
+
   # Extra environment variables for the service, as name: value.
   env: {}
 

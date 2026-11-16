@@ -99,6 +99,27 @@ spec:
               value: {{ .Values.api.datahub.gmsUrl | quote }}
             - name: VEROMESH_INSTANCE_BASE
               value: {{ .Values.api.instanceBase | quote }}
+            {{- with .Values.api.auth }}
+            {{- if .disabled }}
+            - name: VEROMESH_AUTH_DISABLED
+              value: "true"
+            {{- else }}
+            - name: VEROMESH_OIDC_ISSUER
+              value: {{ .issuer | quote }}
+            - name: VEROMESH_OIDC_AUDIENCE
+              value: {{ .audience | quote }}
+            - name: VEROMESH_OIDC_ROLES_CLAIM
+              value: {{ .rolesClaim | quote }}
+            {{- if .rolePrefix }}
+            - name: VEROMESH_OIDC_ROLE_PREFIX
+              value: {{ .rolePrefix | quote }}
+            {{- end }}
+            {{- if .jwksUrl }}
+            - name: VEROMESH_OIDC_JWKS_URL
+              value: {{ .jwksUrl | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if or .Values.api.datahub.token .Values.api.datahub.existingSecret }}
             - name: VEROMESH_DATAHUB_TOKEN
               valueFrom:

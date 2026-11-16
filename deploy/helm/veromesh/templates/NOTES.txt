@@ -11,6 +11,18 @@ Reach the API from your machine:
 Through the ingress: http{{ if .Values.api.ingress.tls }}s{{ end }}://{{ .Values.api.ingress.host }}/docs
 {{- end }}
 
+{{- if .Values.api.auth.disabled }}
+
+SIGN-IN IS OFF: every request acts as an administrator. Development and CI only.
+{{- else if not (and .Values.api.auth.issuer .Values.api.auth.audience) }}
+
+SIGN-IN IS NOT CONFIGURED: the service will not start until api.auth.issuer and
+api.auth.audience are set (see values.yaml).
+{{- else }}
+
+Sign-in: tokens from {{ .Values.api.auth.issuer }} for {{ .Values.api.auth.audience }}.
+{{- end }}
+
 Knowledge graph: {{ include "veromesh.rdfStore" . }}
 DataHub GMS:     {{ .Values.api.datahub.gmsUrl }}
 {{- if not (or .Values.api.datahub.token .Values.api.datahub.existingSecret) }}

@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+# The suites exercise the API itself; sign-in has its own suite (service/tests/test_auth.py).
+os.environ.setdefault("VEROMESH_AUTH_DISABLED", "true")
+
 from veromesh.datahub import Binding
 from veromesh.rdf_store import RDFStore, make_store
 from veromesh.service import VeromeshService

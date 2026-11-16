@@ -59,7 +59,12 @@ for image in "${built[@]}"; do
       target="${REGISTRY:?set REGISTRY to push}/$image"
       docker tag "$image" "$target" && docker push -q "$target" ;;
     kind)
-      kind load docker-image "$image" --name "$KIND_CLUSTER" >/dev/null && echo ">> Loaded $image into kind/$KIND_CLUSTER" ;;
+      # Through an archive of this machine's platform only: "kind load docker-image"
+      # fails ("content digest not found") on images whose base is a multi-platform index.
+      archive=$(mktemp)
+      docker save --platform "$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}')" -o "$archive" "$image"
+      kind load image-archive "$archive" --name "$KIND_CLUSTER" >/dev/null && echo ">> Loaded $image into kind/$KIND_CLUSTER"
+      rm -f "$archive" ;;
   esac
 done
 printf '%s\n' "${built[@]}"

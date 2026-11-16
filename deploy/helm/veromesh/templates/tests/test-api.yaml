@@ -1,4 +1,5 @@
-# helm test <release>: the service answers, reads its schema, and reaches the knowledge graph.
+# helm test <release>: the service answers and, with sign-in off, reads its schema and the
+# knowledge graph; with sign-in on, it refuses a request without a token.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -32,9 +33,19 @@ spec:
               with urllib.request.urlopen(base + path, timeout=30) as r:
                   return json.load(r)
           assert get("/health")["status"] == "ok"
+          {{- if .Values.api.auth.disabled }}
           assert any(t["type"] == "roles" for t in get("/api/v1/schema")), "schema has no roles"
           # Reads the source registry from the knowledge graph.
           print("sources:", get("/api/v1/sources"))
+          {{- else }}
+          import urllib.error
+          try:
+              get("/api/v1/sources")
+              raise SystemExit("the API answered without a token")
+          except urllib.error.HTTPError as e:
+              assert e.code == 401, f"expected 401 without a token, got {e.code}"
+          print("sign-in enforced")
+          {{- end }}
           print("ok")
       securityContext:
         allowPrivilegeEscalation: false

@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     # branding/ folder; the Docker image sets /app/branding.
     branding_dir: str = str(Path(__file__).resolve().parents[3] / "branding")
 
+    # Sign-in (see auth.py). The issuer is the identity provider's issuer URL:
+    # Entra ID https://login.microsoftonline.com/<tenant ID>/v2.0 (v2 access
+    # tokens), Keycloak https://<host>/realms/<realm>. The audience is what the
+    # tokens are issued for: the API's application (client) ID or its
+    # Application ID URI; several may be given, comma-separated.
+    auth_disabled: bool = False  # local development and tests only: every request acts as an administrator
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None  # default: from the issuer's discovery document
+    oidc_algorithms: str = "RS256"
+    # Claim holding the caller's roles, dotted for nested claims: "roles" for
+    # Entra app roles, "realm_access.roles" for Keycloak realm roles.
+    oidc_roles_claim: str = "roles"
+    oidc_role_prefix: str = ""  # e.g. "VeroMesh." for Entra app roles named VeroMesh.Admin
+
 
 @lru_cache
 def get_settings() -> Settings:
