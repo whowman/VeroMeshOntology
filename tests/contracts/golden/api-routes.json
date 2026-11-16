@@ -285,6 +285,49 @@
       "422"
     ]
   },
+  "POST /api/v1/decisions/check": {
+    "body": {
+      "application/json": {
+        "action": "string",
+        "agent?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "amount?": {
+          "anyOf": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "currency?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "onDate?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
   "POST /api/v1/effective/rebuild": {
     "params": [],
     "status": [
