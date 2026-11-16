@@ -78,15 +78,18 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         amount: str | None = None,
         currency: str | None = None,
         note: str | None = None,
+        agent: str | None = None,
     ) -> dict:
         """Ask before any consequential action whether you may take it now, for the person you act for.
         action: the action's ID (e.g. ApproveSupplierInvoice); amount and currency when it has one
         (e.g. "3000", "USD"); note: what it is about (e.g. the invoice number), kept in the decision log.
+        agent: leave it out; your sign-in says which agent you are. (Only an administrator testing a
+        check, or an install with sign-in off, names the agent.)
         Returns outcome allow | consult | refuse, reasons, whom to consult, whom to inform, and
         escalateTo when it is above your limit. The decision is logged."""
         return _call(
             lambda: handlers["check_action"](
-                state(ctx), action=action, amount=amount, currency=currency, note=note
+                state(ctx), action=action, amount=amount, currency=currency, note=note, agent=agent
             )
         )
 

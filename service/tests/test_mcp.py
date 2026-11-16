@@ -121,3 +121,26 @@ def test_lookups_are_need_to_know(mcp):
     assert "email" not in person and "email" in person["withheld"]
     msg, err = call(client, agent_app(), "get_entity", type="nonsense", id="x")
     assert err
+
+
+def test_with_sign_in_off_the_agent_is_named(service):
+    """Local development: sign-in off, so the check names the agent, as the REST route does."""
+    from veromesh.config import Settings
+
+    log = D.MemoryLog()
+    app = create_app(service, Settings(rdf_store="memory", auth_disabled=True), decision_log=log)
+    with TestClient(app) as client:
+        load_example(client)
+        msg, err = call(client, {}, "check_action", action="ApproveSupplierInvoice")
+        assert err and "Give the agent ID" in msg
+        d, err = call(client, {}, "check_action", action="ApproveSupplierInvoice", agent="InvoiceAssistant")
+        assert not err and d["agent"] == "InvoiceAssistant" and log.verify().entries == 1
+
+
+def test_a_signed_in_agent_cannot_name_another(mcp):
+    client, log = mcp
+    msg, err = call(
+        client, agent_app(), "check_action", action="ApproveSupplierInvoice", agent="SomeOtherAgent"
+    )
+    assert err and "not SomeOtherAgent" in msg
+    assert log.verify().entries == 0
