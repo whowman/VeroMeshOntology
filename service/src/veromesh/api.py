@@ -389,6 +389,61 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             )
         return pid, True
 
+    def agent_for(s: VeromeshService, c: Settings, who: auth.Caller) -> tuple[str | None, str | None]:
+        """(the Agent entity this signed-in service is, None) or (None, why not)."""
+        if who.kind != "app":
+            return None, "Signed in as a person, not an agent."
+        if not who.client_id:
+            return None, "The token carries no client ID (azp, appid or client_id)."
+        hits = prov.matching(s.store, "agents", "signInClientId", who.client_id)
+        if not hits:
+            return (
+                None,
+                f"No agent in the model signs in with client ID {who.client_id}; register it on the agent.",
+            )
+        if len(hits) > 1:
+            return None, f"Several agents sign in with client ID {who.client_id}: {', '.join(hits)}."
+        return hits[0], None
+
+    @app.get("/api/v1/me", dependencies=need(auth.READ), tags=["sign-in"])
+    def me(s: Svc, c: Cfg, who: Who) -> dict:
+        """Who the caller is: their VeroMesh roles and, in the model, the person they are or the agent
+        they are and the one person it acts for, with the authorities the agent holds. Answers are
+        need-to-know: an agent sees its principal's roles, not their personal details."""
+        out: dict = {"subject": who.subject, "kind": who.kind, "name": who.name, "roles": sorted(who.roles)}
+        if c.auth_disabled:
+            out["signInDisabled"] = True
+            return out
+
+        def entity(type_: str, rid: str) -> dict:
+            return auth.need_to_know(who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base))
+
+        if who.kind == "user":
+            value = auth.person_claim(who, c)
+            pid = prov.person_matching(s.store, c.person_match_field, value) if value else None
+            # Your own record, in full: need to know does not hide you from yourself.
+            out["person"] = changesets.get_entity(s.store, "people", pid, c.instance_base) if pid else None
+            if pid is None:
+                out["problem"] = (
+                    f"Your sign-in ({value}) does not match exactly one person in the model by {c.person_match_field}."
+                    if value
+                    else f"Your sign-in carries none of the claims that identify a person ({c.oidc_person_claims})."
+                )
+            return out
+        aid, why = agent_for(s, c, who)
+        out["agent"] = entity("agents", aid) if aid else None
+        if aid is None:
+            out["problem"] = why
+            return out
+        principal = out["agent"].get("actsFor")
+        out["actsFor"] = entity("people", principal) if principal else None
+        out["authorities"] = [
+            a
+            for a in changesets.list_entities(s.store, "authorities", c.instance_base)
+            if a.get("holder") == aid
+        ]
+        return out
+
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",
         dependencies=need(auth.READ),

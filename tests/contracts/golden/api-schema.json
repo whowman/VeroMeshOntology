@@ -613,6 +613,14 @@
         ]
       },
       {
+        "help": "The client (application) ID the agent signs in with at your identity provider; links its sign-in to this agent.",
+        "key": "signInClientId",
+        "kind": "text",
+        "label": "Sign-in client ID",
+        "multi": false,
+        "required": false
+      },
+      {
         "help": "",
         "key": "performsActions",
         "kind": "ref",

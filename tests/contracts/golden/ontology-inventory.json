@@ -14,12 +14,17 @@
           "path": "vmo:actsFor"
         },
         {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmo:signInClientId"
+        },
+        {
           "minCount": "1",
           "path": "rdfs:label"
         }
       ],
       "severity": "",
-      "sparqlRules": 2,
+      "sparqlRules": 3,
       "target": [
         "vmo:AIAgent"
       ]
@@ -1085,6 +1090,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:Objective"
+        ]
+      },
+      "vmo:signInClientId": {
+        "domain": [
+          "vmo:AIAgent"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
         ]
       },
       "vmo:steward": {

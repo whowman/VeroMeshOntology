@@ -786,18 +786,25 @@ def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Att
     return resolve(read_claims(store), atts), atts
 
 
+def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case: bool = False) -> list[str]:
+    """IDs of the entities of ``type_`` whose ``field`` is ``value``, as VeroMesh believes it now."""
+
+    def norm(v: str) -> str:
+        return v.strip().casefold() if ignore_case else v.strip()
+
+    want = norm(value)
+    resolved, _ = _current(store)
+    return sorted(
+        rid
+        for (t, rid), r in resolved.items()
+        if t == type_ and isinstance(r.values.get(field), str) and norm(r.values[field]) == want
+    )
+
+
 def person_matching(store: RDFStore, field: str, value: str) -> str | None:
     """The ID of the one person whose ``field`` (email or employeeId) is ``value``, as VeroMesh
     believes it now; None when no person, or more than one, matches."""
-    want = value.strip().casefold() if field == "email" else value.strip()
-    resolved, _ = _current(store)
-    hits = []
-    for (t, pid), r in resolved.items():
-        got = r.values.get(field)
-        if t != "people" or not isinstance(got, str):
-            continue
-        if (got.strip().casefold() if field == "email" else got.strip()) == want:
-            hits.append(pid)
+    hits = matching(store, "people", field, value, ignore_case=field == "email")
     return hits[0] if len(hits) == 1 else None
 
 

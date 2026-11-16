@@ -119,6 +119,7 @@ ex:ApApprovalAuthority
 ex:InvoiceAssistant
     a vmo:AIAgent ;
     rdfs:label "Invoice assistant" ;
+    vmo:signInClientId "11111111-2222-3333-4444-555555555555" ;
     vmo:actsFor ex:DanaExample ;
     vmo:holds ex:AssistantApprovalAuthority ;
     vmo:performs ex:ApproveSupplierInvoice ;
