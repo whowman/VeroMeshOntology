@@ -63,7 +63,13 @@ TAG=test SKIP_DATAHUB=1 "$ROOT/deploy/helm/build-images.sh" --kind "$CLUSTER" >/
 
 echo ">> Starting a single-node Kafka ($KAFKA_TEST_IMAGE)"
 docker pull -q "$KAFKA_TEST_IMAGE" >/dev/null
-kind load docker-image "$KAFKA_TEST_IMAGE" --name "$CLUSTER" >/dev/null
+# A pulled image is a multi-platform index whose other platforms are not on
+# disk; "kind load docker-image" then fails with "content digest not found".
+# Save only this machine's platform and load the archive.
+archive=$(mktemp)
+docker save --platform "$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}')" -o "$archive" "$KAFKA_TEST_IMAGE"
+kind load image-archive "$archive" --name "$CLUSTER" >/dev/null
+rm -f "$archive"
 kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f - >/dev/null
 sed "s|KAFKA_IMAGE|$KAFKA_TEST_IMAGE|" "$ROOT/tests/k8s/kafka.yaml" | k apply -f - >/dev/null
 k rollout status deployment/kafka --timeout 5m

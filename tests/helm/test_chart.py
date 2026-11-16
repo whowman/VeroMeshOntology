@@ -306,7 +306,9 @@ def test_inline_token_creates_a_secret():
 
 
 def test_sign_in_settings_reach_the_service():
-    env = env_of(one(render("production-values.yaml"), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    env = env_of(
+        one(render("production-values.yaml"), "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    )
     assert env["VEROMESH_OIDC_ISSUER"]["value"].startswith("https://login.microsoftonline.com/")
     assert env["VEROMESH_OIDC_AUDIENCE"]["value"] == "api://veromesh-acme"
     assert env["VEROMESH_OIDC_ROLES_CLAIM"]["value"] == "roles"

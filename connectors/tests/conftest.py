@@ -9,6 +9,9 @@ from __future__ import annotations
 import os
 
 import pytest
+
+# The connectors call the API itself; sign-in has its own suite (service/tests/test_auth.py).
+os.environ.setdefault("VEROMESH_AUTH_DISABLED", "true")
 from fastapi.testclient import TestClient
 from veromesh.api import create_app
 from veromesh.config import Settings
