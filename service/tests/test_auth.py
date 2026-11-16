@@ -409,3 +409,44 @@ def test_the_decision_log_is_for_stewards(client):
         )
     assert client.get(f"{API}/decisions", headers=steward()).status_code == 200
     assert client.get(f"{API}/decisions/verify", headers=steward()).json()["ok"] is True
+
+
+# ---------------------------------------------------------------- the decision check: who may ask
+
+
+def check(client, hdr, **body):
+    return client.post(
+        f"{API}/decisions/check", json={"action": "ApproveSupplierInvoice", **body}, headers=hdr
+    )
+
+
+def test_an_agent_asks_as_itself(client):
+    load_example(client)
+    r = check(client, agent_token(), amount=800, currency="USD")
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["agent"] == "InvoiceAssistant" and d["principal"] == "DanaExample"
+    assert d["subject"] == ASSISTANT  # logged as the client that asked
+    assert d["outcome"] in ("allow", "consult", "refuse")
+
+
+def test_an_agent_cannot_ask_for_another_or_another_day(client):
+    load_example(client)
+    assert check(client, agent_token(), agent="SomeOtherAgent").status_code == 403
+    assert check(client, agent_token(), onDate="2026-06-01").status_code == 403
+    r = check(client, agent_token(client_id="not-registered"))
+    assert r.status_code == 403 and "register it on the agent" in r.json()["detail"]
+
+
+def test_people_without_admin_cannot_ask(client):
+    load_example(client)
+    for hdr in (reader(email="dana@example.com"), steward(email="dana@example.com")):
+        assert check(client, hdr, agent="InvoiceAssistant").status_code == 403
+
+
+def test_an_administrator_tests_a_check_on_an_agents_behalf(client):
+    load_example(client)
+    admin = h(token(roles=("VeroMesh.Admin",)))
+    assert check(client, admin).status_code == 422  # must name the agent
+    r = check(client, admin, agent="InvoiceAssistant", amount=800, currency="USD", onDate="2026-11-16")
+    assert r.status_code == 201 and r.json()["subject"] == "oid-1"

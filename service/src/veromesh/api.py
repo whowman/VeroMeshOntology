@@ -5,6 +5,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -14,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from . import __version__, auth, branding, changesets, decisions, entities
+from . import __version__, auth, branding, changesets, decide, decisions, entities
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -74,6 +75,16 @@ class AttestationIn(BaseModel):
     fields: list[str] | None = None
     source: str | None = None
     note: str | None = None
+
+
+class CheckIn(BaseModel):
+    action: str  # action ID, e.g. ApproveSupplierInvoice
+    amount: str | float | None = None
+    currency: str | None = None
+    note: str | None = None
+    # Only with sign-in off, or for an administrator testing a check on an agent's behalf:
+    agent: str | None = None
+    onDate: str | None = None  # YYYY-MM-DD; default today
 
 
 class CorrectionIn(BaseModel):
@@ -491,6 +502,53 @@ def create_app(
             refers_to=refersTo,
             after_seq=afterSeq,
             limit=limit,
+        )
+
+    @app.post("/api/v1/decisions/check", dependencies=need(auth.READ), status_code=201, tags=["decisions"])
+    def decisions_check(s: Svc, c: Cfg, dl: Log, who: Who, body: CheckIn) -> dict:
+        """Before a consequential action: may this agent take it, for its principal, now?
+        Answers allow, consult (with the owners to consult first) or refuse, with reasons, and
+        appends the decision to the log. Ask as the agent (its own sign-in); the answer says
+        whom to inform, whom to consult, and whom to escalate to above the agent's limit."""
+        trusted = c.auth_disabled or "admin" in who.roles
+        if c.auth_disabled or (who.kind != "app" and "admin" in who.roles):
+            if not body.agent:
+                raise HTTPException(
+                    status_code=422, detail="Give the agent ID (only an agent's own sign-in implies it)."
+                )
+            agent, subject = body.agent, who.subject
+        else:
+            if "agent" not in who.roles:
+                raise HTTPException(
+                    status_code=403, detail="Decision checks are asked by agents, signed in as themselves."
+                )
+            agent, why = agent_for(s, c, who)
+            if agent is None:
+                raise HTTPException(status_code=403, detail=why)
+            if body.agent and body.agent != agent:
+                raise HTTPException(
+                    status_code=403, detail=f"You are signed in as agent {agent}, not {body.agent}."
+                )
+            subject = who.client_id or who.subject
+        on = None
+        if body.onDate:
+            if not trusted:
+                raise HTTPException(
+                    status_code=403, detail="Agents are checked as of today; onDate is for administrators."
+                )
+            on = date.fromisoformat(body.onDate)
+        return decide.check(
+            s.store,
+            c.instance_base,
+            dl,
+            agent=agent,
+            action=body.action,
+            subject=subject,
+            amount=body.amount,
+            currency=body.currency,
+            on=on,
+            note=body.note,
+            require_attested=c.decision_requires_attested,
         )
 
     @app.get("/api/v1/decisions/verify", dependencies=need(auth.STEWARD), tags=["decisions"])

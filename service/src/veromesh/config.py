@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # restart) or postgresql://user:password@host:5432/database[?sslmode=require],
     # its own database, append-only and hash-chained.
     decision_log: str = "memory"
+    # The decision check refuses when the facts behind the agent's authority are not
+    # all attested and current (decision 3). Off only for demonstrations on unreviewed data.
+    decision_requires_attested: bool = True
 
 
 @lru_cache

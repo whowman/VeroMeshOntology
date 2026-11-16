@@ -28,6 +28,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_OIDC_PERSON_CLAIMS` | `email,preferred_username,upn` | Token claims that identify the signed-in person, first present wins |
 | `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
 | `VEROMESH_DECISION_LOG` | `memory` | The decision log: `memory` (development; lost on restart) or `postgresql://user:password@host:5432/database[?sslmode=require]`, its own database |
+| `VEROMESH_DECISION_REQUIRES_ATTESTED` | `true` | The check refuses when the facts behind the agent's authority are not all attested and current. `false` only to demonstrate on unreviewed data |
 | `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
 
 ## Sign-in
@@ -52,6 +53,17 @@ A token without any of these roles gets 403.
 
 **Decision log.** Every decision about an agent's action (allow, consult or refuse, with reasons, the principal, the authority used and the facts relied on), and every later override or outcome that refers to it, is appended to the decision log (`src/veromesh/decisions.py`). Entries are never changed: in PostgreSQL a trigger refuses UPDATE, DELETE and TRUNCATE, and each entry carries the SHA-256 of the one before it, so `GET /api/v1/decisions/verify` finds any entry changed, removed or inserted, even by someone who bypasses the trigger. Concurrent writers (several API replicas) take an advisory lock and form one chain. Give the log its own database; the service creates its table on first use. Export to write-once storage for regulated customers follows.
 
+**Decision check.** `POST /api/v1/decisions/check` (`src/veromesh/decide.py`) answers, on the effective model:
+
+1. For whom: the agent's one principal.
+2. Set up for it: the agent is registered to perform the action.
+3. Authority: one the agent holds covers the action, is valid today, is in the amount's currency and within its limit, and so are the authorities it derives from. Above the limit: refuse, and escalate to the principal.
+4. Attested facts only: every fact behind that authority is attested and current, or refuse.
+5. Co-approval: a tier on the authority or a parent applies above its amount: consult the approver role.
+6. Impact: per KPI or capability the action affects, below the materiality threshold act and inform the owner; above it, consult the owner first. Money thresholds ("USD per invoice") compare the amount; per-day thresholds ("invoices per day") count today's allowed decisions in the log; a threshold that cannot be checked counts as material.
+
+Refuse if any step refuses, else consult if anyone must be consulted, else allow. Each answer names the roles and the people filling them, and is appended to the decision log. It is advisory: an agent could skip it; enforcement at a gateway comes later. An agent asks as itself (its sign-in implies the agent, and the day is today); an administrator may test a check on an agent's behalf with `agent` and `onDate`.
+
 **Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one.
 
 **Connectors** send a token with `--token` / `VEROMESH_TOKEN`, or get one themselves with client credentials (`VEROMESH_TOKEN_URL`, `VEROMESH_CLIENT_ID`, `VEROMESH_CLIENT_SECRET`, `VEROMESH_SCOPE`; for Entra ID the scope is `<Application ID URI>/.default`).
@@ -63,6 +75,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
+| `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first) or refuse, with reasons, whom to inform and, above its limit, whom to escalate to. Logged |
 | `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
 | `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |
 | `GET /api/v1/decisions/verify` | Walk the hash chain: ok, or the first entry changed, removed or inserted |
