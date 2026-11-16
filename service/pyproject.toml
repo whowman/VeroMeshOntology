@@ -19,6 +19,7 @@ dependencies = [
     "rdflib>=7.1,<8",           # BSD-3-Clause
     "pyshacl>=0.40,<0.41",      # Apache-2.0
     "pyjwt[crypto]>=2.8,<3",    # MIT (cryptography: Apache-2.0 OR BSD-3-Clause)
+    "pg8000>=1.31,<2",          # BSD-3-Clause (scramp: MIT-0); the decision log. Not psycopg: LGPL needs review
 ]
 
 [project.optional-dependencies]

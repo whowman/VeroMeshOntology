@@ -13,10 +13,11 @@ Fields
     steps       shell commands, run from the repository root. Placeholders:
                   {results}    absolute path of this run's results folder
                   {fuseki}     dataset URL of the throwaway Fuseki (needs="fuseki")
+                  {postgres}   postgresql:// URL of a throwaway PostgreSQL (needs="postgres")
                   {api} {gms} {fuseki_stack} {token_file}   the running stack (needs="stack")
     where       runner  - inside the test-runner (Docker image, or the --local venv)
                 host    - on your machine (docker, git, bash)
-    needs       extra things the suite requires: docker, fuseki, stack, jdk25-or-docker,
+    needs       extra things the suite requires: docker, fuseki, postgres, stack, jdk25-or-docker,
                 helm (in the test-runner image; --local needs it on PATH),
                 kind (kind, kubectl and Helm on PATH)
     env         extra environment for the steps
@@ -156,6 +157,15 @@ SUITES: list[Suite] = [
             f"cd service && {PYTEST} --junitxml={{results}}/fuseki-service.xml",
             f"cd connectors && {PYTEST} --junitxml={{results}}/fuseki-connectors.xml",
         ),
+    ),
+    Suite(
+        name="decision-log",
+        component="service",
+        tier="integration",
+        needs=frozenset({"postgres"}),
+        description="Decision log on a real PostgreSQL: append-only triggers, hash chain, concurrent writers",
+        env={"VEROMESH_TEST_DECISION_LOG": "{postgres}"},
+        steps=(f"cd service && {PYTEST} tests/test_decisions.py --junitxml={{results}}/decision-log.xml",),
     ),
     Suite(
         name="images",

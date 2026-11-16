@@ -82,6 +82,36 @@
       "422"
     ]
   },
+  "GET /api/v1/decisions": {
+    "params": [
+      "action? (query)",
+      "afterSeq? (query)",
+      "agent? (query)",
+      "kind? (query)",
+      "limit? (query)",
+      "principal? (query)",
+      "refersTo? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/decisions/verify": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/decisions/{entry_id}": {
+    "params": [
+      "entry_id (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/examples/procure-to-pay": {
     "params": [],
     "status": [

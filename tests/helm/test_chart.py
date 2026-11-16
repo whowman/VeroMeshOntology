@@ -316,6 +316,16 @@ def test_sign_in_settings_reach_the_service():
     assert "VEROMESH_AUTH_DISABLED" not in env
 
 
+def test_decision_log_url_comes_from_a_secret():
+    env = env_of(
+        one(render("production-values.yaml"), "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    )
+    ref = env["VEROMESH_DECISION_LOG"]["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "veromesh-decision-log", "key": "url"}
+    default = env_of(one(render(), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert "VEROMESH_DECISION_LOG" not in default  # memory, with a warning in the notes
+
+
 def test_sign_in_is_never_off_by_default():
     env = env_of(one(render(), "Deployment")["spec"]["template"]["spec"]["containers"][0])
     assert "VEROMESH_AUTH_DISABLED" not in env

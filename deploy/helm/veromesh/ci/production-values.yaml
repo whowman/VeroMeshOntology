@@ -15,6 +15,8 @@ api:
     issuer: https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0
     audience: api://veromesh-acme
     rolePrefix: VeroMesh.
+  decisionLog:
+    existingSecret: veromesh-decision-log
   env:
     VEROMESH_GLOSSARY_ROOT_NAME: Acme Ontology
   ingress:
