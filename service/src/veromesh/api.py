@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 from datahub.configuration.common import OperationalError
-from fastapi import Body, Depends, FastAPI, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -65,8 +65,9 @@ class SourceIn(BaseModel):
 
 class AttestationIn(BaseModel):
     verdict: str  # attested | disputed
-    attester: str  # person ID (from single sign-on from Phase 1)
-    role: str  # role ID the person acts in
+    # With sign-in, the signed-in person (leave it out); with sign-in off, their person ID.
+    attester: str | None = None
+    role: str  # role ID the person acts in, which they must fill
     fields: list[str] | None = None
     source: str | None = None
     note: str | None = None
@@ -74,7 +75,7 @@ class AttestationIn(BaseModel):
 
 class CorrectionIn(BaseModel):
     values: dict
-    attester: str
+    attester: str | None = None  # as for AttestationIn
     role: str
     note: str | None = None
 
@@ -138,6 +139,10 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(prov.NotYourRole)
+    async def _not_your_role(_: Request, exc: prov.NotYourRole):
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(ValueError)
     @app.exception_handler(SyntaxError)  # pyoxigraph raises SyntaxError on bad Turtle/SPARQL
@@ -354,25 +359,61 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         """Why we believe this: per field, the winning source, its times and status, and every other claim."""
         return prov.explain(s.store, type_, rid)
 
+    def attester_for(
+        s: VeromeshService, c: Settings, who: auth.Caller, given: str | None
+    ) -> tuple[str, bool]:
+        """Who is attesting: the signed-in person, found in the model; with sign-in off, the request's attester."""
+        if c.auth_disabled:
+            if not given:
+                raise HTTPException(status_code=422, detail="Give the attester's person ID (sign-in is off).")
+            return given, False
+        if who.kind != "user":
+            raise HTTPException(
+                status_code=403, detail="Attestations and corrections are made by people, not services."
+            )
+        value = auth.person_claim(who, c)
+        if not value:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your sign-in carries none of the claims that identify a person ({c.oidc_person_claims}).",
+            )
+        pid = prov.person_matching(s.store, c.person_match_field, value)
+        if pid is None:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your sign-in ({value}) does not match exactly one person in the model by {c.person_match_field}.",
+            )
+        if given and given != pid:
+            raise HTTPException(
+                status_code=403, detail=f"You are signed in as {pid}; you cannot attest as {given}."
+            )
+        return pid, True
+
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",
-        dependencies=need(auth.STEWARD),
+        dependencies=need(auth.READ),
         status_code=201,
         tags=["governance"],
     )
-    def entity_attest(s: Svc, c: Cfg, type_: str, rid: str, body: AttestationIn) -> dict:
-        """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values."""
+    def entity_attest(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
+        """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values.
+        The attester is the signed-in person, who must fill the role they act in. Stewards may attest
+        anything; anyone else, only entities whose owner or steward role they act in."""
+        attester, signed_in = attester_for(s, c, who, body.attester)
+        owner_only = not who.has(*auth.STEWARD)
         return prov.attest(
             s.store,
             c.instance_base,
             type_,
             rid,
             verdict=body.verdict,
-            attester=body.attester,
+            attester=attester,
             role=body.role,
             fields=body.fields,
             source=body.source,
             note=body.note,
+            signed_in=signed_in,
+            owner_only=owner_only,
         )
 
     @app.post(
@@ -381,8 +422,10 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         status_code=201,
         tags=["governance"],
     )
-    def entity_correct(s: Svc, c: Cfg, type_: str, rid: str, body: CorrectionIn):
-        """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested."""
+    def entity_correct(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: CorrectionIn):
+        """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested
+        by the signed-in person."""
+        attester, signed_in = attester_for(s, c, who, body.attester)
         try:
             return prov.correct(
                 s.store,
@@ -391,9 +434,10 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
                 type_,
                 rid,
                 values=body.values,
-                attester=body.attester,
+                attester=attester,
                 role=body.role,
                 note=body.note,
+                signed_in=signed_in,
             )
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})

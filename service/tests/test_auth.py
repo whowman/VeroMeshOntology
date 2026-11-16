@@ -232,3 +232,123 @@ def test_unconfigured_sign_in_stops_the_server_starting(service):
 def test_disabled_sign_in_acts_as_administrator(service):
     c = TestClient(create_app(service, Settings(rdf_store="memory", auth_disabled=True)))
     assert c.post("/sparql", json={"query": "ASK { ?s ?p ?o }"}).status_code == 200
+
+
+# ---------------------------------------------------------------- attesting as the signed-in person
+
+
+def steward(**claims) -> dict:
+    return h(token(roles=("VeroMesh.Steward",), **claims))
+
+
+def attest(client, hdr, **body):
+    return client.post(
+        f"{API}/kpis/OnTimePaymentRate/attestations", json={"verdict": "attested", **body}, headers=hdr
+    )
+
+
+def test_the_attester_is_the_signed_in_person(client):
+    load_example(client)
+    r = attest(client, steward(email="Dana@Example.com"), role="ApManager")  # email matched ignoring case
+    assert r.status_code == 201, r.text
+    assert {a["person"] for a in r.json()["attestations"]} == {"DanaExample"}
+    # naming yourself is fine; naming someone else is refused
+    assert (
+        attest(
+            client, steward(email="dana@example.com"), attester="DanaExample", role="ApManager"
+        ).status_code
+        == 201
+    )
+    r = attest(client, steward(email="dana@example.com"), attester="LeeExample", role="Controller")
+    assert r.status_code == 403 and "signed in as DanaExample" in r.json()["detail"]
+
+
+def test_a_role_you_do_not_fill_is_refused_when_signed_in(client):
+    load_example(client)
+    r = attest(client, steward(email="dana@example.com"), role="Controller")
+    assert r.status_code == 403 and "do not fill role Controller" in r.json()["detail"]
+
+
+def test_sign_in_that_matches_no_person_is_refused(client):
+    load_example(client)
+    r = attest(client, steward(email="someone.else@example.com"), role="ApManager")
+    assert r.status_code == 403 and "does not match" in r.json()["detail"]
+    r = attest(client, steward(email=None, preferred_username=None), role="ApManager")
+    assert r.status_code == 403 and "carries none of the claims" in r.json()["detail"]
+
+
+def test_services_cannot_attest(client):
+    load_example(client)
+    hdr = h(token(roles=("VeroMesh.Steward",), idtyp="app", scp=None, name=None, email="dana@example.com"))
+    assert attest(client, hdr, role="ApManager").status_code == 403
+
+
+def test_person_matched_by_employee_id(service):
+    s = settings(oidc_person_claims="employee_id", person_match_field="employeeId")
+    app = create_app(service, s)
+    app.state.verifier = auth.Verifier(s, key_for=lambda _t: KEY.public_key())
+    c = TestClient(app)
+    load_example(c)
+    r = attest(c, steward(employee_id="E-0042"), role="Controller")
+    assert r.status_code == 201 and {a["person"] for a in r.json()["attestations"]} == {"LeeExample"}
+
+
+def test_corrections_are_made_as_the_signed_in_person(client):
+    load_example(client)
+    r = client.post(
+        f"{API}/systems/Erp/corrections",
+        json={"values": {"criticality": "high"}, "role": "ErpPlatformLead"},
+        headers=steward(email="lee@example.com"),
+    )
+    # Lee has no email in the example: no match, so refused
+    assert r.status_code == 403
+
+
+# ---------------------------------------------------------------- owners attest
+
+
+def reader(**claims) -> dict:
+    return h(token(roles=("VeroMesh.Reader",), **claims))
+
+
+def test_an_owner_attests_without_the_steward_role(client):
+    load_example(client)
+    # Dana fills ApManager, the owner role of this KPI
+    r = attest(client, reader(email="dana@example.com"), role="ApManager")
+    assert r.status_code == 201, r.text
+    assert not r.json()["warnings"]
+
+
+def test_an_owner_cannot_attest_what_she_does_not_own(client):
+    load_example(client)
+    r = client.post(
+        f"{API}/kpis/DuplicatePaymentRate/attestations",  # owned by Controller
+        json={"verdict": "attested", "role": "ApManager"},
+        headers=reader(email="dana@example.com"),
+    )
+    assert r.status_code == 403 and "Only the owner or steward roles" in r.json()["detail"]
+    # a steward may, with a warning
+    r = client.post(
+        f"{API}/kpis/DuplicatePaymentRate/attestations",
+        json={"verdict": "attested", "role": "ApManager"},
+        headers=steward(email="dana@example.com"),
+    )
+    assert r.status_code == 201 and r.json()["warnings"]
+
+
+def test_owners_cannot_correct_or_see_the_review_queue(client):
+    load_example(client)
+    hdr = reader(email="dana@example.com")
+    assert client.get(f"{API}/attestations", headers=hdr).status_code == 403
+    r = client.post(
+        f"{API}/kpis/OnTimePaymentRate/corrections",
+        json={"values": {"unit": "percent"}, "role": "ApManager"},
+        headers=hdr,
+    )
+    assert r.status_code == 403
+
+
+def test_agents_cannot_attest(client):
+    load_example(client)
+    hdr = h(token(roles=("VeroMesh.Agent",), idtyp="app", scp=None, name=None))
+    assert attest(client, hdr, role="ApManager").status_code == 403

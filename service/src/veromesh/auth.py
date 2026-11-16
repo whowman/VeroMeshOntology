@@ -9,9 +9,10 @@ and expiry, then reads the caller's roles from one claim.
 Roles (app roles in Entra ID, realm or client roles in Keycloak):
 
     admin      everything, including raw SPARQL and loading ontologies
-    steward    reviews, attests and corrects facts; sees personal details and provenance
+    steward    reviews, attests and corrects any fact; sees personal details and provenance
     connector  writes changesets (the spreadsheet and CSV connectors, HR and CMDB feeds)
-    reader     reads the model on a need-to-know basis (below)
+    reader     reads the model on a need-to-know basis (below); a person may also attest
+               the entities whose owner or steward role they fill in the model
     agent      an AI agent: reads like a reader (the decision check comes next)
 
 Need to know: readers and agents get what an agent needs to act within its
@@ -217,6 +218,15 @@ def current_caller(request: Request, creds: HTTPAuthorizationCredentials | None,
         raise HTTPException(status_code=403, detail="Signed in, but no VeroMesh role is assigned.")
     request.state.caller = caller
     return caller
+
+
+def person_claim(caller: Caller, s: Settings) -> str | None:
+    """The first of the configured claims the token carries: who the person is, to match in the model."""
+    for name in (n.strip() for n in s.oidc_person_claims.split(",")):
+        value = caller.claims.get(name) if name else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def need_to_know(caller: Caller, type_: str, entity: dict) -> dict:

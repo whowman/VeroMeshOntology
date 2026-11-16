@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Entra app roles, "realm_access.roles" for Keycloak realm roles.
     oidc_roles_claim: str = "roles"
     oidc_role_prefix: str = ""  # e.g. "VeroMesh." for Entra app roles named VeroMesh.Admin
+    # Who a signed-in person is in the model, for attestations and corrections:
+    # the first of these token claims that is present, matched against the
+    # People field below (case-insensitively for email).
+    oidc_person_claims: str = "email,preferred_username,upn"
+    person_match_field: str = "email"  # or "employeeId" (with a claim that carries it)
 
 
 @lru_cache
