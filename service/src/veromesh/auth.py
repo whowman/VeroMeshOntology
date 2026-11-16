@@ -9,10 +9,17 @@ and expiry, then reads the caller's roles from one claim.
 Roles (app roles in Entra ID, realm or client roles in Keycloak):
 
     admin      everything, including raw SPARQL and loading ontologies
-    steward    reviews, attests and corrects facts; sees people and provenance
+    steward    reviews, attests and corrects facts; sees personal details and provenance
     connector  writes changesets (the spreadsheet and CSV connectors, HR and CMDB feeds)
-    reader     reads the model, except people's personal details
-    agent      an AI agent: reads the model like a reader (the decision check comes next)
+    reader     reads the model on a need-to-know basis (below)
+    agent      an AI agent: reads like a reader (the decision check comes next)
+
+Need to know: readers and agents get what an agent needs to act within its
+authority (roles, authorities and their limits, owners, actions, KPIs, and who
+fills which role) but not personal details: fields marked ``personal`` in
+entities.py (a person's email, employee ID and reporting line) are left out of
+their answers and listed under ``withheld``. Raw SPARQL, which could read
+anything, is for administrators only.
 
 A token may carry several. Role names may have a prefix (``VEROMESH_OIDC_ROLE_PREFIX``,
 e.g. ``VeroMesh.`` for Entra app roles named ``VeroMesh.Admin``); matching
@@ -36,6 +43,7 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .config import Settings
+from .entities import PERSONAL_FIELDS
 
 log = logging.getLogger("veromesh.auth")
 
@@ -48,9 +56,8 @@ CONNECTOR = ("connector",)
 STEWARD_OR_CONNECTOR = ("steward", "connector")
 ADMIN: tuple[str, ...] = ()
 
-# Entity types holding personal details: not for readers or agents until
-# answers are scoped to what the caller may see.
-PERSONAL_TYPES = {"people"}
+# Who may see personal details (admin always).
+PERSONAL = ("steward", "connector")
 
 bearer = HTTPBearer(auto_error=False, description="Access token from the customer's identity provider")
 
@@ -210,6 +217,18 @@ def current_caller(request: Request, creds: HTTPAuthorizationCredentials | None,
         raise HTTPException(status_code=403, detail="Signed in, but no VeroMesh role is assigned.")
     request.state.caller = caller
     return caller
+
+
+def need_to_know(caller: Caller, type_: str, entity: dict) -> dict:
+    """The entity as this caller may see it: personal fields removed, and named, for those without the need."""
+    fields = PERSONAL_FIELDS.get(type_)
+    if not fields or caller.has(*PERSONAL):
+        return entity
+    withheld = sorted(k for k in fields if k in entity)
+    out = {k: v for k, v in entity.items() if k not in fields}
+    if withheld:
+        out["withheld"] = withheld
+    return out
 
 
 def forbid(caller: Caller, *roles: str) -> None:

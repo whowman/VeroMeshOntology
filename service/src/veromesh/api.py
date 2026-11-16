@@ -135,10 +135,6 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
 
         return [Depends(check)]
 
-    def personal_ok(who: auth.Caller, type_: str) -> None:
-        if type_ in auth.PERSONAL_TYPES:
-            auth.forbid(who, *auth.STEWARD_OR_CONNECTOR)
-
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
@@ -404,15 +400,16 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
 
     @app.get("/api/v1/{type_}", dependencies=need(auth.READ), tags=["entities"])
     def entity_list(s: Svc, c: Cfg, who: Who, type_: str, source: str | None = None) -> list[dict]:
-        """All entities of a type across the model, or in one source. People: stewards and connectors only."""
-        personal_ok(who, type_)
-        return changesets.list_entities(s.store, type_, c.instance_base, source)
+        """All entities of a type across the model, or in one source. Personal details only to those who need them."""
+        rows = changesets.list_entities(s.store, type_, c.instance_base, source)
+        return [auth.need_to_know(who, type_, r) for r in rows]
 
     @app.get("/api/v1/{type_}/{rid}", dependencies=need(auth.READ), tags=["entities"])
     def entity_get(s: Svc, c: Cfg, who: Who, type_: str, rid: str, asOf: str | None = None) -> dict:
-        """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time. People: stewards and connectors only."""
-        personal_ok(who, type_)
-        return changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf)
+        """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time. Personal details only to those who need them."""
+        return auth.need_to_know(
+            who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf)
+        )
 
     @app.post("/api/v1/{type_}", dependencies=need(auth.CONNECTOR), tags=["entities"])
     def entity_create(s: Svc, c: Cfg, type_: str, source: str, entity: Annotated[dict, Body()]):

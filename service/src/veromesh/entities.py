@@ -53,6 +53,9 @@ class Col:
     inverse: bool = False  # value --prop--> this row, instead of this row --prop--> value
     values: dict[str, URIRef] | tuple[str, ...] = ()
     help: str = ""
+    # Personal details about one person (contact, HR identifiers, reporting line):
+    # answered only to callers who need them (see auth.py, need to know).
+    personal: bool = False
 
 
 @dataclass(frozen=True)
@@ -197,10 +200,11 @@ SHEETS: tuple[Sheet, ...] = (
                 "text",
                 VMO.employeeId,
                 help="From HR; used to match the same person across systems.",
+                personal=True,
             ),
-            Col("Email", "text", VMO.email),
+            Col("Email", "text", VMO.email, personal=True),
             Col("Roles filled", "ref", VMO.fills, ("Roles",), multi=True),
-            Col("Reports to", "ref", ORG.reportsTo, ("People",)),
+            Col("Reports to", "ref", ORG.reportsTo, ("People",), personal=True),
         ),
         help="Only role-relevant facts. Anything else is rejected by the validation rules.",
     ),
@@ -423,6 +427,12 @@ def field_key(col: Col) -> str:
 
 
 TYPES: dict[str, Sheet] = {type_name(s): s for s in SHEETS}
+# Per type, the keys of fields holding personal details (Col.personal).
+PERSONAL_FIELDS: dict[str, frozenset[str]] = {
+    t: frozenset(field_key(c) for c in s.cols if c.personal)
+    for t, s in TYPES.items()
+    if any(c.personal for c in s.cols)
+}
 TYPE_OF_SHEET: dict[str, str] = {s.name: type_name(s) for s in SHEETS}
 FIELDS: dict[str, dict[str, Col]] = {t: {field_key(c): c for c in s.cols} for t, s in TYPES.items()}
 
@@ -447,6 +457,8 @@ def schema() -> list[dict]:
                 "multi": c.multi,
                 "help": c.help,
             }
+            if c.personal:
+                f["personal"] = True
             if c.kind == "ref":
                 f["targets"] = [TYPE_OF_SHEET[x] for x in c.targets]
             if c.kind in ("iri_enum", "class"):

@@ -34,12 +34,14 @@ Every route except `/health` and the docs pages needs `Authorization: Bearer <ac
 | Role | May |
 | --- | --- |
 | `admin` | Everything, including `POST /sparql`, loading ontologies, publishing the glossary, registering sources and rebuilding the effective model |
-| `steward` | Read everything, including people; review queue, conflicts, provenance, attestations and corrections; bindings |
-| `connector` | Write changesets and single entities (the spreadsheet and CSV connectors, HR and CMDB feeds); read people |
-| `reader` | Read the model except people's records |
-| `agent` | An AI agent: reads like a reader. The decision check and need-to-know answers come next |
+| `steward` | Read everything, including personal details; review queue, conflicts, provenance, attestations and corrections; bindings |
+| `connector` | Write changesets and single entities (the spreadsheet and CSV connectors, HR and CMDB feeds); read personal details |
+| `reader` | Read the model on a need-to-know basis (below) |
+| `agent` | An AI agent: reads like a reader. The decision check comes next |
 
-A token without any of these roles gets 403. People's records (`/api/v1/people`) are kept from readers and agents until answers are scoped to what each caller may see.
+A token without any of these roles gets 403.
+
+**Need to know.** Readers and agents get what acting within an authority needs: roles, authorities and their limits, scopes and dates, co-approvals, owners, actions, KPIs, and who fills which role. They do not get personal details: fields the schema marks `"personal": true` (a person's email, employee ID and reporting line) are left out of every entity answer, including `?asOf=` and `?source=`, and their names are listed under `withheld`. Stewards, connectors and administrators get the whole record. Raw SPARQL, which could read anything, stays with administrators.
 
 **Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
 

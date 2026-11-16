@@ -136,21 +136,54 @@ def test_connector_writes_the_model(client):
     assert client.post(f"{API}/changesets/{cs}/commit", headers=h(tok)).status_code == 200
 
 
-def test_people_are_hidden_from_readers_and_agents(client):
+def load_example(client) -> list[dict]:
     admin = h(token(roles=("VeroMesh.Admin",)))
     items = client.get(f"{API}/examples/procure-to-pay", headers=admin).json()["items"]
     cs = client.post(f"{API}/changesets", json={"source": "p2p"}, headers=admin).json()["id"]
     client.post(f"{API}/changesets/{cs}/items", json={"items": items}, headers=admin)
     assert client.post(f"{API}/changesets/{cs}/commit", headers=admin).status_code == 200
-    person = next(i["entity"]["id"] for i in items if i["type"] == "people")
+    return items
+
+
+PERSONAL = {"email", "employeeId", "reportsTo"}
+
+
+def test_readers_and_agents_get_roles_not_personal_details(client):
+    items = load_example(client)
+    person = next(i["entity"] for i in items if i["type"] == "people" and i["entity"].get("email"))
 
     for role in ("Reader", "Agent"):
         hdr = h(token(roles=(f"VeroMesh.{role}",)))
-        assert client.get(f"{API}/people", headers=hdr).status_code == 403
-        assert client.get(f"{API}/people/{person}", headers=hdr).status_code == 403
-        assert client.get(f"{API}/roles", headers=hdr).status_code == 200
-    steward = h(token(roles=("VeroMesh.Steward",)))
-    assert client.get(f"{API}/people/{person}", headers=steward).status_code == 200
+        one = client.get(f"{API}/people/{person['id']}", headers=hdr).json()
+        assert not PERSONAL & one.keys(), one
+        assert set(one["withheld"]) <= PERSONAL and "email" in one["withheld"]
+        assert one["rolesFilled"] and one["name"]  # who fills which role stays answerable
+        for p in client.get(f"{API}/people", headers=hdr).json():
+            assert not PERSONAL & p.keys(), p
+        # as of a date, and one source's values, are filtered the same way
+        dated = client.get(f"{API}/people/{person['id']}", params={"asOf": "2099-01-01"}, headers=hdr).json()
+        assert not PERSONAL & dated.keys()
+        for p in client.get(f"{API}/people", params={"source": "p2p"}, headers=hdr).json():
+            assert not PERSONAL & p.keys()
+        # authorities and their limits are answered in full
+        auths = client.get(f"{API}/authorities", headers=hdr).json()
+        assert any("limitAmount" in a for a in auths)
+        assert "withheld" not in auths[0]
+
+
+def test_stewards_and_connectors_see_personal_details(client):
+    items = load_example(client)
+    person = next(i["entity"] for i in items if i["type"] == "people" and i["entity"].get("email"))
+    for role in ("Steward", "Connector", "Admin"):
+        one = client.get(f"{API}/people/{person['id']}", headers=h(token(roles=(f"VeroMesh.{role}",)))).json()
+        assert one["email"] == person["email"]
+        assert "withheld" not in one
+
+
+def test_schema_marks_personal_fields(client):
+    schema = client.get(f"{API}/schema", headers=h(token())).json()
+    people = next(t for t in schema if t["type"] == "people")
+    assert {f["key"] for f in people["fields"] if f.get("personal")} == PERSONAL
 
 
 def test_attestations_need_a_steward(client):
