@@ -786,15 +786,39 @@ def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Att
     return resolve(read_claims(store), atts), atts
 
 
-def _check_attester(resolved: dict, type_: str, rid: str, attester: str, role: str) -> list[str]:
-    """Attester identity comes from the request until single sign-on (Phase 1): check it
-    names a real person and role, and warn when they are not the owner or steward."""
+def person_matching(store: RDFStore, field: str, value: str) -> str | None:
+    """The ID of the one person whose ``field`` (email or employeeId) is ``value``, as VeroMesh
+    believes it now; None when no person, or more than one, matches."""
+    want = value.strip().casefold() if field == "email" else value.strip()
+    resolved, _ = _current(store)
+    hits = []
+    for (t, pid), r in resolved.items():
+        got = r.values.get(field)
+        if t != "people" or not isinstance(got, str):
+            continue
+        if (got.strip().casefold() if field == "email" else got.strip()) == want:
+            hits.append(pid)
+    return hits[0] if len(hits) == 1 else None
+
+
+class NotYourRole(PermissionError):
+    pass
+
+
+def _check_attester(
+    resolved: dict, type_: str, rid: str, attester: str, role: str, *, signed_in: bool = False
+) -> list[str]:
+    """Check the attester names a real person and role, and warn when they are not the
+    owner or steward. With sign-in, the attester is the signed-in person, and acting in a
+    role they do not fill is refused rather than warned about."""
     if ("people", attester) not in resolved:
         raise ValueError(f"No person '{attester}' in the model.")
     if ("roles", role) not in resolved:
         raise ValueError(f"No role '{role}' in the model.")
     warnings = []
     if role not in resolved[("people", attester)].values.get("rolesFilled", []):
+        if signed_in:
+            raise NotYourRole(f"You ({attester}) do not fill role {role} in the model.")
         warnings.append(f"{attester} does not fill role {role}.")
     target = resolved.get((type_, rid))
     owners = {v for k in OWNERSHIP_FIELDS for v in [target.values.get(k)] if v} if target else set()
@@ -817,6 +841,7 @@ def attest(
     fields: list[str] | None = None,
     source: str | None = None,
     note: str | None = None,
+    signed_in: bool = False,
 ) -> dict:
     """Confirm or dispute fields of an entity: by default the values VeroMesh currently
     believes (each field's winning source); with ``source``, that source's values."""
@@ -829,7 +854,7 @@ def attest(
         from .changesets import _not_found
 
         raise _not_found(f"No {type_} with ID '{rid}'.")
-    warnings = _check_attester(resolved, type_, rid, attester, role)
+    warnings = _check_attester(resolved, type_, rid, attester, role, signed_in=signed_in)
     wanted = fields or sorted(r.winners)
     by_source: dict[str, dict] = {}
     for f in wanted:
@@ -879,6 +904,7 @@ def correct(
     attester: str,
     role: str,
     note: str | None = None,
+    signed_in: bool = False,
 ) -> dict:
     """A steward correction: recorded as the 'steward' source's claim, validated like any
     change, and attested by the steward in the same step."""
@@ -901,7 +927,7 @@ def correct(
         from .changesets import _not_found
 
         raise _not_found(f"No {type_} with ID '{rid}'.")
-    warnings = _check_attester(resolved, type_, rid, attester, role)
+    warnings = _check_attester(resolved, type_, rid, attester, role, signed_in=signed_in)
     existing = extract(read_sources(store).get(source_graph(STEWARD_SOURCE), Graph()), base).get(
         (type_, rid), {}
     )

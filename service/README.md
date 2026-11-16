@@ -25,6 +25,8 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_OIDC_ROLES_CLAIM` | `roles` | Claim with the caller's roles; dotted for nested claims (`realm_access.roles` in Keycloak) |
 | `VEROMESH_OIDC_ROLE_PREFIX` | – | Prefix stripped from role names, e.g. `VeroMesh.` for Entra app roles `VeroMesh.Admin` |
 | `VEROMESH_OIDC_JWKS_URL` | from discovery | Signing keys, when the issuer's discovery document is not reachable |
+| `VEROMESH_OIDC_PERSON_CLAIMS` | `email,preferred_username,upn` | Token claims that identify the signed-in person, first present wins |
+| `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
 | `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
 
 ## Sign-in
@@ -42,6 +44,8 @@ Every route except `/health` and the docs pages needs `Authorization: Bearer <ac
 A token without any of these roles gets 403.
 
 **Need to know.** Readers and agents get what acting within an authority needs: roles, authorities and their limits, scopes and dates, co-approvals, owners, actions, KPIs, and who fills which role. They do not get personal details: fields the schema marks `"personal": true` (a person's email, employee ID and reporting line) are left out of every entity answer, including `?asOf=` and `?source=`, and their names are listed under `withheld`. Stewards, connectors and administrators get the whole record. Raw SPARQL, which could read anything, stays with administrators.
+
+**Attesting as yourself.** Attestations and corrections are recorded as the signed-in person: the first of the token claims in `VEROMESH_OIDC_PERSON_CLAIMS` (default `email,preferred_username,upn`) is matched to exactly one person in the model by `VEROMESH_PERSON_MATCH_FIELD` (`email`, ignoring case, or `employeeId`). A request naming someone else as attester is refused, as is acting in a role the person does not fill, a sign-in that matches no one, and a service (app-only) token. With sign-in off, the request names the attester and a role they do not fill is only a warning.
 
 **Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
 
@@ -65,8 +69,8 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | `GET /api/v1/sources` | Sources with category, provenance and `version` (the changeset that last wrote each) |
 | `PUT /api/v1/sources/{name}` | Register a source's category (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `spreadsheet`), owner role and description |
 | `GET /api/v1/{type}/{id}/provenance` | Why we believe it: per field, the winning source, observed and valid times, attestation status, other sources' values, and history |
-| `POST /api/v1/{type}/{id}/attestations` | Confirm or dispute fields: `{"verdict": "attested"\|"disputed", "attester", "role", "fields"?, "source"?, "note"?}` |
-| `POST /api/v1/{type}/{id}/corrections` | Steward correction of fields a steward may correct: `{"values", "attester", "role"}` |
+| `POST /api/v1/{type}/{id}/attestations` | Confirm or dispute fields: `{"verdict": "attested"\|"disputed", "role", "fields"?, "source"?, "note"?}`. The attester is the signed-in person (with sign-in off, `"attester"`: their person ID) |
+| `POST /api/v1/{type}/{id}/corrections` | Steward correction of fields a steward may correct: `{"values", "role"}`, by the signed-in person (with sign-in off, `"attester"` too) |
 | `GET /api/v1/attestations?status=&type=&ownerRole=` | Review queue |
 | `GET /api/v1/conflicts?type=` | Fields where sources disagree |
 | `GET /api/v1/authorities/{id}/confirmation` | Whether every fact behind an authority is attested and current |

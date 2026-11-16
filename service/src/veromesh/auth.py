@@ -219,6 +219,15 @@ def current_caller(request: Request, creds: HTTPAuthorizationCredentials | None,
     return caller
 
 
+def person_claim(caller: Caller, s: Settings) -> str | None:
+    """The first of the configured claims the token carries: who the person is, to match in the model."""
+    for name in (n.strip() for n in s.oidc_person_claims.split(",")):
+        value = caller.claims.get(name) if name else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def need_to_know(caller: Caller, type_: str, entity: dict) -> dict:
     """The entity as this caller may see it: personal fields removed, and named, for those without the need."""
     fields = PERSONAL_FIELDS.get(type_)

@@ -271,7 +271,12 @@
   "POST /api/v1/{type_}/{rid}/attestations": {
     "body": {
       "application/json": {
-        "attester": "string",
+        "attester?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
         "fields?": {
           "anyOf": [
             {
@@ -308,7 +313,12 @@
   "POST /api/v1/{type_}/{rid}/corrections": {
     "body": {
       "application/json": {
-        "attester": "string",
+        "attester?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
         "note?": {
           "anyOf": [
             "string",

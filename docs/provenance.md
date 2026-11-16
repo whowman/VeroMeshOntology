@@ -106,7 +106,7 @@ Additions to `/api/v1` (existing endpoints unchanged):
 | --- | --- |
 | `GET /{type}/{id}/provenance` | Why we believe this: per field, the effective value, the winning claim (source, observed, valid, status) and any other claims |
 | `GET /{type}/{id}?asOf=2026-10-01` | The entity as it was believed on a date |
-| `POST /{type}/{id}/attestations` | Confirm or dispute: `{fields?, verdict, note?, attester, role}` |
+| `POST /{type}/{id}/attestations` | Confirm or dispute: `{fields?, verdict, note?, role}`, as the signed-in person (who must fill `role`) |
 | `POST /{type}/{id}/corrections` | Steward correction: new values, recorded as a claim from the `steward` source and attested in the same step |
 | `GET /attestations?status=unconfirmed&type=&ownerRole=` | Review queue for the steward screen (Phase 1) |
 | `GET /authorities/{id}/confirmation` | Whether an agent may rely on an authority: every fact behind it attested and current (decision 3), with the reasons when not |
@@ -117,7 +117,7 @@ Additions to `/api/v1` (existing endpoints unchanged):
 
 Changeset items gain optional `observedAt`, `validFrom`, `validUntil`. The connector SDK's `Item` carries them, and mapping files can fill them from source columns (for example `observedAt: "{Last Modified}"`). The spreadsheet keeps working without them.
 
-Attester identity is taken from the request until single sign-on arrives in Phase 1; from then on it comes from the signed-in user, and only holders of the entity's owner or steward role may attest.
+With sign-in on, the attester is the signed-in person (matched to the model by email or employee ID; `service/README.md`, "Attesting as yourself"), who must fill the role they act in. Acting in a role that is not the entity's owner or steward is still a warning, not a refusal. With sign-in off (development), the request names the attester.
 
 ## Validation rules (SHACL)
 
