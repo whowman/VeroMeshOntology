@@ -13,9 +13,11 @@ from datahub.configuration.common import OperationalError
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
+from starlette.routing import Route
 
-from . import __version__, auth, branding, changesets, decide, decisions, entities
+from . import __version__, auth, branding, changesets, decide, decisions, entities, mcp_server
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -117,7 +119,8 @@ def create_app(
             log.warning(
                 "The decision log is in memory: decisions are lost on restart. Set VEROMESH_DECISION_LOG."
             )
-        yield
+        async with app.state.mcp.session_manager.run():
+            yield
 
     app = FastAPI(
         lifespan=lifespan,
@@ -425,20 +428,39 @@ def create_app(
         return pid, True
 
     def agent_for(s: VeromeshService, c: Settings, who: auth.Caller) -> tuple[str | None, str | None]:
-        """(the Agent entity this signed-in service is, None) or (None, why not)."""
-        if who.kind != "app":
-            return None, "Signed in as a person, not an agent."
+        """(the Agent entity the caller is, None) or (None, why not).
+
+        Two ways an agent signs in: as itself (an app-only token, client credentials), or as
+        the person it acts for, through the agent's own app registration (a delegated token
+        whose azp is the agent's client ID, e.g. a Copilot Studio agent with user sign-in).
+        Delegated, the signed-in person must be the agent's principal."""
         if not who.client_id:
+            if who.kind == "user":
+                return None, "Signed in as a person, not through an agent."
             return None, "The token carries no client ID (azp, appid or client_id)."
         hits = prov.matching(s.store, "agents", "signInClientId", who.client_id)
         if not hits:
+            if who.kind == "user":
+                return None, "Signed in as a person, not through a registered agent."
             return (
                 None,
                 f"No agent in the model signs in with client ID {who.client_id}; register it on the agent.",
             )
         if len(hits) > 1:
             return None, f"Several agents sign in with client ID {who.client_id}: {', '.join(hits)}."
-        return hits[0], None
+        agent = hits[0]
+        if who.kind == "user":
+            principal = (changesets.get_entity(s.store, "agents", agent, c.instance_base) or {}).get(
+                "actsFor"
+            )
+            value = auth.person_claim(who, c)
+            person = prov.person_matching(s.store, c.person_match_field, value) if value else None
+            if person is None or person != principal:
+                return None, (
+                    f"Agent {agent} acts for {principal}; you are signed in as "
+                    f"{person or 'nobody in the model'}, so you cannot use it."
+                )
+        return agent, None
 
     @app.get("/api/v1/me", dependencies=need(auth.READ), tags=["sign-in"])
     def me(s: Svc, c: Cfg, who: Who) -> dict:
@@ -464,7 +486,9 @@ def create_app(
                     if value
                     else f"Your sign-in carries none of the claims that identify a person ({c.oidc_person_claims})."
                 )
-            return out
+                return out
+            if not who.client_id or not prov.matching(s.store, "agents", "signInClientId", who.client_id):
+                return out  # a person, not through an agent
         aid, why = agent_for(s, c, who)
         out["agent"] = entity("agents", aid) if aid else None
         if aid is None:
@@ -518,11 +542,13 @@ def create_app(
                 )
             agent, subject = body.agent, who.subject
         else:
-            if "agent" not in who.roles:
+            if who.kind == "app" and "agent" not in who.roles:
                 raise HTTPException(
-                    status_code=403, detail="Decision checks are asked by agents, signed in as themselves."
+                    status_code=403, detail="Decision checks are asked by agents (the agent role)."
                 )
             agent, why = agent_for(s, c, who)
+            if agent is None and who.kind == "user":
+                why = f"Decision checks are asked by agents. {why}"
             if agent is None:
                 raise HTTPException(status_code=403, detail=why)
             if body.agent and body.agent != agent:
@@ -653,6 +679,59 @@ def create_app(
         """Delete one entity from a source; refused if something still references it."""
         return _single(s, c, source, [{"type": type_, "op": "delete", "entity": {"id": rid}}])
 
+    # ------------------------------------------------------------------ MCP, for agents
+
+    def mcp_entity(st: dict, type_: str, rid: str) -> dict:
+        entities.check_type(type_)
+        e = changesets.get_entity(st["service"].store, type_, rid, st["settings"].instance_base)
+        return auth.need_to_know(st["caller"], type_, e)
+
+    mcp = mcp_server.build(
+        {
+            "who_am_i": lambda st: me(st["service"], st["settings"], st["caller"]),
+            "check_action": lambda st, **kw: decisions_check(
+                st["service"], st["settings"], st["log"], st["caller"], CheckIn(**kw)
+            ),
+            "impact_of_action": lambda st, action: decide.impact_of(
+                st["service"].store, st["settings"].instance_base, action
+            ),
+            "who_owns": lambda st, type_, rid: decide.owners_of(
+                st["service"].store, st["settings"].instance_base, type_, rid
+            ),
+            "get_entity": mcp_entity,
+        }
+    )
+    mcp.streamable_http_app()  # creates the session manager the lifespan runs
+    app.state.mcp = mcp
+
+    class McpEndpoint:
+        """/mcp: sign in as for every route (any VeroMesh role), then hand over to the MCP transport."""
+
+        def __init__(self, inner) -> None:
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send) -> None:
+            request = Request(scope, receive)
+            try:
+                c = cfg(request)
+                who = auth.current_caller(request, await auth.bearer(request), c)
+                auth.forbid(who, *auth.READ)
+                state = {"service": svc(request), "settings": c, "log": dlog(request, c), "caller": who}
+            except HTTPException as exc:
+                await JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)(
+                    scope, receive, send
+                )
+                return
+            scope.setdefault("state", {})["veromesh"] = state
+            await self.inner(scope, receive, send)
+
+    app.router.routes.append(
+        Route(
+            "/mcp",
+            endpoint=McpEndpoint(StreamableHTTPASGIApp(mcp.session_manager)),
+            methods=["GET", "POST", "DELETE"],
+        )
+    )
     return app
 
 

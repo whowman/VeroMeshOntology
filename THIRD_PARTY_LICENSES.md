@@ -31,6 +31,10 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | PyJWT | MIT |
 | cryptography (for PyJWT) | Apache-2.0 OR BSD-3-Clause |
 | pg8000 | BSD-3-Clause |
+| mcp (MCP Python SDK) | MIT |
+| sse-starlette (for mcp) | BSD-3-Clause |
+| httpx-sse (for mcp) | MIT |
+| python-multipart (for mcp) | Apache-2.0 |
 | scramp (for pg8000) | MIT-0 |
 
 ## Connectors (Python)

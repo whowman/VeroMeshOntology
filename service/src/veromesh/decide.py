@@ -321,6 +321,51 @@ def check(
     return {**entry, "inform": inform, "escalateTo": escalate}
 
 
+def impact_of(store: RDFStore, base: str, action: str) -> dict:
+    """What an action affects, with each materiality threshold and the owners to inform or consult."""
+    m = Model(store, base)
+    act = m.get("actions", action)
+    if act is None:
+        raise prov_not_found(f"No action '{action}' in the model.")
+    thresholds = {i.get("impactOn"): i for i in m.all("impacts") if i.get("action") == action}
+    out = []
+    for target in sorted(set(act.get("affects", [])) | set(thresholds)):
+        ttype = "kpis" if m.get("kpis", target) else "capabilities"
+        i = thresholds.get(target)
+        out.append(
+            {
+                "type": ttype,
+                "id": target,
+                "name": m.name(ttype, target),
+                "materialityThreshold": i.get("materialityThreshold") if i else None,
+                "thresholdUnit": i.get("thresholdUnit") if i else None,
+                "owners": [
+                    {"role": r, "roleName": m.name("roles", r), "people": m.people_in(r)}
+                    for r in m.owner_roles(ttype, target)
+                ],
+            }
+        )
+    return {"action": action, "name": act.get("name") or action, "affects": out}
+
+
+def owners_of(store: RDFStore, base: str, type_: str, rid: str) -> dict:
+    """The owner and steward roles of an entity, and the people who fill them."""
+    m = Model(store, base)
+    e = m.get(type_, rid)
+    if e is None:
+        raise prov_not_found(f"No {type_} with ID '{rid}'.")
+    found = {k: e[k] for k in OWNER_FIELDS + ("technicalOwner",) if e.get(k)}
+    return {
+        "type": type_,
+        "id": rid,
+        "name": e.get("name") or rid,
+        "owners": [
+            {"field": k, "role": r, "roleName": m.name("roles", r), "people": m.people_in(r)}
+            for k, r in found.items()
+        ],
+    }
+
+
 def _merge(entries: list[dict]) -> list[dict]:
     """One entry per role, with every reason for it."""
     out: dict[str, dict] = {}

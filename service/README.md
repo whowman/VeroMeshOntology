@@ -64,7 +64,9 @@ A token without any of these roles gets 403.
 
 Refuse if any step refuses, else consult if anyone must be consulted, else allow. Each answer names the roles and the people filling them, and is appended to the decision log. It is advisory: an agent could skip it; enforcement at a gateway comes later. An agent asks as itself (its sign-in implies the agent, and the day is today); an administrator may test a check on an agent's behalf with `agent` and `onDate`.
 
-**Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one.
+**MCP.** `/mcp` serves VeroMesh as an MCP server (Streamable HTTP, stateless, JSON responses) for Copilot Studio, Claude or any MCP client, behind the same sign-in and need-to-know rules as the REST routes; each tool calls the function behind a REST route (`src/veromesh/mcp_server.py`). The server's instructions tell the agent to call `check_action` before any consequential action and follow the answer. Setting up a Copilot Studio agent: [docs/copilot-studio.md](../docs/copilot-studio.md).
+
+**Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one. An agent may also sign in **as the person it acts for, through its own app registration** (a delegated token whose `azp` is the agent's client ID, as a Copilot Studio agent with user sign-in does): VeroMesh then treats the call as the agent's, and refuses it unless the signed-in person is the agent's principal.
 
 **Connectors** send a token with `--token` / `VEROMESH_TOKEN`, or get one themselves with client credentials (`VEROMESH_TOKEN_URL`, `VEROMESH_CLIENT_ID`, `VEROMESH_CLIENT_SECRET`, `VEROMESH_SCOPE`; for Entra ID the scope is `<Application ID URI>/.default`).
 
@@ -76,6 +78,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
 | `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first) or refuse, with reasons, whom to inform and, above its limit, whom to escalate to. Logged |
+| `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `impact_of_action`, `who_owns`, `get_entity` |
 | `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
 | `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |
 | `GET /api/v1/decisions/verify` | Walk the hash chain: ok, or the first entry changed, removed or inserted |
