@@ -352,3 +352,51 @@ def test_agents_cannot_attest(client):
     load_example(client)
     hdr = h(token(roles=("VeroMesh.Agent",), idtyp="app", scp=None, name=None))
     assert attest(client, hdr, role="ApManager").status_code == 403
+
+
+# ---------------------------------------------------------------- an agent's sign-in, linked to the model
+
+ASSISTANT = "11111111-2222-3333-4444-555555555555"  # the example agent's sign-in client ID
+
+
+def agent_token(client_id=ASSISTANT, **claims) -> dict:
+    return h(token(roles=("VeroMesh.Agent",), idtyp="app", scp=None, name=None, azp=client_id, **claims))
+
+
+def test_a_signed_in_agent_knows_whom_it_acts_for(client):
+    load_example(client)
+    me = client.get(f"{API}/me", headers=agent_token()).json()
+    assert me["kind"] == "app" and me["roles"] == ["agent"]
+    assert me["agent"]["id"] == "InvoiceAssistant"
+    assert me["actsFor"]["id"] == "DanaExample"
+    assert me["actsFor"]["rolesFilled"] == ["ApManager"]
+    assert "email" not in me["actsFor"] and "email" in me["actsFor"]["withheld"]  # need to know
+    held = {a["id"]: a for a in me["authorities"]}
+    assert held["AssistantApprovalAuthority"]["limitAmount"]
+
+
+def test_entra_v1_appid_claim_also_links_the_agent(client):
+    load_example(client)
+    me = client.get(f"{API}/me", headers=agent_token(client_id=None, appid=ASSISTANT)).json()
+    assert me["agent"]["id"] == "InvoiceAssistant"
+
+
+def test_an_unregistered_agent_is_told_how_to_fix_it(client):
+    load_example(client)
+    me = client.get(f"{API}/me", headers=agent_token(client_id="not-registered")).json()
+    assert me["agent"] is None and "register it on the agent" in me["problem"]
+
+
+def test_a_person_sees_their_own_record(client):
+    load_example(client)
+    me = client.get(f"{API}/me", headers=reader(email="dana@example.com")).json()
+    assert me["kind"] == "user" and me["person"]["id"] == "DanaExample"
+    assert me["person"]["email"] == "dana@example.com"  # your own record, in full
+    me = client.get(f"{API}/me", headers=reader(email="nobody@example.com")).json()
+    assert me["person"] is None and "does not match" in me["problem"]
+
+
+def test_agents_see_their_sign_in_client_id_in_the_schema(client):
+    schema = client.get(f"{API}/schema", headers=h(token())).json()
+    agents = next(t for t in schema if t["type"] == "agents")
+    assert "signInClientId" in {f["key"] for f in agents["fields"]}

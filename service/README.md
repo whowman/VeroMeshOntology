@@ -49,6 +49,8 @@ A token without any of these roles gets 403.
 
 **Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
 
+**Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one.
+
 **Connectors** send a token with `--token` / `VEROMESH_TOKEN`, or get one themselves with client credentials (`VEROMESH_TOKEN_URL`, `VEROMESH_CLIENT_ID`, `VEROMESH_CLIENT_SECRET`, `VEROMESH_SCOPE`; for Entra ID the scope is `<Application ID URI>/.default`).
 
 ## Model API
@@ -57,6 +59,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 
 | Endpoint | Does |
 | --- | --- |
+| `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
 | `GET /api/v1/schema` | Entity types, fields, kinds, reference targets, help text |
 | `GET /api/v1/{type}[/{id}]` | Read the effective model (per field, the winning source's value), one source with `?source=`, or an entity as believed at a time with `?asOf=YYYY-MM-DD` |
 | `POST /api/v1/{type}?source=`, `PUT` / `DELETE /api/v1/{type}/{id}?source=` | Single-entity writes as one-item merge changesets; 422 with the report when invalid |

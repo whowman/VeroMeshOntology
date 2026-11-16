@@ -257,6 +257,18 @@ vms:AIAgentShape
     sh:property [ sh:path vmo:actsFor ; sh:class vmo:Person ; sh:minCount 1 ; sh:maxCount 1 ;
                   sh:message "An agent acts for exactly one person." ] ;
     sh:property [ sh:path vmo:holds ; sh:class vmo:DelegatedAuthority ] ;
+    sh:property [ sh:path vmo:signInClientId ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "An agent signs in with at most one client ID." ] ;
+    sh:sparql [
+        sh:message "Agent {?other} signs in with the same client ID; each agent needs its own." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?other WHERE {
+              $this vmo:signInClientId ?id .
+              ?other a vmo:AIAgent ; vmo:signInClientId ?id .
+              FILTER ($this != ?other)
+            }
+        """ ] ;
     sh:sparql [
         sh:message "Agent holds {?auth}, which is not a bounded subset of an authority its principal holds directly or through a role." ;
         sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;

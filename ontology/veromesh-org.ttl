@@ -462,6 +462,12 @@ vmo:criticality
 
 vmo:employeeId a owl:DatatypeProperty ; rdfs:label "employee ID" ; rdfs:domain vmo:Person ; rdfs:range xsd:string .
 vmo:email      a owl:DatatypeProperty ; rdfs:label "email" ; rdfs:domain vmo:Person ; rdfs:range xsd:string .
+vmo:signInClientId
+    a owl:DatatypeProperty ;
+    rdfs:label "sign-in client ID" ;
+    rdfs:domain vmo:AIAgent ;
+    rdfs:range xsd:string ;
+    skos:definition "The client (application) ID the agent signs in with at the customer's identity provider, as its access tokens carry it (azp, appid or client_id). Links a signed-in agent to this entity, and through it to the one person it acts for." .
 vmo:cmdbId     a owl:DatatypeProperty ; rdfs:label "CMDB ID" ; rdfs:domain vmo:System ; rdfs:range xsd:string .
 vmo:catalogUrn
     a owl:DatatypeProperty ;

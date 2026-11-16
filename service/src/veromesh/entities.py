@@ -285,6 +285,12 @@ SHEETS: tuple[Sheet, ...] = (
                 required=True,
                 help="ID of the one person the agent acts for.",
             ),
+            Col(
+                "Sign-in client ID",
+                "text",
+                VMO.signInClientId,
+                help="The client (application) ID the agent signs in with at your identity provider; links its sign-in to this agent.",
+            ),
             Col("Performs actions", "ref", VMO.performs, ("Actions",), multi=True),
             Col("Consumes data products", "ref", VMO.consumes, ("Data products",), multi=True),
             Col("Runs on systems", "ref", VMO.runsOn, ("Systems",), multi=True),

@@ -94,6 +94,12 @@
       "200"
     ]
   },
+  "GET /api/v1/me": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/schema": {
     "params": [],
     "status": [

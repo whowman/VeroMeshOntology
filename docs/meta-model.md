@@ -64,7 +64,7 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Person | A human filling roles; principal for agents | name, employee ID, email, roles, reporting line, nothing else | HR, identity |
 | Role | A job role or position; ownership attaches here | name, who fills it, authority held | HR |
 | Delegated authority | A grant to decide or act | holder, actions covered, capability scope, limit and currency, co-approval tiers, validity dates, delegated by (person, role or policy), parent grant | ERP approval matrix, credentialing, credit authority |
-| AI agent | Software that acts for exactly one person | principal, authority held, actions performed, data consumed, system | Agent registry |
+| AI agent | Software that acts for exactly one person | principal, authority held, actions performed, data consumed, system, sign-in client ID | Agent registry, identity provider |
 | Action | A type of consequential action | process, KPIs and capabilities affected, materiality thresholds | Process owners |
 | Data product | Governed, owned data with known producers and consumers | owner, system, lineage (feeds), elements, sensitivity, catalog URN | DataHub |
 | System | An application or platform | business and technical owner, CMDB ID, criticality, lifecycle, regulatory scope | CMDB |
