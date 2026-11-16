@@ -3,6 +3,7 @@
 # No `from __future__ import annotations` here: FastAPI must resolve the
 # dependency aliases defined inside create_app() at runtime.
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -13,12 +14,14 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from . import __version__, auth, branding, changesets, entities
+from . import __version__, auth, branding, changesets, decisions, entities
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
 from .rdf_store import StoreRequestError, make_store
 from .service import NotFound, VeromeshService
+
+log = logging.getLogger("veromesh.api")
 
 
 class ClassOut(BaseModel):
@@ -89,11 +92,20 @@ def build_service(settings: Settings, datahub: DataHubPort | None = None) -> Ver
     )
 
 
-def create_app(service: VeromeshService | None = None, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    service: VeromeshService | None = None,
+    settings: Settings | None = None,
+    decision_log: decisions.DecisionLog | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        s = settings or get_settings()
         # Refuse to serve with sign-in neither configured nor explicitly turned off.
-        auth.check_config(settings or get_settings())
+        auth.check_config(s)
+        if s.decision_log == "memory" and not s.auth_disabled:
+            log.warning(
+                "The decision log is in memory: decisions are lost on restart. Set VEROMESH_DECISION_LOG."
+            )
         yield
 
     app = FastAPI(
@@ -106,6 +118,7 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     )
     app.state.service = service
     app.state.settings = settings
+    app.state.decision_log = decision_log
     branding.install(app, Path((settings or get_settings()).branding_dir))
 
     def svc(request: Request) -> VeromeshService:
@@ -119,6 +132,13 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         return request.app.state.settings or get_settings()
 
     Cfg = Annotated[Settings, Depends(cfg)]
+
+    def dlog(request: Request, c: Cfg) -> decisions.DecisionLog:
+        if request.app.state.decision_log is None:
+            request.app.state.decision_log = decisions.make_log(c.decision_log)
+        return request.app.state.decision_log
+
+    Log = Annotated[decisions.DecisionLog, Depends(dlog)]
 
     def caller(
         request: Request, c: Cfg, creds: Annotated[HTTPAuthorizationCredentials | None, Depends(auth.bearer)]
@@ -143,6 +163,10 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     @app.exception_handler(prov.NotYourRole)
     async def _not_your_role(_: Request, exc: prov.NotYourRole):
         return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+    @app.exception_handler(decisions.InvalidEntry)
+    async def _bad_entry(_: Request, exc: decisions.InvalidEntry):
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.exception_handler(ValueError)
     @app.exception_handler(SyntaxError)  # pyoxigraph raises SyntaxError on bad Turtle/SPARQL
@@ -443,6 +467,44 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             if a.get("holder") == aid
         ]
         return out
+
+    # ------------------------------------------------------------------ decision log
+
+    @app.get("/api/v1/decisions", dependencies=need(auth.STEWARD), tags=["decisions"])
+    def decisions_list(
+        dl: Log,
+        agent: str | None = None,
+        principal: str | None = None,
+        action: str | None = None,
+        kind: str | None = None,
+        refersTo: str | None = None,
+        afterSeq: int = 0,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    ) -> list[dict]:
+        """Decision log entries in the order they were recorded: decisions (allow, consult, refuse),
+        and the overrides and outcomes that refer to them. Page with afterSeq."""
+        return dl.find(
+            agent=agent,
+            principal=principal,
+            action=action,
+            kind=kind,
+            refers_to=refersTo,
+            after_seq=afterSeq,
+            limit=limit,
+        )
+
+    @app.get("/api/v1/decisions/verify", dependencies=need(auth.STEWARD), tags=["decisions"])
+    def decisions_verify(dl: Log) -> dict:
+        """Walk the whole hash chain: ok, or the first entry that was changed, removed or inserted."""
+        return dl.verify().as_dict()
+
+    @app.get("/api/v1/decisions/{entry_id}", dependencies=need(auth.STEWARD), tags=["decisions"])
+    def decisions_get(dl: Log, entry_id: str) -> dict:
+        """One entry, with the entries that refer to it (its overrides and outcomes)."""
+        e = dl.get(entry_id)
+        if e is None:
+            raise HTTPException(status_code=404, detail=f"No decision log entry {entry_id}.")
+        return {**e, "followedBy": dl.find(refers_to=e["id"], limit=1000)}
 
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",

@@ -30,6 +30,8 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | pyshacl | Apache-2.0 |
 | PyJWT | MIT |
 | cryptography (for PyJWT) | Apache-2.0 OR BSD-3-Clause |
+| pg8000 | BSD-3-Clause |
+| scramp (for pg8000) | MIT-0 |
 
 ## Connectors (Python)
 

@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     oidc_person_claims: str = "email,preferred_username,upn"
     person_match_field: str = "email"  # or "employeeId" (with a claim that carries it)
 
+    # The decision log (decisions.py): "memory" (development and tests; lost on
+    # restart) or postgresql://user:password@host:5432/database[?sslmode=require],
+    # its own database, append-only and hash-chained.
+    decision_log: str = "memory"
+
 
 @lru_cache
 def get_settings() -> Settings:

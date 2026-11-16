@@ -120,6 +120,15 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- with .Values.api.decisionLog }}
+            {{- if .existingSecret }}
+            - name: VEROMESH_DECISION_LOG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret | quote }}
+                  key: {{ .key | quote }}
+            {{- end }}
+            {{- end }}
             {{- if or .Values.api.datahub.token .Values.api.datahub.existingSecret }}
             - name: VEROMESH_DATAHUB_TOKEN
               valueFrom:

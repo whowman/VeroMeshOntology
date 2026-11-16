@@ -27,6 +27,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_OIDC_JWKS_URL` | from discovery | Signing keys, when the issuer's discovery document is not reachable |
 | `VEROMESH_OIDC_PERSON_CLAIMS` | `email,preferred_username,upn` | Token claims that identify the signed-in person, first present wins |
 | `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
+| `VEROMESH_DECISION_LOG` | `memory` | The decision log: `memory` (development; lost on restart) or `postgresql://user:password@host:5432/database[?sslmode=require]`, its own database |
 | `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
 
 ## Sign-in
@@ -49,6 +50,8 @@ A token without any of these roles gets 403.
 
 **Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
 
+**Decision log.** Every decision about an agent's action (allow, consult or refuse, with reasons, the principal, the authority used and the facts relied on), and every later override or outcome that refers to it, is appended to the decision log (`src/veromesh/decisions.py`). Entries are never changed: in PostgreSQL a trigger refuses UPDATE, DELETE and TRUNCATE, and each entry carries the SHA-256 of the one before it, so `GET /api/v1/decisions/verify` finds any entry changed, removed or inserted, even by someone who bypasses the trigger. Concurrent writers (several API replicas) take an advisory lock and form one chain. Give the log its own database; the service creates its table on first use. Export to write-once storage for regulated customers follows.
+
 **Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one.
 
 **Connectors** send a token with `--token` / `VEROMESH_TOKEN`, or get one themselves with client credentials (`VEROMESH_TOKEN_URL`, `VEROMESH_CLIENT_ID`, `VEROMESH_CLIENT_SECRET`, `VEROMESH_SCOPE`; for Entra ID the scope is `<Application ID URI>/.default`).
@@ -60,6 +63,9 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
+| `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
+| `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |
+| `GET /api/v1/decisions/verify` | Walk the hash chain: ok, or the first entry changed, removed or inserted |
 | `GET /api/v1/schema` | Entity types, fields, kinds, reference targets, help text |
 | `GET /api/v1/{type}[/{id}]` | Read the effective model (per field, the winning source's value), one source with `?source=`, or an entity as believed at a time with `?asOf=YYYY-MM-DD` |
 | `POST /api/v1/{type}?source=`, `PUT` / `DELETE /api/v1/{type}/{id}?source=` | Single-entity writes as one-item merge changesets; 422 with the report when invalid |

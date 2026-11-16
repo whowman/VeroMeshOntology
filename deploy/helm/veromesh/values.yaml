@@ -58,6 +58,15 @@ api:
     # Development and CI only: no sign-in, every request acts as an administrator.
     disabled: false
 
+  # The decision log: an append-only, hash-chained table in its own PostgreSQL
+  # database (the service creates it). Give the database's URL,
+  # postgresql://user:password@host:5432/database?sslmode=require, in a Secret
+  # you create. Unset, the log is kept in memory and lost on restart:
+  # development only.
+  decisionLog:
+    existingSecret: ""
+    key: url
+
   # Extra environment variables for the service, as name: value.
   env: {}
 

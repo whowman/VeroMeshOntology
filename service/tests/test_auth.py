@@ -400,3 +400,12 @@ def test_agents_see_their_sign_in_client_id_in_the_schema(client):
     schema = client.get(f"{API}/schema", headers=h(token())).json()
     agents = next(t for t in schema if t["type"] == "agents")
     assert "signInClientId" in {f["key"] for f in agents["fields"]}
+
+
+def test_the_decision_log_is_for_stewards(client):
+    for role in ("Reader", "Agent", "Connector"):
+        assert (
+            client.get(f"{API}/decisions", headers=h(token(roles=(f"VeroMesh.{role}",)))).status_code == 403
+        )
+    assert client.get(f"{API}/decisions", headers=steward()).status_code == 200
+    assert client.get(f"{API}/decisions/verify", headers=steward()).json()["ok"] is True

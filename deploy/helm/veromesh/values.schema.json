@@ -66,6 +66,14 @@
             "disabled": {"type": "boolean"}
           }
         },
+        "decisionLog": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        },
         "env": {
           "type": "object",
           "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},

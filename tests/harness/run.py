@@ -32,6 +32,9 @@ RUNNER_IMAGE = "veromesh/test-runner"
 TEST_NETWORK = "veromesh-test"
 FUSEKI_CONTAINER = "veromesh-test-fuseki"
 FUSEKI_PORT = int(os.environ.get("VEROMESH_TEST_FUSEKI_PORT", "3039"))
+POSTGRES_CONTAINER = "veromesh-test-postgres"
+POSTGRES_IMAGE = os.environ.get("VEROMESH_TEST_POSTGRES_IMAGE", "postgres:16-alpine")
+POSTGRES_PORT = int(os.environ.get("VEROMESH_TEST_POSTGRES_PORT", "55439"))
 STACK_NETWORK = "datahub_network"
 IGNORED_DIRS = {".build", ".git", "third_party", "node_modules", ".venv"}
 
@@ -72,6 +75,8 @@ class Run:
     results: list[Result] = field(default_factory=list)
     fuseki_started: bool = False
     fuseki_error: str | None = None
+    postgres_started: bool = False
+    postgres_error: str | None = None
     stack: dict | None = None
     stack_error: str | None = None
     runner_ready: bool = False
@@ -359,6 +364,75 @@ def start_fuseki(run: Run) -> str | None:
     return run.fuseki_error
 
 
+def start_postgres(run: Run) -> str | None:
+    """A throwaway PostgreSQL for the decision log tests."""
+    if run.postgres_started:
+        return None
+    if run.postgres_error:
+        return run.postgres_error
+    say(color(f">> Starting a throwaway PostgreSQL ({POSTGRES_IMAGE}) for the decision log", DIM))
+    sh(["docker", "rm", "-f", POSTGRES_CONTAINER])
+    if sh(["docker", "network", "inspect", TEST_NETWORK]).returncode != 0:
+        sh(["docker", "network", "create", TEST_NETWORK])
+    r = sh(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            POSTGRES_CONTAINER,
+            "--network",
+            TEST_NETWORK,
+            "-p",
+            f"127.0.0.1:{POSTGRES_PORT}:5432",
+            "-e",
+            "POSTGRES_USER=veromesh",
+            "-e",
+            "POSTGRES_PASSWORD=test-only",
+            "-e",
+            "POSTGRES_DB=decisions",
+            POSTGRES_IMAGE,
+        ]
+    )
+    if r.returncode != 0:
+        run.postgres_error = "could not start PostgreSQL: " + r.stderr
+        return run.postgres_error
+    for _ in range(60):
+        ok = sh(["docker", "exec", POSTGRES_CONTAINER, "pg_isready", "-U", "veromesh", "-d", "decisions"])
+        if ok.returncode == 0:
+            # pg_isready answers during the image's init restart; a real query does not.
+            if (
+                sh(
+                    [
+                        "docker",
+                        "exec",
+                        POSTGRES_CONTAINER,
+                        "psql",
+                        "-U",
+                        "veromesh",
+                        "-d",
+                        "decisions",
+                        "-c",
+                        "select 1",
+                    ]
+                ).returncode
+                == 0
+            ):
+                run.postgres_started = True
+                return None
+        time.sleep(1)
+    run.postgres_error = (
+        "PostgreSQL did not become ready:\n"
+        + sh(["docker", "logs", "--tail", "40", POSTGRES_CONTAINER]).stdout
+    )
+    return run.postgres_error
+
+
+def stop_postgres(run: Run) -> None:
+    if run.postgres_started and not run.args.keep:
+        sh(["docker", "rm", "-f", POSTGRES_CONTAINER])
+
+
 def stop_fuseki(run: Run) -> None:
     if run.fuseki_started and not run.args.keep:
         sh(["docker", "rm", "-f", FUSEKI_CONTAINER])
@@ -429,6 +503,9 @@ def substitutions(run: Run, suite: Suite) -> dict[str, str]:
             if in_container
             else f"http://127.0.0.1:{FUSEKI_PORT}/veromesh"
         )
+    if "postgres" in suite.needs:
+        host = f"{POSTGRES_CONTAINER}:5432" if in_container else f"127.0.0.1:{POSTGRES_PORT}"
+        subs["postgres"] = f"postgresql://veromesh:test-only@{host}/decisions"
     if "stack" in suite.needs and run.stack:
         subs.update(run.stack)
         if suite.where == "host":
@@ -454,7 +531,7 @@ def command_for(run: Run, suite: Suite, step: str, env: dict[str, str]) -> tuple
     pythonpath = "{root}/service/src:{root}/connectors/src"
     if run.mode == "docker":
         network = []
-        if "fuseki" in suite.needs:
+        if "fuseki" in suite.needs or "postgres" in suite.needs:
             network = ["--network", TEST_NETWORK]
         elif "stack" in suite.needs:
             network = ["--network", STACK_NETWORK]
@@ -483,6 +560,7 @@ def blocked_reason(run: Run, suite: Suite) -> str | None:
     if (
         "docker" in suite.needs
         or "fuseki" in suite.needs
+        or "postgres" in suite.needs
         or (suite.where == "runner" and run.mode == "docker")
     ) and not run.docker:
         return "Docker is not running"
@@ -501,6 +579,10 @@ def blocked_reason(run: Run, suite: Suite) -> str | None:
             return err
     if "fuseki" in suite.needs:
         err = start_fuseki(run)
+        if err:
+            return err
+    if "postgres" in suite.needs:
+        err = start_postgres(run)
         if err:
             return err
     if "stack" in suite.needs:
@@ -722,6 +804,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         say(color("\nInterrupted.", RED))
     finally:
+        stop_postgres(run)
         stop_fuseki(run)
     total = time.time() - start
     write_reports(run, total)
