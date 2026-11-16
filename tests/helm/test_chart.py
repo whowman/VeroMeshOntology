@@ -135,6 +135,8 @@ def test_lint(variant):
         "fuseki.replication.kafka.bootstrapServers=kafka",
         "fuseki.replication.kafka.topic=bad topic",
         "fuseki.replication.kafka.replicationFactor=-1",
+        "api.auth.issuer=http://login.example.com",  # an issuer must be https
+        "api.auth.enabled=true",  # typo: the switch is api.auth.disabled
     ],
 )
 def test_schema_rejects_bad_values(bad):
@@ -301,6 +303,22 @@ def test_inline_token_creates_a_secret():
         assert "volumeClaimTemplates" not in sts["spec"]
         assert {"name": "data", "emptyDir": {}} in sts["spec"]["template"]["spec"]["volumes"]
     assert not by_kind(docs, "NetworkPolicy")
+
+
+def test_sign_in_settings_reach_the_service():
+    env = env_of(one(render("production-values.yaml"), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert env["VEROMESH_OIDC_ISSUER"]["value"].startswith("https://login.microsoftonline.com/")
+    assert env["VEROMESH_OIDC_AUDIENCE"]["value"] == "api://veromesh-acme"
+    assert env["VEROMESH_OIDC_ROLES_CLAIM"]["value"] == "roles"
+    assert env["VEROMESH_OIDC_ROLE_PREFIX"]["value"] == "VeroMesh."
+    assert "VEROMESH_AUTH_DISABLED" not in env
+
+
+def test_sign_in_is_never_off_by_default():
+    env = env_of(one(render(), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert "VEROMESH_AUTH_DISABLED" not in env
+    off = env_of(one(render("kind-values.yaml"), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert off["VEROMESH_AUTH_DISABLED"]["value"] == "true"
 
 
 def test_production_shape():

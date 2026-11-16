@@ -18,6 +18,7 @@ dependencies = [
     "pydantic-settings>=2.4",   # MIT
     "rdflib>=7.1,<8",           # BSD-3-Clause
     "pyshacl>=0.40,<0.41",      # Apache-2.0
+    "pyjwt[crypto]>=2.8,<3",    # MIT (cryptography: Apache-2.0 OR BSD-3-Clause)
 ]
 
 [project.optional-dependencies]

@@ -7,6 +7,9 @@ api:
     pullPolicy: Never
   datahub:
     gmsUrl: http://datahub-not-installed:8080
+  # The smoke test calls the API without an identity provider in the cluster.
+  auth:
+    disabled: true
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}

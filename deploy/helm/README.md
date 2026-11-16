@@ -10,7 +10,7 @@ Everything runs in the customer's own cluster. Three Helm releases, installed in
 
 DataHub runs unmodified from its own charts; the overlays only add our plugin, the branded frontend image and the theme settings, the same way `scripts/dev-up.sh` does for the local stack. Chart versions are pinned in [deploy/versions.env](../versions.env) (`DATAHUB_CHART_VERSION`, `DATAHUB_PREREQUISITES_CHART_VERSION`) and match `DATAHUB_VERSION`.
 
-Status: Phase 0. It installs and passes its tests on a kind cluster in CI, including Fuseki replication over Kafka (see [Replication](#replication)). Not yet included: sign-in through Keycloak and secrets from OpenBao (Phase 1), and the scheduled connector jobs.
+Status: Phase 0. It installs and passes its tests on a kind cluster in CI, including Fuseki replication over Kafka (see [Replication](#replication)). Sign-in: the API takes tokens from any OpenID Connect provider (`api.auth`; Entra ID first), and the service will not start without it unless `api.auth.disabled` is set, which the kind test does. Not yet included: secrets from OpenBao, and the scheduled connector jobs.
 
 ## 1. Images
 

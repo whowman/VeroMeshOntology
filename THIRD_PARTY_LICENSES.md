@@ -28,6 +28,8 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | pydantic / pydantic-settings | MIT |
 | rdflib | BSD-3-Clause |
 | pyshacl | Apache-2.0 |
+| PyJWT | MIT |
+| cryptography (for PyJWT) | Apache-2.0 OR BSD-3-Clause |
 
 ## Connectors (Python)
 

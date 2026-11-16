@@ -3,15 +3,17 @@
 # No `from __future__ import annotations` here: FastAPI must resolve the
 # dependency aliases defined inside create_app() at runtime.
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
 from datahub.configuration.common import OperationalError
 from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from . import __version__, branding, changesets, entities
+from . import __version__, auth, branding, changesets, entities
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -87,7 +89,14 @@ def build_service(settings: Settings, datahub: DataHubPort | None = None) -> Ver
 
 
 def create_app(service: VeromeshService | None = None, settings: Settings | None = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        # Refuse to serve with sign-in neither configured nor explicitly turned off.
+        auth.check_config(settings or get_settings())
+        yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="VeroMesh API",
         version=__version__,
         description="Organizational ontology, model changesets and DataHub bindings.",
@@ -104,6 +113,31 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         return request.app.state.service
 
     Svc = Annotated[VeromeshService, Depends(svc)]
+
+    def cfg(request: Request) -> Settings:
+        return request.app.state.settings or get_settings()
+
+    Cfg = Annotated[Settings, Depends(cfg)]
+
+    def caller(
+        request: Request, c: Cfg, creds: Annotated[HTTPAuthorizationCredentials | None, Depends(auth.bearer)]
+    ) -> auth.Caller:
+        return auth.current_caller(request, creds, c)
+
+    Who = Annotated[auth.Caller, Depends(caller)]
+
+    def need(roles: tuple[str, ...]):
+        """Route dependency: the caller holds admin or one of ``roles``."""
+
+        def check(who: Who) -> auth.Caller:
+            auth.forbid(who, *roles)
+            return who
+
+        return [Depends(check)]
+
+    def personal_ok(who: auth.Caller, type_: str) -> None:
+        if type_ in auth.PERSONAL_TYPES:
+            auth.forbid(who, *auth.STEWARD_OR_CONNECTOR)
 
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
@@ -128,12 +162,13 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     def health() -> dict:
         return {"status": "ok", "version": __version__}
 
-    @app.get("/ontologies")
+    @app.get("/ontologies", dependencies=need(auth.READ))
     def list_ontologies(s: Svc) -> list[str]:
         return s.list_ontologies()
 
     @app.put(
         "/ontologies",
+        dependencies=need(auth.ADMIN),
         status_code=204,
         openapi_extra={
             "requestBody": {"required": True, "content": {"text/turtle": {"schema": {"type": "string"}}}}
@@ -149,40 +184,35 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         turtle = (await request.body()).decode("utf-8")
         s.load_ontology(graph, turtle, replace=replace)
 
-    @app.get("/classes", response_model=list[ClassOut])
+    @app.get("/classes", dependencies=need(auth.READ), response_model=list[ClassOut])
     def list_classes(s: Svc, graph: str | None = None):
         return [ClassOut(**c.__dict__) for c in s.list_classes(graph)]
 
-    @app.get("/classes/assets")
+    @app.get("/classes/assets", dependencies=need(auth.READ))
     def assets_for_class(s: Svc, class_iri: str, include_subclasses: bool = True) -> list[str]:
         return s.assets_for_class(class_iri, include_subclasses=include_subclasses)
 
-    @app.post("/glossary/publish")
+    @app.post("/glossary/publish", dependencies=need(auth.ADMIN))
     def publish_glossary(s: Svc, body: PublishIn) -> dict:
         result = s.publish_glossary(body.graph, body.name)
         return result.__dict__
 
-    @app.get("/bindings")
+    @app.get("/bindings", dependencies=need(auth.READ))
     def get_bindings(s: Svc, datahub_urn: str) -> list[str]:
         return s.classes_for_asset(datahub_urn)
 
-    @app.post("/bindings", status_code=201)
+    @app.post("/bindings", dependencies=need(auth.STEWARD), status_code=201)
     def bind(s: Svc, body: BindingIn) -> dict:
         return s.bind(body.datahub_urn, body.class_iri).to_aspect_dict()
 
-    @app.delete("/bindings", status_code=204)
+    @app.delete("/bindings", dependencies=need(auth.STEWARD), status_code=204)
     def unbind(s: Svc, body: BindingIn) -> None:
         s.unbind(body.datahub_urn, body.class_iri)
 
-    @app.post("/sparql")
+    @app.post("/sparql", dependencies=need(auth.ADMIN))
     def sparql(s: Svc, body: SparqlIn) -> dict:
         """Read-only SPARQL (SELECT / ASK)."""
         return s.sparql(body.query)
-
-    def cfg(request: Request) -> Settings:
-        return request.app.state.settings or get_settings()
-
-    Cfg = Annotated[Settings, Depends(cfg)]
 
     # ------------------------------------------------------------------ model API (v1)
     # The only way facts enter the organizational model. Clients such as the
@@ -200,17 +230,17 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     async def _unknown(_: Request, exc: LookupError):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
-    @app.get("/api/v1/schema", tags=["model"])
+    @app.get("/api/v1/schema", dependencies=need(auth.READ), tags=["model"])
     def model_schema() -> list[dict]:
         """Every entity type: its fields, kinds, required fields, reference targets and help text."""
         return entities.schema()
 
-    @app.get("/api/v1/sources", tags=["model"])
+    @app.get("/api/v1/sources", dependencies=need(auth.READ), tags=["model"])
     def model_sources(s: Svc) -> list[dict]:
         """Sources in the model, with kind, file, last update and the changeset that wrote them."""
         return changesets.list_sources(s.store)
 
-    @app.get("/api/v1/examples/procure-to-pay", tags=["model"])
+    @app.get("/api/v1/examples/procure-to-pay", dependencies=need(auth.READ), tags=["model"])
     def model_example(c: Cfg) -> dict:
         """The worked example as changeset items, ready to submit."""
         from pathlib import Path
@@ -228,7 +258,7 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
                 items.append({"type": t, "op": "upsert", "entity": ent})
         return {"items": items}
 
-    @app.post("/api/v1/changesets", status_code=201, tags=["changesets"])
+    @app.post("/api/v1/changesets", dependencies=need(auth.CONNECTOR), status_code=201, tags=["changesets"])
     def changeset_create(s: Svc, body: ChangesetIn):
         """Open a changeset for one source. `replace`: its items become the whole source. `merge`: upsert/delete within it."""
         cs = changesets.create(
@@ -243,33 +273,33 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         )
         return JSONResponse(status_code=200 if cs["reused"] else 201, content=cs)
 
-    @app.get("/api/v1/changesets", tags=["changesets"])
+    @app.get("/api/v1/changesets", dependencies=need(auth.STEWARD_OR_CONNECTOR), tags=["changesets"])
     def changeset_list(
         s: Svc, source: str | None = None, status: str | None = None, limit: int = 50
     ) -> list[dict]:
         """Run history, newest first; filter by source and status (e.g. open, committed)."""
         return changesets.list_changesets(s.store, source=source, status=status, limit=limit)
 
-    @app.get("/api/v1/changesets/{cs}", tags=["changesets"])
+    @app.get("/api/v1/changesets/{cs}", dependencies=need(auth.STEWARD_OR_CONNECTOR), tags=["changesets"])
     def changeset_get(s: Svc, cs: str) -> dict:
         return changesets.get(s.store, cs)
 
-    @app.post("/api/v1/changesets/{cs}/items", tags=["changesets"])
+    @app.post("/api/v1/changesets/{cs}/items", dependencies=need(auth.CONNECTOR), tags=["changesets"])
     def changeset_items(s: Svc, cs: str, body: ItemsIn) -> dict:
         """Add items: `{"type": "kpis", "op": "upsert", "entity": {...}}`. Re-adding a type and ID replaces it."""
         return changesets.add_items(s.store, cs, body.items)
 
-    @app.post("/api/v1/changesets/{cs}/validate", tags=["changesets"])
+    @app.post("/api/v1/changesets/{cs}/validate", dependencies=need(auth.CONNECTOR), tags=["changesets"])
     def changeset_validate(s: Svc, c: Cfg, cs: str) -> dict:
         """Check the changeset against the whole model. Nothing is written."""
         return changesets.validate(s.store, cs, base=c.instance_base, ontology_dir=c.ontology_dir)
 
-    @app.post("/api/v1/changesets/{cs}/commit", tags=["changesets"])
+    @app.post("/api/v1/changesets/{cs}/commit", dependencies=need(auth.CONNECTOR), tags=["changesets"])
     def changeset_commit(s: Svc, c: Cfg, cs: str) -> dict:
         """Re-validate and write. 409 with the report when it is not valid."""
         return changesets.commit(s.store, cs, base=c.instance_base, ontology_dir=c.ontology_dir)
 
-    @app.delete("/api/v1/changesets/{cs}", tags=["changesets"])
+    @app.delete("/api/v1/changesets/{cs}", dependencies=need(auth.CONNECTOR), tags=["changesets"])
     def changeset_discard(s: Svc, cs: str) -> dict:
         return changesets.discard(s.store, cs)
 
@@ -285,24 +315,24 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
     # ------------------------------------------------------------------ provenance and governance
     # (declared before the per-type routes, which would otherwise match these paths)
 
-    @app.get("/api/v1/governance", tags=["governance"])
+    @app.get("/api/v1/governance", dependencies=need(auth.READ), tags=["governance"])
     def governance() -> dict:
         """Source rankings, which fields a steward may correct, and re-confirmation cadence."""
         return prov.governance()
 
-    @app.put("/api/v1/sources/{name}", tags=["governance"])
+    @app.put("/api/v1/sources/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
     def source_register(s: Svc, c: Cfg, name: str, body: SourceIn) -> dict:
         """Register a source's category (hr, iam, cmdb, erp, catalog, spreadsheet), owner role and description."""
         out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
         prov.refresh_effective(s.store, c.instance_base)
         return out
 
-    @app.get("/api/v1/conflicts", tags=["governance"])
+    @app.get("/api/v1/conflicts", dependencies=need(auth.STEWARD), tags=["governance"])
     def conflicts(s: Svc, type: str | None = None) -> list[dict]:
         """Fields where sources state different values, with the value that wins."""
         return prov.conflicts(s.store, type)
 
-    @app.get("/api/v1/attestations", tags=["governance"])
+    @app.get("/api/v1/attestations", dependencies=need(auth.STEWARD), tags=["governance"])
     def review_queue(
         s: Svc,
         status: str = "unconfirmed",
@@ -313,22 +343,27 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         """Review queue: entities with fields in a status (unconfirmed, attested, disputed, expired)."""
         return prov.review_queue(s.store, status=status, type_=type, owner_role=ownerRole, limit=limit)
 
-    @app.post("/api/v1/effective/rebuild", tags=["governance"])
+    @app.post("/api/v1/effective/rebuild", dependencies=need(auth.ADMIN), tags=["governance"])
     def effective_rebuild(s: Svc, c: Cfg) -> dict:
         """Recompute the effective model (e.g. after valid-until dates pass)."""
         return prov.rebuild(s.store, c.instance_base)
 
-    @app.get("/api/v1/authorities/{rid}/confirmation", tags=["governance"])
+    @app.get("/api/v1/authorities/{rid}/confirmation", dependencies=need(auth.READ), tags=["governance"])
     def authority_confirmation(s: Svc, rid: str) -> dict:
         """Whether an agent may rely on this authority: every fact behind it attested and current."""
         return prov.authority_basis(s.store, rid)
 
-    @app.get("/api/v1/{type_}/{rid}/provenance", tags=["governance"])
+    @app.get("/api/v1/{type_}/{rid}/provenance", dependencies=need(auth.STEWARD), tags=["governance"])
     def entity_provenance(s: Svc, type_: str, rid: str) -> dict:
         """Why we believe this: per field, the winning source, its times and status, and every other claim."""
         return prov.explain(s.store, type_, rid)
 
-    @app.post("/api/v1/{type_}/{rid}/attestations", status_code=201, tags=["governance"])
+    @app.post(
+        "/api/v1/{type_}/{rid}/attestations",
+        dependencies=need(auth.STEWARD),
+        status_code=201,
+        tags=["governance"],
+    )
     def entity_attest(s: Svc, c: Cfg, type_: str, rid: str, body: AttestationIn) -> dict:
         """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values."""
         return prov.attest(
@@ -344,7 +379,12 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             note=body.note,
         )
 
-    @app.post("/api/v1/{type_}/{rid}/corrections", status_code=201, tags=["governance"])
+    @app.post(
+        "/api/v1/{type_}/{rid}/corrections",
+        dependencies=need(auth.STEWARD),
+        status_code=201,
+        tags=["governance"],
+    )
     def entity_correct(s: Svc, c: Cfg, type_: str, rid: str, body: CorrectionIn):
         """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested."""
         try:
@@ -362,17 +402,19 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
 
-    @app.get("/api/v1/{type_}", tags=["entities"])
-    def entity_list(s: Svc, c: Cfg, type_: str, source: str | None = None) -> list[dict]:
-        """All entities of a type across the model, or in one source."""
+    @app.get("/api/v1/{type_}", dependencies=need(auth.READ), tags=["entities"])
+    def entity_list(s: Svc, c: Cfg, who: Who, type_: str, source: str | None = None) -> list[dict]:
+        """All entities of a type across the model, or in one source. People: stewards and connectors only."""
+        personal_ok(who, type_)
         return changesets.list_entities(s.store, type_, c.instance_base, source)
 
-    @app.get("/api/v1/{type_}/{rid}", tags=["entities"])
-    def entity_get(s: Svc, c: Cfg, type_: str, rid: str, asOf: str | None = None) -> dict:
-        """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time."""
+    @app.get("/api/v1/{type_}/{rid}", dependencies=need(auth.READ), tags=["entities"])
+    def entity_get(s: Svc, c: Cfg, who: Who, type_: str, rid: str, asOf: str | None = None) -> dict:
+        """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time. People: stewards and connectors only."""
+        personal_ok(who, type_)
         return changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf)
 
-    @app.post("/api/v1/{type_}", tags=["entities"])
+    @app.post("/api/v1/{type_}", dependencies=need(auth.CONNECTOR), tags=["entities"])
     def entity_create(s: Svc, c: Cfg, type_: str, source: str, entity: Annotated[dict, Body()]):
         """Create one entity in a source (validated against the whole model, then committed)."""
         entities.check_type(type_)
@@ -385,12 +427,12 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             )
         return _single(s, c, source, [{"type": type_, "op": "upsert", "entity": entity}], status=201)
 
-    @app.put("/api/v1/{type_}/{rid}", tags=["entities"])
+    @app.put("/api/v1/{type_}/{rid}", dependencies=need(auth.CONNECTOR), tags=["entities"])
     def entity_put(s: Svc, c: Cfg, type_: str, rid: str, source: str, entity: Annotated[dict, Body()]):
         """Create or replace one entity in a source."""
         return _single(s, c, source, [{"type": type_, "op": "upsert", "entity": {**entity, "id": rid}}])
 
-    @app.delete("/api/v1/{type_}/{rid}", tags=["entities"])
+    @app.delete("/api/v1/{type_}/{rid}", dependencies=need(auth.CONNECTOR), tags=["entities"])
     def entity_delete(s: Svc, c: Cfg, type_: str, rid: str, source: str):
         """Delete one entity from a source; refused if something still references it."""
         return _single(s, c, source, [{"type": type_, "op": "delete", "entity": {"id": rid}}])

@@ -11,6 +11,10 @@ api:
     existingSecret: veromesh-datahub
     existingSecretKey: token
   instanceBase: "urn:veromesh:org:acme:"
+  auth:
+    issuer: https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0
+    audience: api://veromesh-acme
+    rolePrefix: VeroMesh.
   env:
     VEROMESH_GLOSSARY_ROOT_NAME: Acme Ontology
   ingress:
