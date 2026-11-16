@@ -9,9 +9,10 @@ and expiry, then reads the caller's roles from one claim.
 Roles (app roles in Entra ID, realm or client roles in Keycloak):
 
     admin      everything, including raw SPARQL and loading ontologies
-    steward    reviews, attests and corrects facts; sees personal details and provenance
+    steward    reviews, attests and corrects any fact; sees personal details and provenance
     connector  writes changesets (the spreadsheet and CSV connectors, HR and CMDB feeds)
-    reader     reads the model on a need-to-know basis (below)
+    reader     reads the model on a need-to-know basis (below); a person may also attest
+               the entities whose owner or steward role they fill in the model
     agent      an AI agent: reads like a reader (the decision check comes next)
 
 Need to know: readers and agents get what an agent needs to act within its

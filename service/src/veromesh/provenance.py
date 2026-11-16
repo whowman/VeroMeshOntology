@@ -806,11 +806,20 @@ class NotYourRole(PermissionError):
 
 
 def _check_attester(
-    resolved: dict, type_: str, rid: str, attester: str, role: str, *, signed_in: bool = False
+    resolved: dict,
+    type_: str,
+    rid: str,
+    attester: str,
+    role: str,
+    *,
+    signed_in: bool = False,
+    owner_only: bool = False,
 ) -> list[str]:
     """Check the attester names a real person and role, and warn when they are not the
     owner or steward. With sign-in, the attester is the signed-in person, and acting in a
-    role they do not fill is refused rather than warned about."""
+    role they do not fill is refused rather than warned about. ``owner_only`` (an owner
+    attesting without the VeroMesh steward role): the role must be one of the entity's
+    owner or steward roles, or the attestation is refused."""
     if ("people", attester) not in resolved:
         raise ValueError(f"No person '{attester}' in the model.")
     if ("roles", role) not in resolved:
@@ -822,6 +831,12 @@ def _check_attester(
         warnings.append(f"{attester} does not fill role {role}.")
     target = resolved.get((type_, rid))
     owners = {v for k in OWNERSHIP_FIELDS for v in [target.values.get(k)] if v} if target else set()
+    if owner_only and role not in owners:
+        named = f" ({', '.join(sorted(owners))})" if owners else " (it names none)"
+        raise NotYourRole(
+            f"Only the owner or steward roles of {type_} '{rid}'{named} may attest it, "
+            "unless you have the VeroMesh steward role."
+        )
     if owners and role not in owners:
         warnings.append(
             f"Role {role} is not an owner or steward of {type_} '{rid}' ({', '.join(sorted(owners))})."
@@ -842,6 +857,7 @@ def attest(
     source: str | None = None,
     note: str | None = None,
     signed_in: bool = False,
+    owner_only: bool = False,
 ) -> dict:
     """Confirm or dispute fields of an entity: by default the values VeroMesh currently
     believes (each field's winning source); with ``source``, that source's values."""
@@ -854,7 +870,9 @@ def attest(
         from .changesets import _not_found
 
         raise _not_found(f"No {type_} with ID '{rid}'.")
-    warnings = _check_attester(resolved, type_, rid, attester, role, signed_in=signed_in)
+    warnings = _check_attester(
+        resolved, type_, rid, attester, role, signed_in=signed_in, owner_only=owner_only
+    )
     wanted = fields or sorted(r.winners)
     by_source: dict[str, dict] = {}
     for f in wanted:

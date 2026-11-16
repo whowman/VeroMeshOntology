@@ -391,14 +391,16 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
 
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",
-        dependencies=need(auth.STEWARD),
+        dependencies=need(auth.READ),
         status_code=201,
         tags=["governance"],
     )
     def entity_attest(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
         """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values.
-        The attester is the signed-in person, who must fill the role they act in."""
+        The attester is the signed-in person, who must fill the role they act in. Stewards may attest
+        anything; anyone else, only entities whose owner or steward role they act in."""
         attester, signed_in = attester_for(s, c, who, body.attester)
+        owner_only = not who.has(*auth.STEWARD)
         return prov.attest(
             s.store,
             c.instance_base,
@@ -411,6 +413,7 @@ def create_app(service: VeromeshService | None = None, settings: Settings | None
             source=body.source,
             note=body.note,
             signed_in=signed_in,
+            owner_only=owner_only,
         )
 
     @app.post(

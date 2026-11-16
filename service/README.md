@@ -36,16 +36,16 @@ Every route except `/health` and the docs pages needs `Authorization: Bearer <ac
 | Role | May |
 | --- | --- |
 | `admin` | Everything, including `POST /sparql`, loading ontologies, publishing the glossary, registering sources and rebuilding the effective model |
-| `steward` | Read everything, including personal details; review queue, conflicts, provenance, attestations and corrections; bindings |
+| `steward` | Read everything, including personal details; review queue, conflicts, provenance; attest and correct any entity; bindings |
 | `connector` | Write changesets and single entities (the spreadsheet and CSV connectors, HR and CMDB feeds); read personal details |
-| `reader` | Read the model on a need-to-know basis (below) |
+| `reader` | Read the model on a need-to-know basis (below); attest the entities whose owner or steward role the person fills |
 | `agent` | An AI agent: reads like a reader. The decision check comes next |
 
 A token without any of these roles gets 403.
 
 **Need to know.** Readers and agents get what acting within an authority needs: roles, authorities and their limits, scopes and dates, co-approvals, owners, actions, KPIs, and who fills which role. They do not get personal details: fields the schema marks `"personal": true` (a person's email, employee ID and reporting line) are left out of every entity answer, including `?asOf=` and `?source=`, and their names are listed under `withheld`. Stewards, connectors and administrators get the whole record. Raw SPARQL, which could read anything, stays with administrators.
 
-**Attesting as yourself.** Attestations and corrections are recorded as the signed-in person: the first of the token claims in `VEROMESH_OIDC_PERSON_CLAIMS` (default `email,preferred_username,upn`) is matched to exactly one person in the model by `VEROMESH_PERSON_MATCH_FIELD` (`email`, ignoring case, or `employeeId`). A request naming someone else as attester is refused, as is acting in a role the person does not fill, a sign-in that matches no one, and a service (app-only) token. With sign-in off, the request names the attester and a role they do not fill is only a warning.
+**Attesting as yourself.** Attestations and corrections are recorded as the signed-in person: the first of the token claims in `VEROMESH_OIDC_PERSON_CLAIMS` (default `email,preferred_username,upn`) is matched to exactly one person in the model by `VEROMESH_PERSON_MATCH_FIELD` (`email`, ignoring case, or `employeeId`). Owners attest their own facts: a person without the steward role (any VeroMesh role, e.g. `reader`) may attest an entity when the role they act in is one of its owner or steward roles and they fill it; stewards may attest anything. Corrections stay with stewards. A request naming someone else as attester is refused, as is acting in a role the person does not fill, a sign-in that matches no one, and a service (app-only) token. With sign-in off, the request names the attester and a role they do not fill is only a warning.
 
 **Entra ID setup:** register the API as an app, set its access tokens to v2 (`"accessTokenAcceptedVersion": 2` in the manifest), expose an Application ID URI, and define app roles `VeroMesh.Admin`, `VeroMesh.Steward`, `VeroMesh.Connector`, `VeroMesh.Reader` and `VeroMesh.Agent` for users and applications. Assign people to roles under Enterprise applications; give each connector or agent its own app registration with the role it needs (client credentials). Then set the issuer, the audience (the Application ID URI or client ID) and `VEROMESH_OIDC_ROLE_PREFIX=VeroMesh.`.
 

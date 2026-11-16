@@ -117,7 +117,7 @@ Additions to `/api/v1` (existing endpoints unchanged):
 
 Changeset items gain optional `observedAt`, `validFrom`, `validUntil`. The connector SDK's `Item` carries them, and mapping files can fill them from source columns (for example `observedAt: "{Last Modified}"`). The spreadsheet keeps working without them.
 
-With sign-in on, the attester is the signed-in person (matched to the model by email or employee ID; `service/README.md`, "Attesting as yourself"), who must fill the role they act in. Acting in a role that is not the entity's owner or steward is still a warning, not a refusal. With sign-in off (development), the request names the attester.
+With sign-in on, the attester is the signed-in person (matched to the model by email or employee ID; `service/README.md`, "Attesting as yourself"), who must fill the role they act in. Owners attest their own facts without the VeroMesh steward role: acting in one of the entity's owner or steward roles is enough. A steward acting in another role may still attest, with a warning. With sign-in off (development), the request names the attester.
 
 ## Validation rules (SHACL)
 
