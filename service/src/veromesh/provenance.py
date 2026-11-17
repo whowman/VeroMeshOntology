@@ -44,7 +44,7 @@ SOURCE_BASE = "https://veromesh.ai/source/"
 CHANGESET_BASE = "https://veromesh.ai/changeset/"
 
 STEWARD_SOURCE = "steward"
-CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "spreadsheet", "steward")
+CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "spreadsheet", "steward")
 DEFAULT_CATEGORY = "spreadsheet"
 
 # ---------------------------------------------------------------------------- governance defaults
@@ -56,6 +56,7 @@ RANKING: dict[str, list[str]] = {
     "systems": ["cmdb", "catalog", "spreadsheet"],
     "authorities": ["erp", "iam", "spreadsheet"],
     "co-approvals": ["erp", "iam", "spreadsheet"],
+    "ai-use-cases": ["governance", "spreadsheet"],
 }
 DEFAULT_RANKING = ["spreadsheet"]
 
@@ -76,10 +77,26 @@ SOURCE_WINS: dict[str, set[str]] = {
     },
     "co-approvals": {"authority", "approverRole", "aboveAmount"},
     "systems": {"name", "cmdbId", "lifecycle"},
+    # The board decides; a steward can dispute, not overrule.
+    "ai-use-cases": {
+        "approvedBy",
+        "status",
+        "coversAgents",
+        "allowsActions",
+        "approvedOn",
+        "reviewBy",
+        "conditions",
+    },
 }
 
 # Re-confirmation cadence in days (decision 4).
-CADENCE_DAYS: dict[str, int] = {"authorities": 90, "co-approvals": 90, "people": 180, "roles": 180}
+CADENCE_DAYS: dict[str, int] = {
+    "authorities": 90,
+    "co-approvals": 90,
+    "people": 180,
+    "roles": 180,
+    "ai-use-cases": 365,
+}
 DEFAULT_CADENCE_DAYS = 365
 OWNERSHIP_FIELDS = {"ownerRole", "stewardRole", "businessOwner", "technicalOwner"}
 OWNERSHIP_CADENCE_DAYS = 180

@@ -58,7 +58,7 @@ stateDiagram-v2
   Disputed --> Unconfirmed: source changes the value
 ```
 
-**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `spreadsheet`, `steward`), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
+**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `spreadsheet`, `steward`), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
 
 **Changeset** stays as it is; it becomes a `prov:Activity` that generated its claims.
 
@@ -78,12 +78,13 @@ For each entity and field, VeroMesh picks one source's values:
 | Roles | hr > spreadsheet |
 | Systems | cmdb > catalog > spreadsheet |
 | Delegated authority | erp > iam > spreadsheet |
+| Approved AI use cases | governance > spreadsheet |
 | Everything else | spreadsheet (the model's own home today) |
 
 **Steward corrections** are configured per field (decision 1):
 
 - **Steward wins** where the system of record is often incomplete or is not where the business decides: owner and steward roles, criticality, classification and data category, descriptions and definitions, links between business entities (capability served, KPIs measured, data product inputs). The correction takes effect at once; the disagreement stays listed as a conflict until the source is fixed.
-- **Source wins** where a system of record is legally or operationally authoritative: a person's name, employee ID, email, reporting line and roles filled (HR); authority amounts, currencies and dates (ERP, IAM); system identifiers and lifecycle state (CMDB). A steward can dispute these, which flags them and notifies the source owner, but the value changes only when the source changes.
+- **Source wins** where a system of record is legally or operationally authoritative: a person's name, employee ID, email, reporting line and roles filled (HR); authority amounts, currencies and dates (ERP, IAM); system identifiers and lifecycle state (CMDB); every field of an approved AI use case (the governance board's register: board decisions are disputed, not overruled). A steward can dispute these, which flags them and notifies the source owner, but the value changes only when the source changes.
 - Customers can flip any field.
 
 The result is materialized in an **effective graph** (`https://veromesh.ai/graph/effective`), recomputed for the touched entities on every commit and attestation. Validation, impact queries, the agent gateway and DataHub publishing read the effective graph instead of the union, so a disagreement between sources is no longer a model violation. Instead it is a **conflict**: two sources assert different non-empty values for the same field. Conflicts are listed by the API and, from Phase 2, routed to the entity's owner.

@@ -420,7 +420,7 @@ def create_app(
 
     @app.put("/api/v1/sources/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
     def source_register(s: Svc, c: Cfg, name: str, body: SourceIn) -> dict:
-        """Register a source's category (hr, iam, cmdb, erp, catalog, spreadsheet), owner role and description."""
+        """Register a source's category (hr, iam, cmdb, erp, catalog, governance, spreadsheet), owner role and description."""
         out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
         prov.refresh_effective(s.store, c.instance_base)
         return out

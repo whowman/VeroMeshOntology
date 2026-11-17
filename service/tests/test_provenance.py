@@ -253,3 +253,42 @@ def test_governance_settings_are_published(client):
     g = client.get(f"{API}/governance").json()
     assert g["ranking"]["people"][0] == "hr" and "email" in g["sourceWins"]["people"]
     assert g["cadenceDays"]["authorities"] == 90
+
+
+def use_entity(use: dict) -> dict:
+    keep = (
+        "id",
+        "name",
+        "approvedBy",
+        "status",
+        "coversAgents",
+        "allowsActions",
+        "approvedOn",
+        "reviewBy",
+        "conditions",
+    )
+    return {k: use[k] for k in keep if k in use}
+
+
+def test_board_decisions_are_a_source_and_the_board_wins(client):
+    """G6: an approved AI use case from the governance board's register outranks the spreadsheet."""
+    use = client.get(f"{API}/ai-use-cases/InvoiceAssistantUse").json()
+    assert use["approvedBy"] == "AiReviewBoard" and use["status"] == "conditional"
+    assert use["coversAgents"] == ["InvoiceAssistant"] and use["allowsActions"] == ["ApproveSupplierInvoice"]
+
+    assert client.put(f"{API}/sources/ai-board", json={"category": "governance"}).status_code == 200
+    load(
+        client,
+        "ai-board",
+        [{"type": "ai-use-cases", "entity": {**use_entity(use), "status": "approved"}}],
+    )
+    assert client.get(f"{API}/ai-use-cases/InvoiceAssistantUse").json()["status"] == "approved"
+
+    # A steward can dispute the board's decision, not overrule it.
+    r = client.post(
+        f"{API}/ai-use-cases/InvoiceAssistantUse/corrections",
+        json={"values": {"status": "suspended"}, "attester": "LeeExample", "role": "AiReviewBoard"},
+    )
+    assert r.status_code == 400 and "governed by its source system" in r.json()["detail"]
+    g = client.get(f"{API}/governance").json()
+    assert "governance" in g["categories"] and g["ranking"]["ai-use-cases"][0] == "governance"

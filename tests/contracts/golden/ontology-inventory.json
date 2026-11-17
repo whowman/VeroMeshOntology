@@ -29,6 +29,50 @@
         "vmo:AIAgent"
       ]
     },
+    "vms:AIUseCaseShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:AIAgent",
+          "minCount": "1",
+          "path": "vmo:coversAgent"
+        },
+        {
+          "class": "vmo:Action",
+          "path": "vmo:allowsAction"
+        },
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:approvedBy"
+        },
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmo:approvedOn"
+        },
+        {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmo:reviewBy"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:approvalStatus"
+        },
+        {
+          "minCount": "1",
+          "path": "rdfs:label"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 2,
+      "target": [
+        "vmo:AIUseCase"
+      ]
+    },
     "vms:ActionShape": {
       "closed": "false",
       "properties": [
@@ -669,6 +713,7 @@
       "vmo:AIAgent": [
         "prov:SoftwareAgent"
       ],
+      "vmo:AIUseCase": [],
       "vmo:Action": [],
       "vmo:BusinessCapability": [],
       "vmo:CoApproval": [],
@@ -720,6 +765,42 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "(vmo:BusinessCapability or vmo:KPI)"
+        ]
+      },
+      "vmo:allowsAction": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Action"
+        ]
+      },
+      "vmo:approvalStatus": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:approvedBy": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Role"
+        ]
+      },
+      "vmo:approvedOn": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
         ]
       },
       "vmo:approverRole": {
@@ -788,6 +869,15 @@
           "vmo:DataProduct"
         ]
       },
+      "vmo:conditions": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmo:consumes": {
         "domain": [
           "(vmo:AIAgent or vmo:BusinessCapability or vmo:Process)"
@@ -813,6 +903,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:Action"
+        ]
+      },
+      "vmo:coversAgent": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:AIAgent"
         ]
       },
       "vmo:criticalDataElement": {
@@ -1065,6 +1164,15 @@
         "kind": "owl:DatatypeProperty",
         "range": [
           "xsd:duration"
+        ]
+      },
+      "vmo:reviewBy": {
+        "domain": [
+          "vmo:AIUseCase"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
         ]
       },
       "vmo:runsOn": {

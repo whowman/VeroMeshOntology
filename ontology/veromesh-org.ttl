@@ -135,6 +135,11 @@ vmo:CoApproval
     rdfs:label "Co-approval" ;
     skos:definition "A second sign-off an authority requires above an amount, from whoever fills the approver role, e.g. 'co-approval by the financial controller above 25,000 USD'. An authority can have several tiers." .
 
+vmo:AIUseCase
+    a owl:Class ;
+    rdfs:label "Approved AI use case" ;
+    skos:definition "A governance board's decision that an AI use may run: which agents, which actions, under what conditions, approved when and to be reviewed by when. Recorded from the board's minutes or register (source category 'governance'). Approval says the use is allowed; the agent's authority still comes from the person it acts for." .
+
 vmo:DataElement
     a owl:Class ;
     rdfs:label "Business data element" ;
@@ -388,6 +393,55 @@ vmo:limitCurrency
     rdfs:domain vmo:DelegatedAuthority ;
     rdfs:range xsd:string ;
     skos:definition "ISO 4217 code, e.g. USD." .
+
+## Governance decisions (approved AI use cases)
+
+vmo:approvedBy
+    a owl:ObjectProperty ;
+    rdfs:label "approved by" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range vmo:Role ;
+    skos:definition "The board or committee that approved the use, as a role (e.g. 'AI review board')." .
+
+vmo:coversAgent
+    a owl:ObjectProperty ;
+    rdfs:label "covers agent" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range vmo:AIAgent .
+
+vmo:allowsAction
+    a owl:ObjectProperty ;
+    rdfs:label "allows action" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range vmo:Action ;
+    skos:definition "An action the approved use may take. None listed: the approval does not limit actions." .
+
+vmo:approvedOn
+    a owl:DatatypeProperty ;
+    rdfs:label "approved on" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range xsd:date .
+
+vmo:reviewBy
+    a owl:DatatypeProperty ;
+    rdfs:label "review by" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range xsd:date ;
+    skos:definition "The date the board must review the approval again." .
+
+vmo:approvalStatus
+    a owl:DatatypeProperty ;
+    rdfs:label "approval status" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range xsd:string ;
+    skos:definition "One of: approved, conditional, suspended, retired." .
+
+vmo:conditions
+    a owl:DatatypeProperty ;
+    rdfs:label "conditions" ;
+    rdfs:domain vmo:AIUseCase ;
+    rdfs:range xsd:string ;
+    skos:definition "Conditions the board attached, e.g. 'human review of every denial'." .
 
 vmo:validFrom
     a owl:DatatypeProperty ;
