@@ -17,7 +17,7 @@ from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
 from starlette.routing import Route
 
-from . import __version__, auth, branding, changesets, decide, decisions, entities, mcp_server
+from . import __version__, auth, branding, changesets, decide, decisions, entities, followup, mcp_server
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -87,6 +87,18 @@ class CheckIn(BaseModel):
     # Only with sign-in off, or for an administrator testing a check on an agent's behalf:
     agent: str | None = None
     onDate: str | None = None  # YYYY-MM-DD; default today
+
+
+class OverrideIn(BaseModel):
+    verdict: str  # approved | rejected
+    role: str | None = None  # the consulted role you answer as, when you fill several
+    note: str | None = None
+    person: str | None = None  # only with sign-in off: who is answering
+
+
+class OutcomeIn(BaseModel):
+    outcome: str  # done | not_done
+    note: str | None = None
 
 
 class CorrectionIn(BaseModel):
@@ -176,6 +188,10 @@ def create_app(
 
     @app.exception_handler(prov.NotYourRole)
     async def _not_your_role(_: Request, exc: prov.NotYourRole):
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+    @app.exception_handler(PermissionError)
+    async def _not_allowed(_: Request, exc: PermissionError):
         return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(decisions.InvalidEntry)
@@ -582,6 +598,108 @@ def create_app(
         """Walk the whole hash chain: ok, or the first entry that was changed, removed or inserted."""
         return dl.verify().as_dict()
 
+    @app.get("/api/v1/decisions/measures", dependencies=need(auth.STEWARD), tags=["decisions"])
+    def decisions_measures(
+        dl: Log, since: str | None = None, until: str | None = None, agent: str | None = None
+    ) -> dict:
+        """Override rate, consultation precision and delegation extended, from the decision log
+        (dates YYYY-MM-DD, UTC; working definitions in followup.py)."""
+        return followup.measures(dl, since=since, until=until, agent=agent)
+
+    def the_decision(dl: decisions.DecisionLog, entry_id: str) -> dict:
+        d = dl.get(entry_id)
+        if d is None or d["kind"] != "decision":
+            raise HTTPException(status_code=404, detail=f"No decision {entry_id} in the log.")
+        return d
+
+    def person_for(
+        s: VeromeshService, c: Settings, who: auth.Caller, given: str | None
+    ) -> tuple[str, list[str]]:
+        """The signed-in person (or, with sign-in off, the one named) and the roles they fill."""
+        pid, _ = attester_for(s, c, who, given)
+        p = changesets.get_entity(s.store, "people", pid, c.instance_base) or {}
+        return pid, p.get("rolesFilled", [])
+
+    def may_view(s: VeromeshService, c: Settings, who: auth.Caller, d: dict) -> None:
+        """Stewards, the decision's agent, its principal and the people consulted or informed."""
+        if c.auth_disabled or who.has(*auth.STEWARD):
+            return
+        if who.kind == "app" or who.client_id:
+            agent, _ = agent_for(s, c, who)
+            if agent and agent == d.get("agent"):
+                return
+        if who.kind == "user":
+            value = auth.person_claim(who, c)
+            pid = prov.person_matching(s.store, c.person_match_field, value) if value else None
+            if pid:
+                roles = (changesets.get_entity(s.store, "people", pid, c.instance_base) or {}).get(
+                    "rolesFilled", []
+                )
+                involved = {x["role"] for x in d.get("consult", [])} | {
+                    x["role"] for x in (d.get("basis") or {}).get("inform", [])
+                }
+                if pid == d.get("principal") or involved & set(roles):
+                    return
+        raise HTTPException(
+            status_code=403,
+            detail="Only the agent, its principal, the owners involved and stewards see this decision.",
+        )
+
+    @app.get("/api/v1/decisions/{entry_id}/status", dependencies=need(auth.READ), tags=["decisions"])
+    def decisions_status(s: Svc, c: Cfg, dl: Log, who: Who, entry_id: str) -> dict:
+        """Where a decision stands: allowed, pending (waiting for consulted owners), approved, rejected or
+        refused; may the agent act; who answered; what the agent did."""
+        d = the_decision(dl, entry_id)
+        may_view(s, c, who, d)
+        return followup.status_of(d, followup.followups(dl, d["id"]))
+
+    @app.post(
+        "/api/v1/decisions/{entry_id}/overrides",
+        dependencies=need(auth.READ),
+        status_code=201,
+        tags=["decisions"],
+    )
+    def decisions_override(s: Svc, c: Cfg, dl: Log, who: Who, entry_id: str, body: OverrideIn) -> dict:
+        """A person answers or overrules a decision, as themselves: a consulted owner approves or rejects;
+        the principal approves an action above the agent's authority; the principal or an informed
+        owner stops an allowed one. Appended to the log."""
+        d = the_decision(dl, entry_id)
+        if who.kind == "app" and not c.auth_disabled:
+            raise HTTPException(
+                status_code=403, detail="Answers and overrides are made by people, not services."
+            )
+        pid, roles = person_for(s, c, who, body.person)
+        return followup.override(
+            dl,
+            d,
+            person=pid,
+            person_roles=roles,
+            is_admin=c.auth_disabled or "admin" in who.roles,
+            verdict=body.verdict,
+            subject=who.subject,
+            role=body.role,
+            note=body.note,
+        )
+
+    @app.post(
+        "/api/v1/decisions/{entry_id}/outcome",
+        dependencies=need(auth.READ),
+        status_code=201,
+        tags=["decisions"],
+    )
+    def decisions_outcome(s: Svc, c: Cfg, dl: Log, who: Who, entry_id: str, body: OutcomeIn) -> dict:
+        """The agent reports what it did (done or not_done), once the decision stands as allowed or approved."""
+        d = the_decision(dl, entry_id)
+        if not (c.auth_disabled or "admin" in who.roles):
+            agent, why = agent_for(s, c, who)
+            if agent != d.get("agent"):
+                raise HTTPException(
+                    status_code=403, detail=why or f"Only {d.get('agent')} reports this outcome."
+                )
+        return followup.report_outcome(
+            dl, d, outcome=body.outcome, subject=who.client_id or who.subject, note=body.note
+        )
+
     @app.get("/api/v1/decisions/{entry_id}", dependencies=need(auth.STEWARD), tags=["decisions"])
     def decisions_get(dl: Log, entry_id: str) -> dict:
         """One entry, with the entries that refer to it (its overrides and outcomes)."""
@@ -699,6 +817,17 @@ def create_app(
                 st["service"].store, st["settings"].instance_base, type_, rid
             ),
             "get_entity": mcp_entity,
+            "decision_status": lambda st, decision_id: decisions_status(
+                st["service"], st["settings"], st["log"], st["caller"], decision_id
+            ),
+            "report_outcome": lambda st, decision_id, outcome, note: decisions_outcome(
+                st["service"],
+                st["settings"],
+                st["log"],
+                st["caller"],
+                decision_id,
+                OutcomeIn(outcome=outcome, note=note),
+            ),
         }
     )
     mcp.streamable_http_app()  # creates the session manager the lifespan runs

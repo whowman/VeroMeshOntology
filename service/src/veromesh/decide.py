@@ -33,7 +33,7 @@ import re
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 
-from . import changesets
+from . import changesets, followup
 from . import provenance as prov
 from .decisions import DecisionLog
 from .rdf_store import RDFStore
@@ -110,17 +110,6 @@ def _chain(m: Model, auth: dict) -> list[dict]:
 
 def _consult_entry(m: Model, role: str, why: str) -> dict:
     return {"role": role, "roleName": m.name("roles", role), "people": m.people_in(role), "why": why}
-
-
-def _done_today(log: DecisionLog, action: str, day: date) -> int:
-    """Allowed decisions for ``action`` recorded today (UTC), across agents."""
-    n, after = 0, 0
-    while True:
-        page = log.find(action=action, kind="decision", after_seq=after, limit=1000)
-        if not page:
-            return n
-        n += sum(1 for e in page if e.get("outcome") == "allow" and e["recordedAt"][:10] == day.isoformat())
-        after = page[-1]["seq"]
 
 
 def check(
@@ -258,9 +247,9 @@ def check(
             money, per_day = MONEY_UNIT.match(unit), PER_DAY_UNIT.search(unit)
             if thr is None:
                 material, why = True, f"no materiality threshold for {tname}"
-            elif per_day:
+            elif per_day:  # actions taken today: allowed, or consulted and then done
                 if done_today is None:
-                    done_today = _done_today(log, action, day)
+                    done_today = followup.done_today(log, action, day)
                 material = done_today + 1 > thr
                 why = f"{done_today + 1} today against a threshold of {_money(thr)} {unit} on {tname}"
             elif money and amt is not None and money.group(1).upper() == cur:

@@ -97,6 +97,17 @@
       "422"
     ]
   },
+  "GET /api/v1/decisions/measures": {
+    "params": [
+      "agent? (query)",
+      "since? (query)",
+      "until? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/decisions/verify": {
     "params": [],
     "status": [
@@ -104,6 +115,15 @@
     ]
   },
   "GET /api/v1/decisions/{entry_id}": {
+    "params": [
+      "entry_id (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/decisions/{entry_id}/status": {
     "params": [
       "entry_id (path)"
     ],
@@ -323,6 +343,58 @@
       }
     },
     "params": [],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/decisions/{entry_id}/outcome": {
+    "body": {
+      "application/json": {
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": "string"
+      }
+    },
+    "params": [
+      "entry_id (path)"
+    ],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/decisions/{entry_id}/overrides": {
+    "body": {
+      "application/json": {
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "person?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "role?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": "string"
+      }
+    },
+    "params": [
+      "entry_id (path)"
+    ],
     "status": [
       "201",
       "422"

@@ -64,6 +64,16 @@ A token without any of these roles gets 403.
 
 Refuse if any step refuses, else consult if anyone must be consulted, else allow. Each answer names the roles and the people filling them, and is appended to the decision log. It is advisory: an agent could skip it; enforcement at a gateway comes later. An agent asks as itself (its sign-in implies the agent, and the day is today); an administrator may test a check on an agent's behalf with `agent` and `onDate`.
 
+**After a decision** (`src/veromesh/followup.py`), everything is appended to the decision log, referring to the decision:
+
+- A consulted owner, filling a consulted role, approves or rejects; the decision is approved once every consulted role has approved, rejected as soon as one rejects.
+- Above the agent's limit, the principal may approve (taking responsibility; a candidate for extending the delegation). A refusal is never "rejected": it stands until approved.
+- The principal or an informed owner may stop an allowed action (rejected).
+- The agent reports `done` or `not_done`, once the decision stands as allowed or approved. Per-day thresholds count actions taken: allowed ones, and consulted ones once done.
+- Measures (working definitions, to confirm against the white paper): **override rate**, decisions a person overruled (an allow stopped, a refusal approved) over all decisions; **consultation precision**, of consultations answered, the share the owner rejected (low: owners are asked about things they always approve); **delegation extended**, the share of decisions within the agent's own delegation, and escalations the principal approved.
+
+The answer is an API call today; the button that makes it belongs on the steward screen or a Teams approval card.
+
 **MCP.** `/mcp` serves VeroMesh as an MCP server (Streamable HTTP, stateless, JSON responses) for Copilot Studio, Claude or any MCP client, behind the same sign-in and need-to-know rules as the REST routes; each tool calls the function behind a REST route (`src/veromesh/mcp_server.py`). The server's instructions tell the agent to call `check_action` before any consequential action and follow the answer. Setting up a Copilot Studio agent: [docs/copilot-studio.md](../docs/copilot-studio.md).
 
 **Agents.** Each AI agent signs in as its own application (client credentials) with the `agent` role, and is linked to the model by the Agent entity's **Sign-in client ID** (`signInClientId`): the client ID its tokens carry (`azp`, or `appid` in Entra ID v1 tokens, or `client_id`). Through that entity VeroMesh knows the one person the agent acts for and the authorities it holds; `GET /api/v1/me` shows the link, or says what is missing. Each agent needs its own client ID; the validation rules refuse two agents sharing one. An agent may also sign in **as the person it acts for, through its own app registration** (a delegated token whose `azp` is the agent's client ID, as a Copilot Studio agent with user sign-in does): VeroMesh then treats the call as the agent's, and refuses it unless the signed-in person is the agent's principal.
@@ -78,8 +88,12 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
 | `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first) or refuse, with reasons, whom to inform and, above its limit, whom to escalate to. Logged |
-| `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `impact_of_action`, `who_owns`, `get_entity` |
+| `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `decision_status`, `report_outcome`, `impact_of_action`, `who_owns`, `get_entity` |
 | `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
+| `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
+| `POST /api/v1/decisions/{id}/overrides` | A person answers or overrules, as themselves: `{"verdict": "approved"\|"rejected", "role"?, "note"?}` |
+| `POST /api/v1/decisions/{id}/outcome` | The agent reports what it did: `{"outcome": "done"\|"not_done", "note"?}` |
+| `GET /api/v1/decisions/measures[?since=&until=&agent=]` | Override rate, consultation precision, delegation extended (stewards) |
 | `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |
 | `GET /api/v1/decisions/verify` | Walk the hash chain: ok, or the first entry changed, removed or inserted |
 | `GET /api/v1/schema` | Entity types, fields, kinds, reference targets, help text |

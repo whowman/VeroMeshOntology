@@ -70,7 +70,15 @@ def test_tools_and_instructions(mcp):
     ).json()["result"]
     assert "Before any consequential action" in init["instructions"]
     tools = {t["name"] for t in rpc(client, agent_app(), "tools/list").json()["result"]["tools"]}
-    assert tools == {"who_am_i", "check_action", "impact_of_action", "who_owns", "get_entity"}
+    assert tools == {
+        "who_am_i",
+        "check_action",
+        "decision_status",
+        "report_outcome",
+        "impact_of_action",
+        "who_owns",
+        "get_entity",
+    }
 
 
 def test_an_agent_signed_in_as_itself(mcp):
