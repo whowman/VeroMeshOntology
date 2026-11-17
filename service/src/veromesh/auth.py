@@ -136,6 +136,26 @@ def kind_of(claims: dict) -> str:
     return "user"
 
 
+_discovery: dict[str, tuple[float, dict]] = {}
+
+
+def discovery(issuer: str) -> dict:
+    """The issuer's OpenID Connect discovery document, cached for an hour."""
+    import time
+
+    now = time.time()
+    hit = _discovery.get(issuer)
+    if hit and now - hit[0] < 3600:
+        return hit[1]
+    doc = (
+        httpx.get(f"{issuer.rstrip('/')}/.well-known/openid-configuration", timeout=10)
+        .raise_for_status()
+        .json()
+    )
+    _discovery[issuer] = (now, doc)
+    return doc
+
+
 class Verifier:
     """Checks bearer tokens against one issuer's signing keys.
 

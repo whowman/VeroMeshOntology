@@ -13,6 +13,7 @@ from datahub.configuration.common import OperationalError
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
 from starlette.routing import Route
@@ -146,6 +147,12 @@ def create_app(
     app.state.settings = settings
     app.state.decision_log = decision_log
     branding.install(app, Path((settings or get_settings()).branding_dir))
+    # The steward screen: plain HTML and JavaScript, signed in in the browser (sign-in config below).
+    app.mount(
+        "/steward",
+        StaticFiles(directory=Path(__file__).parent / "static" / "steward", html=True),
+        name="steward",
+    )
 
     def svc(request: Request) -> VeromeshService:
         if request.app.state.service is None:
@@ -212,6 +219,29 @@ def create_app(
     @app.exception_handler(OperationalError)
     async def _datahub_error(_: Request, exc: OperationalError):
         return JSONResponse(status_code=502, content={"detail": f"DataHub request failed: {exc}"})
+
+    @app.get("/api/v1/sign-in/config", tags=["sign-in"])
+    def sign_in_config(c: Cfg) -> dict:
+        """For the steward screen in the browser: how to sign in (no secrets)."""
+        if c.auth_disabled:
+            return {"disabled": True}
+        out = {
+            "disabled": False,
+            "issuer": c.oidc_issuer,
+            "clientId": c.oidc_ui_client_id,
+            "scope": c.oidc_ui_scope,
+        }
+        if c.oidc_issuer and c.oidc_ui_client_id:
+            try:
+                doc = auth.discovery(c.oidc_issuer)
+                out.update(
+                    authorizationEndpoint=doc["authorization_endpoint"], tokenEndpoint=doc["token_endpoint"]
+                )
+            except Exception as exc:  # the page shows it; the API itself keeps working
+                out["problem"] = f"Cannot read the identity provider's configuration: {exc}"
+        else:
+            out["problem"] = "The steward screen's sign-in is not configured (VEROMESH_OIDC_UI_CLIENT_ID)."
+        return out
 
     @app.get("/health")
     def health() -> dict:
@@ -597,6 +627,15 @@ def create_app(
     def decisions_verify(dl: Log) -> dict:
         """Walk the whole hash chain: ok, or the first entry that was changed, removed or inserted."""
         return dl.verify().as_dict()
+
+    @app.get("/api/v1/decisions/inbox", dependencies=need(auth.READ), tags=["decisions"])
+    def decisions_inbox(
+        s: Svc, c: Cfg, dl: Log, who: Who, person: str | None = None, days: int = 7
+    ) -> list[dict]:
+        """What waits for the signed-in person (with sign-in off, the one named): consultations to answer,
+        escalations above their agent's limit, allowed actions they may stop. The steward screen's list."""
+        pid, roles = person_for(s, c, who, person)
+        return followup.inbox(dl, person=pid, roles=roles, days=max(1, min(days, 90)))
 
     @app.get("/api/v1/decisions/measures", dependencies=need(auth.STEWARD), tags=["decisions"])
     def decisions_measures(

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Entra app roles, "realm_access.roles" for Keycloak realm roles.
     oidc_roles_claim: str = "roles"
     oidc_role_prefix: str = ""  # e.g. "VeroMesh." for Entra app roles named VeroMesh.Admin
+    # The steward screen (/steward) signs people in in the browser (authorization code + PKCE):
+    # the client ID of a public (single-page application) registration, and the scope to ask for,
+    # e.g. "api://veromesh-acme/access_as_user" for Entra ID, "openid" for Keycloak.
+    oidc_ui_client_id: str | None = None
+    oidc_ui_scope: str = "openid profile email"
     # Who a signed-in person is in the model, for attestations and corrections:
     # the first of these token claims that is present, matched against the
     # People field below (case-insensitively for email).

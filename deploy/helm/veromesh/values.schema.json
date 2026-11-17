@@ -63,7 +63,9 @@
             "rolesClaim": {"type": "string", "minLength": 1},
             "rolePrefix": {"type": "string"},
             "jwksUrl": {"type": "string", "pattern": "^(https://.+)?$"},
-            "disabled": {"type": "boolean"}
+            "disabled": {"type": "boolean"},
+            "uiClientId": {"type": "string"},
+            "uiScope": {"type": "string", "minLength": 1}
           }
         },
         "decisionLog": {
