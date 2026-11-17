@@ -59,17 +59,20 @@ VeroMesh links either to the Agent in the model by the agent's **client ID** (`a
 
    > Before approving, paying, changing or sending anything on Dana's behalf, call
    > VeroMesh `check_action` with the action ID and the amount and currency. If the outcome is
-   > allow, act and then tell the people listed under inform. If it is consult, do not act:
-   > ask the people listed under consult and wait. If it is refuse, do not act; explain the
-   > reasons and hand it to the person under escalateTo. Never retry with a smaller amount to
-   > get under a limit.
+   > allow, act, tell the people listed under inform, and call `report_outcome` with "done". If
+   > it is consult, do not act: ask the people listed under consult, and call `decision_status`
+   > until mayAct is true (then act and report "done") or the status is rejected. If it is
+   > refuse, do not act; explain the reasons and hand it to the person under escalateTo. Never
+   > retry with a smaller amount to get under a limit.
 
    (The same guidance is in the MCP server's own instructions; Copilot Studio may not show
    those to its orchestrator, so put it in the agent's.)
 7. **Try it** in the test pane, as Dana: "Approve invoice INV-1001 from Northwind for 800 USD",
    then 3,000 USD, then 7,000 USD. Expect allow (inform the Controller and the AP manager),
    consult the Controller, and refuse with escalation to Dana. A steward sees each one under
-   `GET /api/v1/decisions`.
+   `GET /api/v1/decisions`. For the consult, the Controller (Lee) answers with
+   `POST /api/v1/decisions/{id}/overrides` `{"verdict": "approved"}`; the agent's next
+   `decision_status` says it may act. `GET /api/v1/decisions/measures` shows the measures.
 
 ## The agent alone (client credentials)
 

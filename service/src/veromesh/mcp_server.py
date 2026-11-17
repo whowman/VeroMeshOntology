@@ -11,6 +11,8 @@ Tools
     impact_of_action  what an action affects, the materiality thresholds and the owners
     who_owns          the owner and steward roles of something, and the people filling them
     get_entity        one entity of the model, need-to-know
+    decision_status   where a decision stands: may the agent act yet (consulted owners answered)?
+    report_outcome    after acting (or not): done | not_done, for the log and the measures
 """
 
 from __future__ import annotations
@@ -28,8 +30,9 @@ and what each action affects. You act for one person, within a bounded part of t
 
 Before any consequential action (approving, paying, changing, sending on someone's behalf):
 1. Call check_action with the action ID and, where it has one, the amount and currency.
-2. If the outcome is "allow", act, then tell the people under "inform".
-3. If it is "consult", do not act yet: ask the people under "consult" and wait for their answer.
+2. If the outcome is "allow", act, then tell the people under "inform", then call report_outcome.
+3. If it is "consult", do not act yet: ask the people under "consult" and wait; call decision_status
+   with the decision's id until mayAct is true (act, then report_outcome) or the status is rejected.
 4. If it is "refuse", do not act. Explain the reasons; if "escalateTo" names someone, hand it to them.
 Never act on an action the check refused, and never retry with a smaller amount to get under a limit.
 Use who_am_i to see whom you act for and what you may do; impact_of_action and who_owns to explain."""
@@ -90,6 +93,22 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         return _call(
             lambda: handlers["check_action"](
                 state(ctx), action=action, amount=amount, currency=currency, note=note, agent=agent
+            )
+        )
+
+    @mcp.tool()
+    def decision_status(ctx: Context, decision_id: str) -> dict:
+        """Where a decision stands (the id check_action returned): allowed, pending (waitingFor the
+        consulted roles), approved, rejected or refused; mayAct says whether you may act now."""
+        return _call(lambda: handlers["decision_status"](state(ctx), decision_id=decision_id))
+
+    @mcp.tool()
+    def report_outcome(ctx: Context, decision_id: str, outcome: str, note: str | None = None) -> dict:
+        """After acting on a decision you were allowed (or approved) to take, report outcome "done";
+        if you did not act after all, "not_done". note: e.g. the payment reference."""
+        return _call(
+            lambda: handlers["report_outcome"](
+                state(ctx), decision_id=decision_id, outcome=outcome, note=note
             )
         )
 
