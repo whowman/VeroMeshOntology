@@ -70,8 +70,8 @@ VeroMesh links either to the Agent in the model by the agent's **client ID** (`a
 7. **Try it** in the test pane, as Dana: "Approve invoice INV-1001 from Northwind for 800 USD",
    then 3,000 USD, then 7,000 USD. Expect allow (inform the Controller and the AP manager),
    consult the Controller, and refuse with escalation to Dana. A steward sees each one under
-   `GET /api/v1/decisions`. For the consult, the Controller (Lee) answers with
-   `POST /api/v1/decisions/{id}/overrides` `{"verdict": "approved"}`; the agent's next
+   `GET /api/v1/decisions`. For the consult, the Controller (Lee) answers on the steward screen
+   (`https://<veromesh>/steward/`, Waiting for you > Approve); the agent's next
    `decision_status` says it may act. `GET /api/v1/decisions/measures` shows the measures.
 
 ## The agent alone (client credentials)

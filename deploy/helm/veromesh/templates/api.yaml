@@ -118,6 +118,12 @@ spec:
             - name: VEROMESH_OIDC_JWKS_URL
               value: {{ .jwksUrl | quote }}
             {{- end }}
+            {{- if .uiClientId }}
+            - name: VEROMESH_OIDC_UI_CLIENT_ID
+              value: {{ .uiClientId | quote }}
+            - name: VEROMESH_OIDC_UI_SCOPE
+              value: {{ .uiScope | quote }}
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- with .Values.api.decisionLog }}

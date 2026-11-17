@@ -202,6 +202,35 @@ def done_today(log: DecisionLog, action: str, day: date) -> int:
     return n
 
 
+def inbox(log: DecisionLog, *, person: str, roles: list[str], days: int = 7) -> list[dict]:
+    """What waits for this person, newest first: consultations they are asked to answer, escalations
+    above their agent's limit, and allowed actions (not yet carried out) they may stop."""
+    from datetime import UTC, datetime, timedelta
+
+    since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    entries = all_entries(log)
+    later: dict[str, list[dict]] = {}
+    for e in entries:
+        if e.get("refersTo"):
+            later.setdefault(e["refersTo"], []).append(e)
+    out = []
+    for d in entries:
+        if d["kind"] != "decision" or d["recordedAt"] < since:
+            continue
+        st = status_of(d, later.get(d["id"], []))
+        informed = {i["role"] for i in (d.get("basis") or {}).get("inform", [])}
+        if d["outcome"] == "consult" and st["status"] == "pending":
+            mine = [r for r in st.get("waitingFor", []) if r in roles]
+            if mine:
+                out.append({"ask": "answer", "asRole": mine[0], "decision": d, "status": st})
+        elif d["outcome"] == "refuse" and st["status"] == "refused" and d.get("principal") == person:
+            out.append({"ask": "escalation", "asRole": None, "decision": d, "status": st})
+        elif d["outcome"] == "allow" and st["status"] == "allowed" and st["done"] is None:
+            if d.get("principal") == person or informed & set(roles):
+                out.append({"ask": "stop", "asRole": None, "decision": d, "status": st})
+    return list(reversed(out))
+
+
 def measures(
     log: DecisionLog, *, since: str | None = None, until: str | None = None, agent: str | None = None
 ) -> dict:

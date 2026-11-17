@@ -97,6 +97,16 @@
       "422"
     ]
   },
+  "GET /api/v1/decisions/inbox": {
+    "params": [
+      "days? (query)",
+      "person? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/decisions/measures": {
     "params": [
       "agent? (query)",
@@ -151,6 +161,12 @@
     ]
   },
   "GET /api/v1/schema": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/sign-in/config": {
     "params": [],
     "status": [
       "200"

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeroMesh · Steward</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/steward/app.css">
+</head>
+<body>
+<header class="top">
+  <img class="logo" src="/brand/logos/veromesh-landscape.svg" alt="VeroMesh" onerror="this.replaceWith(document.createTextNode('VeroMesh'))">
+  <span class="product">Steward</span>
+  <span class="spacer"></span>
+  <span id="who" class="who"></span>
+  <button id="signout" class="link" hidden>Sign out</button>
+</header>
+
+<div id="devbar" class="devbar" hidden>
+  <span>Sign-in is off (development). Act as</span>
+  <select id="actas" aria-label="Act as"></select>
+</div>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-tab="inbox" aria-selected="true">Waiting for you <span id="inbox-count" class="count"></span></button>
+  <button role="tab" data-tab="facts" data-steward>Facts to confirm <span id="facts-count" class="count"></span></button>
+  <button role="tab" data-tab="log" data-steward>Decisions</button>
+  <button role="tab" data-tab="measures" data-steward>Measures</button>
+</nav>
+
+<main>
+  <div id="message" class="message" role="status" hidden></div>
+
+  <section id="tab-inbox" class="tab">
+    <p class="lead">Decisions agents have asked about that need your answer, escalations above an agent's limit, and allowed actions you can still stop.</p>
+    <div id="inbox"></div>
+  </section>
+
+  <section id="tab-facts" class="tab" hidden>
+    <p class="lead">Facts in the model that nobody has attested yet. Agents may rely only on attested, current facts.</p>
+    <div class="toolbar">
+      <label>Act as role <select id="attest-role"></select></label>
+      <label>Type <select id="facts-type"><option value="">All</option></select></label>
+    </div>
+    <div id="facts"></div>
+  </section>
+
+  <section id="tab-log" class="tab" hidden>
+    <p class="lead">Every decision, newest first, with where it stands. The log is append-only and hash-chained.</p>
+    <div class="toolbar"><span id="chain" class="chip"></span></div>
+    <div id="log"></div>
+  </section>
+
+  <section id="tab-measures" class="tab" hidden>
+    <p class="lead">From the decision log. Working definitions: see <code>followup.py</code>.</p>
+    <div id="measures" class="tiles"></div>
+  </section>
+</main>
+
+<template id="card">
+  <article class="card">
+    <header><span class="kind"></span><h3></h3><span class="amount"></span></header>
+    <p class="meta"></p>
+    <ul class="reasons"></ul>
+    <div class="answer">
+      <input class="note" type="text" placeholder="Note (optional)" aria-label="Note">
+      <div class="buttons"></div>
+    </div>
+  </article>
+</template>
+
+<script src="/steward/app.js"></script>
+</body>
+</html>

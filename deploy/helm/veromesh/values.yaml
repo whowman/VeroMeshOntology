@@ -57,6 +57,11 @@ api:
     jwksUrl: ""
     # Development and CI only: no sign-in, every request acts as an administrator.
     disabled: false
+    # The steward screen (/steward) signs people in in the browser: a public (single-page
+    # application) registration's client ID, with redirect URI https://<host>/steward/, and the
+    # scope it asks for (Entra ID: api://<the API's ID URI>/access_as_user).
+    uiClientId: ""
+    uiScope: "openid profile email"
 
   # The decision log: an append-only, hash-chained table in its own PostgreSQL
   # database (the service creates it). Give the database's URL,

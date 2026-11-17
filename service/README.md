@@ -24,6 +24,8 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_OIDC_AUDIENCE` | – | What tokens are issued for: the API's application (client) ID or Application ID URI; several comma-separated |
 | `VEROMESH_OIDC_ROLES_CLAIM` | `roles` | Claim with the caller's roles; dotted for nested claims (`realm_access.roles` in Keycloak) |
 | `VEROMESH_OIDC_ROLE_PREFIX` | – | Prefix stripped from role names, e.g. `VeroMesh.` for Entra app roles `VeroMesh.Admin` |
+| `VEROMESH_OIDC_UI_CLIENT_ID` | – | The steward screen's browser sign-in: a public (single-page application) registration, redirect URI `https://<host>/steward/` |
+| `VEROMESH_OIDC_UI_SCOPE` | `openid profile email` | The scope the steward screen asks for; Entra ID: `api://<the API's ID URI>/access_as_user` |
 | `VEROMESH_OIDC_JWKS_URL` | from discovery | Signing keys, when the issuer's discovery document is not reachable |
 | `VEROMESH_OIDC_PERSON_CLAIMS` | `email,preferred_username,upn` | Token claims that identify the signed-in person, first present wins |
 | `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
@@ -72,7 +74,7 @@ Refuse if any step refuses, else consult if anyone must be consulted, else allow
 - The agent reports `done` or `not_done`, once the decision stands as allowed or approved. Per-day thresholds count actions taken: allowed ones, and consulted ones once done.
 - Measures (working definitions, to confirm against the white paper): **override rate**, decisions a person overruled (an allow stopped, a refusal approved) over all decisions; **consultation precision**, of consultations answered, the share the owner rejected (low: owners are asked about things they always approve); **delegation extended**, the share of decisions within the agent's own delegation, and escalations the principal approved.
 
-The answer is an API call today; the button that makes it belongs on the steward screen or a Teams approval card.
+**Steward screen** (`/steward`): plain HTML and JavaScript in the service, in the VeroMesh palette, signed in in the browser with the same identity provider (authorization code with PKCE; `VEROMESH_OIDC_UI_CLIENT_ID`). **Waiting for you**: consultations to answer (Approve, Reject), escalations above an agent's limit (Approve), allowed actions you can still Stop, each with a note. For stewards: **Facts to confirm** (attest or dispute, as a role you fill), **Decisions** (the log with where each stands, and whether the chain is intact), **Measures**. With sign-in off (development) it asks whom to act as.
 
 **MCP.** `/mcp` serves VeroMesh as an MCP server (Streamable HTTP, stateless, JSON responses) for Copilot Studio, Claude or any MCP client, behind the same sign-in and need-to-know rules as the REST routes; each tool calls the function behind a REST route (`src/veromesh/mcp_server.py`). The server's instructions tell the agent to call `check_action` before any consequential action and follow the answer. Setting up a Copilot Studio agent: [docs/copilot-studio.md](../docs/copilot-studio.md).
 
@@ -93,6 +95,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
 | `POST /api/v1/decisions/{id}/overrides` | A person answers or overrules, as themselves: `{"verdict": "approved"\|"rejected", "role"?, "note"?}` |
 | `POST /api/v1/decisions/{id}/outcome` | The agent reports what it did: `{"outcome": "done"\|"not_done", "note"?}` |
+| `GET /api/v1/decisions/inbox` | What waits for the signed-in person: consultations to answer, escalations above their agent's limit, allowed actions they may stop |
 | `GET /api/v1/decisions/measures[?since=&until=&agent=]` | Override rate, consultation precision, delegation extended (stewards) |
 | `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |
 | `GET /api/v1/decisions/verify` | Walk the hash chain: ok, or the first entry changed, removed or inserted |
