@@ -22,6 +22,7 @@ from . import (
     __version__,
     auth,
     branding,
+    catalog,
     changesets,
     clock,
     decide,
@@ -45,6 +46,10 @@ class ClassOut(BaseModel):
     definition: str | None
     parents: list[str]
     graph: str | None
+
+
+class CatalogPublishIn(BaseModel):
+    ids: list[str] | None = None  # only these data products; default all
 
 
 class BindingIn(BaseModel):
@@ -445,6 +450,18 @@ def create_app(
     def effective_rebuild(s: Svc, c: Cfg) -> dict:
         """Recompute the effective model (e.g. after valid-until dates pass)."""
         return prov.rebuild(s.store, c.instance_base)
+
+    @app.post("/api/v1/catalog/data-products", dependencies=need(auth.STEWARD), tags=["catalog"])
+    def catalog_publish_data_products(s: Svc, c: Cfg, body: CatalogPublishIn | None = None) -> dict:
+        """Write each data product's organizational context (owner and steward roles, capabilities,
+        KPIs, consuming agents, lineage, systems, data elements, sensitivity, policies) onto its
+        catalog entry, as veromesh.* custom properties. Roles only, never people."""
+        try:
+            return catalog.publish_data_products(
+                s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.get("/api/v1/authorities/{rid}/confirmation", dependencies=need(auth.READ), tags=["governance"])
     def authority_confirmation(s: Svc, rid: str) -> dict:

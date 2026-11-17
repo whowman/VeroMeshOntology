@@ -27,6 +27,7 @@ class FakeDataHub:
         self.nodes: dict[str, dict] = {}
         self.terms: dict[str, dict] = {}
         self.asset_terms: dict[str, list[str]] = {}
+        self.properties: dict[str, dict[str, str]] = {}
 
     def get_bindings(self, urn: str) -> list[Binding]:
         return list(self.bindings.get(urn, []))
@@ -50,6 +51,13 @@ class FakeDataHub:
         current = [t for t in self.asset_terms.get(urn, []) if t not in remove]
         current += [t for t in add if t not in current]
         self.asset_terms[urn] = current
+
+    def set_custom_properties(self, urn: str, properties: dict[str, str], *, prefix: str) -> bool:
+        if urn not in self.properties:  # tests register catalog entries in self.properties first
+            return False
+        kept = {k: v for k, v in self.properties[urn].items() if not k.startswith(prefix)}
+        self.properties[urn] = kept | properties
+        return True
 
 
 def fresh_store() -> RDFStore:

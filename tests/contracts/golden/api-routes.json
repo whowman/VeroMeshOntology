@@ -249,6 +249,30 @@
       "200"
     ]
   },
+  "POST /api/v1/catalog/data-products": {
+    "body": {
+      "application/json": {
+        "anyOf": [
+          {
+            "ids?": {
+              "anyOf": [
+                {
+                  "array": "string"
+                },
+                "null"
+              ]
+            }
+          },
+          "null"
+        ]
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/changesets": {
     "body": {
       "application/json": {

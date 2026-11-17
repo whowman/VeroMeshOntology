@@ -120,7 +120,10 @@ def test_datahub_ui_uses_the_veromesh_theme(api, gms):
 
 
 def test_ontologies_load_and_publish_to_the_glossary(api, gms):
-    for graph, path in ((CORE, "ontology/veromesh-core.ttl"), (RETAIL, "ontology/examples/retail.ttl")):
+    for graph, path in (
+        (CORE, "ontology/veromesh-core.ttl"),
+        (RETAIL, "ontology/examples/retail.ttl"),
+    ):
         r = api.put(
             "/ontologies",
             params={"graph": graph},
@@ -237,8 +240,36 @@ def test_org_model_through_the_spreadsheet_connector(api, tmp_path, capsys, clea
 
     # Export and re-import round-trips cleanly
     exported = tmp_path / "exported.xlsx"
-    assert main(["--api", API, "spreadsheet", "export", "--source", SOURCE, "-o", str(exported)]) == 0
-    assert main(["--api", API, "spreadsheet", "import", str(exported), "--source", SOURCE, "--dry-run"]) == 0
+    assert (
+        main(
+            [
+                "--api",
+                API,
+                "spreadsheet",
+                "export",
+                "--source",
+                SOURCE,
+                "-o",
+                str(exported),
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "--api",
+                API,
+                "spreadsheet",
+                "import",
+                str(exported),
+                "--source",
+                SOURCE,
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
     assert "0 errors, 0 violations" in capsys.readouterr().out
 
     # Provenance: every fact has a claim from this source; an owner can confirm it
@@ -247,7 +278,11 @@ def test_org_model_through_the_spreadsheet_connector(api, tmp_path, capsys, clea
     assert prov["fields"]["ownerRole"]["status"] == "unconfirmed"
     r = api.post(
         f"/api/v1/kpis/{PREFIX}OnTimePaymentRate/attestations",
-        json={"verdict": "attested", "attester": f"{PREFIX}DanaExample", "role": f"{PREFIX}ApManager"},
+        json={
+            "verdict": "attested",
+            "attester": f"{PREFIX}DanaExample",
+            "role": f"{PREFIX}ApManager",
+        },
     )
     assert r.status_code == 201 and r.json()["warnings"] == [], r.text
     prov = api.get(f"/api/v1/kpis/{PREFIX}OnTimePaymentRate/provenance").json()
@@ -261,3 +296,41 @@ def test_org_model_through_the_spreadsheet_connector(api, tmp_path, capsys, clea
     # The run history shows the connector's changeset
     runs = api.get("/api/v1/changesets", params={"source": SOURCE}).json()
     assert any(r["status"] == "committed" and r.get("connector") == "spreadsheet" for r in runs)
+
+
+def test_data_product_context_reaches_the_catalog(api, gms, clean_source):
+    """G8: a data product's owner role, consumers and lineage appear on its DataHub entry."""
+    from datahub.emitter.mcp import MetadataChangeProposalWrapper
+    from datahub.ingestion.graph.client import DatahubClientConfig, DataHubGraph
+    from datahub.metadata.schema_classes import DataProductPropertiesClass
+
+    urn = "urn:li:dataProduct:regtest-supplier-invoices"
+    token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None
+    graph = DataHubGraph(DatahubClientConfig(server=GMS, token=token))
+    graph.emit_mcp(
+        MetadataChangeProposalWrapper(
+            entityUrn=urn,
+            aspect=DataProductPropertiesClass(
+                name="regtest supplier invoices", customProperties={"team": "finance"}
+            ),
+        )
+    )
+    try:
+        _, ents = _prefixed_example(api)
+        for dp in ents["data-products"]:
+            if dp["id"] == f"{PREFIX}SupplierInvoices":
+                dp["catalogUrn"] = urn
+        items = [{"type": t, "op": "upsert", "entity": e} for t, es in ents.items() for e in es]
+        cs = api.post("/api/v1/changesets", json={"source": SOURCE}).json()["id"]
+        api.post(f"/api/v1/changesets/{cs}/items", json={"items": items})
+        assert api.post(f"/api/v1/changesets/{cs}/commit").status_code == 200
+
+        r = api.post("/api/v1/catalog/data-products", json={"ids": [f"{PREFIX}SupplierInvoices"]})
+        assert r.status_code == 200 and len(r.json()["published"]) == 1, r.text
+        props = graph.get_aspect(urn, DataProductPropertiesClass).customProperties
+        assert props["team"] == "finance", props
+        assert props["veromesh.VeroMesh ID"] == f"{PREFIX}SupplierInvoices"
+        assert props["veromesh.owner role"] == "Accounts payable manager"
+        assert props["veromesh.agents consuming it"] == "Invoice assistant"
+    finally:
+        graph.delete_entity(urn, hard=True)
