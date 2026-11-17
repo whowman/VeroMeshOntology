@@ -28,7 +28,7 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 
 ## The two ontology modes
 
-- **Business semantic layer:** `POST /glossary/publish` turns every `owl:Class` in an ontology into a DataHub glossary term under *Veromesh Ontology → \<ontology name\>* (one node per ontology; `rdfs:subClassOf` stays in the triple store). Binding an asset also attaches the term, so it appears in DataHub search, filters and lineage views.
+- **Glossary in the catalog:** `POST /glossary/publish` turns every `owl:Class` in an ontology into a DataHub glossary term under *Veromesh Ontology → \<ontology name\>* (one node per ontology; `rdfs:subClassOf` stays in the triple store). Binding an asset also attaches the term, so it appears in DataHub search, filters and lineage views. This is a business glossary in the catalog, not a semantic layer: DataHub does not define metrics or the meaning of data. Where a customer has a semantic layer, it is layer 2 of the reference architecture and an input to the ontology.
 - **Formal OWL/RDF:** the ontologies themselves stay in the triple store with full fidelity. `POST /sparql` runs read-only queries across ontologies and bindings; `GET /classes/assets` already follows `rdfs:subClassOf` transitively.
 
 ## Custom DataHub aspect
