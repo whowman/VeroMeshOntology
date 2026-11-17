@@ -36,6 +36,7 @@ Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticse
 | httpx-sse (for mcp) | MIT |
 | python-multipart (for mcp) | Apache-2.0 |
 | scramp (for pg8000) | MIT-0 |
+| tzdata | Apache-2.0 |
 
 ## Connectors (Python)
 

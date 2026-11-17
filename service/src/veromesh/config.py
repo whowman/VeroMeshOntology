@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # The decision check refuses when the facts behind the agent's authority are not
     # all attested and current (decision 3). Off only for demonstrations on unreviewed data.
     decision_requires_attested: bool = True
+    # The calendar the dates people reason about follow (validity dates, per-day
+    # limits, measures periods): an IANA time zone such as America/New_York.
+    # Timestamps are stored in UTC either way (clock.py).
+    time_zone: str = "UTC"
 
 
 @lru_cache

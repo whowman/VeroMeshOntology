@@ -18,7 +18,18 @@ from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
 from starlette.routing import Route
 
-from . import __version__, auth, branding, changesets, decide, decisions, entities, followup, mcp_server
+from . import (
+    __version__,
+    auth,
+    branding,
+    changesets,
+    clock,
+    decide,
+    decisions,
+    entities,
+    followup,
+    mcp_server,
+)
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -147,6 +158,8 @@ def create_app(
     app.state.settings = settings
     app.state.decision_log = decision_log
     branding.install(app, Path((settings or get_settings()).branding_dir))
+    # Dates people reason about follow the customer's calendar (clock.py).
+    clock.configure((settings or get_settings()).time_zone)
     # The steward screen: plain HTML and JavaScript, signed in in the browser (sign-in config below).
     app.mount(
         "/steward",
@@ -642,7 +655,7 @@ def create_app(
         dl: Log, since: str | None = None, until: str | None = None, agent: str | None = None
     ) -> dict:
         """Override rate, consultation precision and delegation extended, from the decision log
-        (dates YYYY-MM-DD, UTC; working definitions in followup.py)."""
+        (dates YYYY-MM-DD in the install's time zone, VEROMESH_TIME_ZONE; working definitions in followup.py)."""
         return followup.measures(dl, since=since, until=until, agent=agent)
 
     def the_decision(dl: decisions.DecisionLog, entry_id: str) -> dict:

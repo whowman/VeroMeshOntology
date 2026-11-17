@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime, timedelta
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 
+from . import clock
 from . import entities as E
 from .ontology import literal
 from .rdf_store import RDFStore
@@ -150,7 +151,7 @@ def _dt(text: str | None) -> datetime | None:
 def _as_of_end(as_of: str) -> datetime:
     """'2026-10-01' means the end of that day; a timestamp means itself."""
     if len(as_of) == 10:
-        return datetime.fromisoformat(as_of).replace(tzinfo=UTC) + timedelta(days=1) - timedelta(seconds=1)
+        return clock.end_of_day(date.fromisoformat(as_of))
     return _dt(as_of)  # type: ignore[return-value]
 
 
@@ -558,7 +559,7 @@ def resolve(
 ) -> dict[tuple[str, str], Resolved]:
     """Per entity and field, the value VeroMesh believes, by the precedence rules.
     Claims outside their valid period on ``day`` (default today) do not count."""
-    day = day or datetime.now(UTC).date()
+    day = day or clock.today()
     by_entity: dict[tuple[str, str], list[Claim]] = {}
     for c in claims:
         if ignore_validity or c.valid_on(day):

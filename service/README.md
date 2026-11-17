@@ -31,6 +31,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
 | `VEROMESH_DECISION_LOG` | `memory` | The decision log: `memory` (development; lost on restart) or `postgresql://user:password@host:5432/database[?sslmode=require]`, its own database |
 | `VEROMESH_DECISION_REQUIRES_ATTESTED` | `true` | The check refuses when the facts behind the agent's authority are not all attested and current. `false` only to demonstrate on unreviewed data |
+| `VEROMESH_TIME_ZONE` | `UTC` | The customer's calendar, as an IANA name such as `America/New_York`: authority validity dates, per-day limits ("25 invoices per day") and measures periods are days in this zone. Timestamps are stored in UTC either way. An unknown name stops the service at start |
 | `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
 
 ## Sign-in
