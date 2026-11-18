@@ -8,11 +8,12 @@ What it does today (main, 18 November 2026):
 - **Kept true:** loaded from spreadsheets, CSV and connectors, one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
 - **Sign-in and need to know:** tokens from any OpenID Connect provider (Entra ID first), five roles, and answers that leave out personal details for callers not allowed them.
 - **The agent decision check:** before acting, an agent asks and gets allow, consult (named owners) or refuse, with reasons, decided from attested facts only. Every answer goes into an append-only, hash-chained decision log; people approve or reject, agents report outcomes, and the first measures come from the log. Over REST and MCP (`/mcp`, [docs/copilot-studio.md](docs/copilot-studio.md)).
-- **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions and measures.
+- **The data element inventory:** columns bound to business data elements (in bulk from spreadsheets or the API, or accepted from the catalog's own classifications), and coverage: which critical data elements are owned, sourced, classified, bound and attested.
+- **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions, measures and the data element inventory.
 - **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
 - **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
 
-Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, the data element inventory, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
 
 DataHub runs **unmodified** from its official images; Veromesh extends it with a custom-model plugin and its APIs. See [docs/architecture.md](docs/architecture.md).
 

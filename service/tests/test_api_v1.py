@@ -41,7 +41,7 @@ def load(client, items, source="p2p", mode="replace") -> dict:
 
 def test_schema_describes_every_type(client):
     types = {t["type"]: t for t in client.get(f"{API}/schema").json()}
-    assert len(types) == 16
+    assert len(types) == 17
     holder = next(f for f in types["authorities"]["fields"] if f["key"] == "holder")
     assert holder["targets"] == ["roles", "people", "agents"] and holder["required"]
     assert types["impacts"]["keyed"] is False

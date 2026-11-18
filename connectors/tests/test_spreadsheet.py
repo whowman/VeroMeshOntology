@@ -24,7 +24,7 @@ def test_template_is_generated_from_the_api_schema(http, tmp_path, capsys):
     out = tmp_path / "t.xlsx"
     assert run(http, "template", "-o", str(out)) == 0
     wb = load_workbook(out)
-    assert wb.sheetnames[0] == "How to use" and "Authorities" in wb.sheetnames and len(wb.sheetnames) == 17
+    assert wb.sheetnames[0] == "How to use" and "Authorities" in wb.sheetnames and len(wb.sheetnames) == 18
     assert [c.value for c in wb["Impacts"][1]][0] == "Action"  # no ID column for types without one
     assert "Roles, People, Agents" in wb["Authorities"]["C1"].comment.text
 

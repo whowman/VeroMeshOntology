@@ -152,6 +152,27 @@
         "vmo:CoApproval"
       ]
     },
+    "vms:ColumnBindingShape": {
+      "closed": "false",
+      "properties": [
+        {
+          "class": "vmo:DataElement",
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:bindsElement"
+        },
+        {
+          "maxCount": "1",
+          "minCount": "1",
+          "path": "vmo:columnUrn"
+        }
+      ],
+      "severity": "",
+      "sparqlRules": 1,
+      "target": [
+        "vmo:ColumnBinding"
+      ]
+    },
     "vms:DataElementShape": {
       "closed": "false",
       "properties": [
@@ -177,6 +198,9 @@
           "minCount": "1",
           "path": "skos:definition",
           "severity": "sh:Warning"
+        },
+        {
+          "path": "vmo:catalogTerm"
         },
         {
           "path": "vmo:dataCategory"
@@ -717,6 +741,7 @@
       "vmo:Action": [],
       "vmo:BusinessCapability": [],
       "vmo:CoApproval": [],
+      "vmo:ColumnBinding": [],
       "vmo:DataElement": [],
       "vmo:DataProduct": [
         "dcat:Resource"
@@ -821,6 +846,15 @@
           "vmo:System"
         ]
       },
+      "vmo:bindsElement": {
+        "domain": [
+          "vmo:ColumnBinding"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:DataElement"
+        ]
+      },
       "vmo:boundedSubsetOf": {
         "domain": [
           "vmo:DelegatedAuthority"
@@ -844,6 +878,15 @@
         "kind": "owl:ObjectProperty",
         "range": []
       },
+      "vmo:catalogTerm": {
+        "domain": [
+          "vmo:DataElement"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmo:catalogUrn": {
         "domain": [],
         "kind": "owl:DatatypeProperty",
@@ -854,6 +897,15 @@
       "vmo:cmdbId": {
         "domain": [
           "vmo:System"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:columnUrn": {
+        "domain": [
+          "vmo:ColumnBinding"
         ],
         "kind": "owl:DatatypeProperty",
         "range": [

@@ -94,6 +94,11 @@ class DataHubPort(Protocol):
         dataset), keeping every other property. False when the entity is not in DataHub."""
         ...
 
+    def columns_with_terms(self, terms: list[str]) -> list[dict]:
+        """Columns (schema fields) carrying any of these glossary term or tag URNs, as
+        ``{"column", "dataset", "fieldPath", "terms"}``; ``terms`` lists the ones it carries."""
+        ...
+
 
 class DataHubSdkPort:
     """``DataHubPort`` backed by the ``acryl-datahub`` Python SDK."""
@@ -236,3 +241,61 @@ class DataHubSdkPort:
         current.customProperties = wanted
         self._graph.emit_mcp(MetadataChangeProposalWrapper(entityUrn=urn, aspect=current))
         return True
+
+    # -- columns marked by classifiers --------------------------------------
+
+    _SEARCH = """
+    query cols($input: SearchAcrossEntitiesInput!) {
+      searchAcrossEntities(input: $input) { total searchResults { entity { urn } } }
+    }"""
+
+    def columns_with_terms(self, terms: list[str], *, limit: int = 1000) -> list[dict]:
+        from datahub.emitter.mce_builder import make_schema_field_urn
+        from datahub.metadata.schema_classes import EditableSchemaMetadataClass, SchemaMetadataClass
+
+        wanted = set(terms)
+        datasets: set[str] = set()
+        for term in terms:
+            field = "fieldTags" if term.startswith("urn:li:tag:") else "fieldGlossaryTerms"
+            start = 0
+            while start < limit:
+                res = self._graph.execute_graphql(
+                    self._SEARCH,
+                    variables={
+                        "input": {
+                            "types": ["DATASET"],
+                            "query": "*",
+                            "start": start,
+                            "count": 100,
+                            "orFilters": [{"and": [{"field": field, "values": [term]}]}],
+                        }
+                    },
+                )["searchAcrossEntities"]
+                urns = [r["entity"]["urn"] for r in res["searchResults"]]
+                datasets.update(urns)
+                start += 100
+                if not urns or start >= res["total"]:
+                    break
+
+        def marks(terms_aspect, tags_aspect) -> set[str]:
+            got = {t.urn for t in (terms_aspect.terms if terms_aspect else [])}
+            got |= {t.tag for t in (tags_aspect.tags if tags_aspect else [])}
+            return got & wanted
+
+        out: dict[str, dict] = {}
+        for ds in sorted(datasets):
+            found: dict[str, set[str]] = {}
+            schema = self._graph.get_aspect(ds, SchemaMetadataClass)
+            for f in schema.fields if schema else []:
+                m = marks(f.glossaryTerms, f.globalTags)
+                if m:
+                    found.setdefault(f.fieldPath, set()).update(m)
+            editable = self._graph.get_aspect(ds, EditableSchemaMetadataClass)
+            for f in editable.editableSchemaFieldInfo if editable else []:
+                m = marks(f.glossaryTerms, f.globalTags)
+                if m:
+                    found.setdefault(f.fieldPath, set()).update(m)
+            for path, m in found.items():
+                col = make_schema_field_urn(ds, path)
+                out[col] = {"column": col, "dataset": ds, "fieldPath": path, "terms": sorted(m)}
+        return [out[k] for k in sorted(out)]

@@ -378,6 +378,26 @@ vms:SystemShape
     sh:property [ sh:path vmo:sensitivity ; sh:maxCount 1 ; sh:in ( vmo:Public vmo:Internal vmo:Confidential vmo:Restricted ) ] ;
     sh:property [ sh:path vmo:regulatoryScope ; sh:class vmo:Regulation ] .
 
+vms:ColumnBindingShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:ColumnBinding ;
+    sh:property [ sh:path vmo:bindsElement ; sh:class vmo:DataElement ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "A column binding names one business data element." ] ;
+    sh:property [ sh:path vmo:columnUrn ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:pattern "^urn:li:schemaField:\\(urn:li:dataset:\\(.+\\),.+\\)$" ;
+                  sh:message "The column is a DataHub schema field URN: urn:li:schemaField:(<dataset URN>,<field path>)." ] ;
+    sh:sparql [
+        sh:severity sh:Warning ;
+        sh:message "Column {?col} is bound to more than one data element ({?other} as well)." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?col ?other WHERE {
+              $this vmo:columnUrn ?col ; vmo:bindsElement ?el .
+              ?b vmo:columnUrn ?col ; vmo:bindsElement ?other .
+              FILTER (?b != $this && ?other != ?el)
+            }
+        """ ] .
+
 vms:DataElementShape
     a sh:NodeShape ;
     sh:targetClass vmo:DataElement ;
@@ -388,6 +408,8 @@ vms:DataElementShape
     sh:property [ sh:path vmo:dataCategory ; sh:in ( vmo:PersonalData vmo:HealthData vmo:PaymentCardData vmo:FinancialReportingData ) ;
                   sh:message "Use a value from vmo:DataCategoryScheme (extension packs may add more)." ] ;
     sh:property [ sh:path vmo:retention ; sh:datatype xsd:duration ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:catalogTerm ; sh:pattern "^urn:li:(glossaryTerm|tag):.+$" ;
+                  sh:message "A catalog term is a DataHub glossary term or tag URN (urn:li:glossaryTerm:... or urn:li:tag:...)." ] ;
     sh:sparql [
         sh:message "A critical data element must have an owner, a steward and an authoritative source system." ;
         sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;

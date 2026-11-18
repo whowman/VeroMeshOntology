@@ -25,11 +25,13 @@ from . import (
     catalog,
     changesets,
     clock,
+    coverage,
     decide,
     decisions,
     entities,
     followup,
     mcp_server,
+    suggest,
 )
 from . import provenance as prov
 from .config import Settings, get_settings
@@ -46,6 +48,11 @@ class ClassOut(BaseModel):
     definition: str | None
     parents: list[str]
     graph: str | None
+
+
+class SuggestionsIn(BaseModel):
+    items: list[dict]  # [{dataElement, column}]
+    note: str | None = None
 
 
 class CatalogPublishIn(BaseModel):
@@ -459,6 +466,57 @@ def create_app(
         try:
             return catalog.publish_data_products(
                 s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/api/v1/catalog/columns", dependencies=need(auth.STEWARD), tags=["catalog"])
+    def catalog_publish_columns(s: Svc, c: Cfg, body: CatalogPublishIn | None = None) -> dict:
+        """Write each column binding onto its DataHub column, so the catalog shows the business
+        data element a column holds. `{"ids": [...]}` limits it to those data elements."""
+        try:
+            return catalog.publish_column_bindings(
+                s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.get("/api/v1/data-elements/suggestions", dependencies=need(auth.STEWARD), tags=["governance"])
+    def data_element_suggestions(s: Svc, c: Cfg) -> dict:
+        """Columns the catalog marks with a data element's catalog terms (glossary terms or tags, often
+        set by a classifier) that are not yet bound to it, for a steward to accept or reject."""
+        return suggest.suggestions(s.store, c.instance_base, s.datahub)
+
+    @app.post(
+        "/api/v1/data-elements/suggestions/accept", dependencies=need(auth.STEWARD), tags=["governance"]
+    )
+    def data_element_suggestions_accept(s: Svc, c: Cfg, body: SuggestionsIn) -> dict:
+        """Bind the given columns to their data elements (source `catalog-suggestions`)."""
+        try:
+            return suggest.accept(s.store, c.instance_base, c.ontology_dir, body.items)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.post(
+        "/api/v1/data-elements/suggestions/reject", dependencies=need(auth.STEWARD), tags=["governance"]
+    )
+    def data_element_suggestions_reject(s: Svc, c: Cfg, who: Who, body: SuggestionsIn) -> dict:
+        """Record that the given columns do not hold those data elements; they are not suggested again."""
+        try:
+            return suggest.reject(s.store, body.items, by=who.name or who.subject, note=body.note)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.get("/api/v1/data-elements/coverage", dependencies=need(auth.READ), tags=["governance"])
+    def data_element_coverage(
+        s: Svc, c: Cfg, dataProduct: str | None = None, criticalOnly: bool = False
+    ) -> dict:
+        """The data element inventory: for each element, whether it is defined, owned (owner and
+        steward roles), sourced, classified, bound to catalog columns and attested; totals for all
+        elements and for critical ones. `dataProduct` limits it to one product's elements."""
+        try:
+            return coverage.inventory(
+                s.store, c.instance_base, data_product=dataProduct, critical_only=criticalOnly
             )
         except LookupError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e

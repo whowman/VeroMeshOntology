@@ -443,8 +443,32 @@ SHEETS: tuple[Sheet, ...] = (
             Col("Sensitivity", "iri_enum", VMO.sensitivity, values=SENSITIVITY),
             Col("Data categories", "iri_enum", VMO.dataCategory, multi=True, values=DATA_CATEGORY),
             Col("Retention", "duration", VMO.retention, help="ISO 8601 duration, e.g. P7Y for seven years."),
+            Col(
+                "Catalog terms",
+                "text",
+                VMO.catalogTerm,
+                multi=True,
+                help="DataHub glossary term or tag URNs that mark this element's columns; "
+                "columns carrying them are suggested as bindings.",
+            ),
         ),
         help="Business-level data items. Physical columns in DataHub are bound to these.",
+    ),
+    Sheet(
+        "Column bindings",
+        VMO.ColumnBinding,
+        (
+            Col("Data element", "ref", VMO.bindsElement, ("Data elements",), required=True),
+            Col(
+                "Column",
+                "text",
+                VMO.columnUrn,
+                required=True,
+                help="DataHub column URN: urn:li:schemaField:(<dataset URN>,<field path>).",
+            ),
+        ),
+        keyed=False,
+        help="Which physical columns in DataHub hold each business data element. One row per column.",
     ),
 )
 SHEET_BY_NAME = {s.name: s for s in SHEETS}
@@ -541,9 +565,12 @@ def local_id(base: str, iri) -> str:
 
 
 def generated_id(type_: str, entity: dict) -> str:
-    """Stable ID for types without one (impacts, co-approvals): parent + content hash."""
+    """Stable ID for types without one (impacts, co-approvals, column bindings): parent + content hash.
+    The parent is the row's inverse reference, or else its first reference."""
     sheet = TYPES[type_]
-    parent_key = next(field_key(c) for c in sheet.cols if c.inverse)
+    parent_key = next((field_key(c) for c in sheet.cols if c.inverse), None) or next(
+        field_key(c) for c in sheet.cols if c.kind == "ref"
+    )
     parent = str(entity.get(parent_key) or "item")
     body = json.dumps({k: v for k, v in sorted(entity.items()) if k != "id"}, sort_keys=True, default=str)
     return f"{parent}.{type_}.{hashlib.sha1(body.encode()).hexdigest()[:8]}"

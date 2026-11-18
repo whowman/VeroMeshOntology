@@ -6,6 +6,7 @@
     "authorities": 3,
     "capabilities": 1,
     "co-approvals": 1,
+    "column-bindings": 1,
     "data-elements": 1,
     "data-products": 2,
     "impacts": 2,
@@ -17,13 +18,13 @@
     "roles": 4,
     "systems": 2
   },
-  "facts": 168,
+  "facts": 172,
   "findings": [],
   "summary": {
     "conflicts": 0,
     "deletes": 0,
     "errors": 0,
-    "upserts": 28,
+    "upserts": 29,
     "violations": 0,
     "warnings": 0
   },
