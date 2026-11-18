@@ -250,6 +250,40 @@ vms:CoApprovalShape
 
 # --- Agents and data ---------------------------------------------------------
 
+vms:AIUseCaseShape
+    a sh:NodeShape ;
+    sh:targetClass vmo:AIUseCase ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:message "An approved AI use case needs a name." ] ;
+    sh:property [ sh:path vmo:approvedBy ; sh:class vmo:Role ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "An approved AI use case names the one board or committee (a role) that approved it." ] ;
+    sh:property [ sh:path vmo:approvalStatus ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:in ( "approved" "conditional" "suspended" "retired" ) ;
+                  sh:message "Approval status is one of: approved, conditional, suspended, retired." ] ;
+    sh:property [ sh:path vmo:coversAgent ; sh:class vmo:AIAgent ; sh:minCount 1 ;
+                  sh:message "An approved AI use case covers at least one agent." ] ;
+    sh:property [ sh:path vmo:allowsAction ; sh:class vmo:Action ] ;
+    sh:property [ sh:path vmo:approvedOn ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:property [ sh:path vmo:reviewBy ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:sparql [
+        sh:message "The review date comes before the approval date." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE {
+              $this vmo:approvedOn ?on ; vmo:reviewBy ?by .
+              FILTER (?by < ?on)
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Action {?act} is not one the covered agent {?agent} performs." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?agent ?act WHERE {
+              $this vmo:coversAgent ?agent ; vmo:allowsAction ?act .
+              FILTER NOT EXISTS { ?agent vmo:performs ?act }
+            }
+        """ ] .
+
+
 vms:AIAgentShape
     a sh:NodeShape ;
     sh:targetClass vmo:AIAgent ;

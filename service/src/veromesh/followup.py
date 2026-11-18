@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from . import clock
 from .decisions import DecisionLog, InvalidEntry
 
 VERDICTS = ("approved", "rejected")
@@ -185,7 +186,9 @@ def done_today(log: DecisionLog, action: str, day: date) -> int:
     """Actions taken today: decisions for ``action`` recorded today that were done, or that were
     allowed and have no outcome yet (the agent is about to act). Consulted ones count once done."""
     decisions = [
-        e for e in all_entries(log, action=action, kind="decision") if e["recordedAt"][:10] == day.isoformat()
+        e
+        for e in all_entries(log, action=action, kind="decision")
+        if clock.local_date(e["recordedAt"]) == day.isoformat()
     ]
     if not decisions:
         return 0
@@ -240,8 +243,8 @@ def measures(
         e
         for e in entries
         if e["kind"] == "decision"
-        and (since is None or e["recordedAt"][:10] >= since)
-        and (until is None or e["recordedAt"][:10] <= until)
+        and (since is None or clock.local_date(e["recordedAt"]) >= since)
+        and (until is None or clock.local_date(e["recordedAt"]) <= until)
     ]
     later: dict[str, list[dict]] = {}
     for e in entries:
@@ -271,7 +274,7 @@ def measures(
         return round(a / b, 4) if b else None
 
     return {
-        "period": {"since": since, "until": until, "agent": agent},
+        "period": {"since": since, "until": until, "agent": agent, "timeZone": clock.zone_name()},
         "decisions": total,
         "byOutcome": by_outcome,
         "carriedOut": done,

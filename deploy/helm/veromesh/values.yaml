@@ -72,6 +72,11 @@ api:
     existingSecret: ""
     key: url
 
+  # The customer's time zone (an IANA name such as America/New_York): the calendar
+  # for authority validity dates, per-day limits and measures periods. Timestamps
+  # are stored in UTC either way.
+  timeZone: UTC
+
   # Extra environment variables for the service, as name: value.
   env: {}
 

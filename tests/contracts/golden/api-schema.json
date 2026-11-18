@@ -670,6 +670,101 @@
         "required": true
       },
       {
+        "help": "Display name of the approved AI use case.",
+        "key": "name",
+        "kind": "label",
+        "label": "Name",
+        "multi": false,
+        "required": true
+      },
+      {
+        "help": "ID of the board or committee (as a role) that approved it, e.g. the AI review board.",
+        "key": "approvedBy",
+        "kind": "ref",
+        "label": "Approved by",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "",
+        "key": "status",
+        "kind": "str_enum",
+        "label": "Status",
+        "multi": false,
+        "required": true,
+        "values": [
+          "approved",
+          "conditional",
+          "suspended",
+          "retired"
+        ]
+      },
+      {
+        "help": "",
+        "key": "coversAgents",
+        "kind": "ref",
+        "label": "Covers agents",
+        "multi": true,
+        "required": true,
+        "targets": [
+          "agents"
+        ]
+      },
+      {
+        "help": "Actions the approved use may take. Empty: the approval does not limit actions.",
+        "key": "allowsActions",
+        "kind": "ref",
+        "label": "Allows actions",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "actions"
+        ]
+      },
+      {
+        "help": "",
+        "key": "approvedOn",
+        "kind": "date",
+        "label": "Approved on",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "When the board must review the approval again.",
+        "key": "reviewBy",
+        "kind": "date",
+        "label": "Review by",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "Conditions the board attached.",
+        "key": "conditions",
+        "kind": "text",
+        "label": "Conditions",
+        "multi": false,
+        "required": false
+      }
+    ],
+    "help": "Governance board decisions: which AI uses may run, for which agents and actions. From the board's register or minutes.",
+    "keyed": true,
+    "label": "AI use cases",
+    "type": "ai-use-cases"
+  },
+  {
+    "fields": [
+      {
+        "help": "Short unique key, used to reference this row from other sheets. Letters, digits, '.', '_' or '-'.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": true
+      },
+      {
         "help": "Display name of the action.",
         "key": "name",
         "kind": "label",

@@ -126,6 +126,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            - name: VEROMESH_TIME_ZONE
+              value: {{ .Values.api.timeZone | default "UTC" | quote }}
             {{- with .Values.api.decisionLog }}
             {{- if .existingSecret }}
             - name: VEROMESH_DECISION_LOG

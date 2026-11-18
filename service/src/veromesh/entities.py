@@ -298,6 +298,42 @@ SHEETS: tuple[Sheet, ...] = (
         help="AI agents. Each acts for exactly one person.",
     ),
     Sheet(
+        "AI use cases",
+        VMO.AIUseCase,
+        (
+            _id(),
+            _name("approved AI use case"),
+            Col(
+                "Approved by",
+                "ref",
+                VMO.approvedBy,
+                ("Roles",),
+                required=True,
+                help="ID of the board or committee (as a role) that approved it, e.g. the AI review board.",
+            ),
+            Col(
+                "Status",
+                "str_enum",
+                VMO.approvalStatus,
+                values=("approved", "conditional", "suspended", "retired"),
+                required=True,
+            ),
+            Col("Covers agents", "ref", VMO.coversAgent, ("Agents",), multi=True, required=True),
+            Col(
+                "Allows actions",
+                "ref",
+                VMO.allowsAction,
+                ("Actions",),
+                multi=True,
+                help="Actions the approved use may take. Empty: the approval does not limit actions.",
+            ),
+            Col("Approved on", "date", VMO.approvedOn),
+            Col("Review by", "date", VMO.reviewBy, help="When the board must review the approval again."),
+            Col("Conditions", "text", VMO.conditions, help="Conditions the board attached."),
+        ),
+        help="Governance board decisions: which AI uses may run, for which agents and actions. From the board's register or minutes.",
+    ),
+    Sheet(
         "Actions",
         VMO.Action,
         (

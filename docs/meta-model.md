@@ -68,6 +68,7 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Action | A type of consequential action | process, KPIs and capabilities affected, materiality thresholds | Process owners |
 | Data product | Governed, owned data with known producers and consumers | owner, system, lineage (feeds), elements, sensitivity, catalog URN | DataHub |
 | System | An application or platform | business and technical owner, CMDB ID, criticality, lifecycle, regulatory scope | CMDB |
+| Approved AI use case (governance) | A governance board's decision that an AI use may run. Outside the 12 core types: it records a board decision about agents, not a new kind of authority | approving board (a role), status (approved, conditional, suspended, retired), agents covered, actions allowed, approved on, review by, conditions | AI review board register or minutes (source category `governance`) |
 
 Three supporting types: **Impact** (attaches a materiality threshold to "action affects KPI"), **Co-approval** (a second sign-off by a role above an amount) and **Business data element** (a business-level data item; physical columns bind to it).
 
@@ -87,6 +88,7 @@ Three supporting types: **Impact** (attaches a materiality threshold to "action 
 | KPIs, capabilities and data products have at most one owning role | Violation |
 | A critical data element has an owner, a steward and an authoritative source system | Violation |
 | Sensitivity and data category use the controlled lists | Violation |
+| An approved AI use case names one approving board (a role), a status from the list and at least one agent; it allows only actions its agents perform; its review date is not before its approval date | Violation |
 | Every impact with a threshold is also listed under "affects" | Violation |
 | Whoever delegated an authority holds one covering the same actions (top-level grants come from a policy) | Warning |
 | A co-approval above the authority's own limit never applies | Warning |

@@ -21,6 +21,7 @@ dependencies = [
     "pyjwt[crypto]>=2.8,<3",    # MIT (cryptography: Apache-2.0 OR BSD-3-Clause)
     "mcp>=1.20,<2",             # MIT; the MCP server at /mcp (Streamable HTTP)
     "pg8000>=1.31,<2",          # BSD-3-Clause (scramp: MIT-0); the decision log. Not psycopg: LGPL needs review
+    "tzdata>=2024.1",           # Apache-2.0; time zones for VEROMESH_TIME_ZONE where the image has none
 ]
 
 [project.optional-dependencies]

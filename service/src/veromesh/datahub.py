@@ -89,6 +89,11 @@ class DataHubPort(Protocol):
 
     def set_asset_terms(self, urn: str, add: list[str], remove: list[str]) -> None: ...
 
+    def set_custom_properties(self, urn: str, properties: dict[str, str], *, prefix: str) -> bool:
+        """Replace the custom properties starting with ``prefix`` on a data product (or
+        dataset), keeping every other property. False when the entity is not in DataHub."""
+        ...
+
 
 class DataHubSdkPort:
     """``DataHubPort`` backed by the ``acryl-datahub`` Python SDK."""
@@ -210,3 +215,24 @@ class DataHubSdkPort:
                 ),
             )
         )
+
+    # -- properties ----------------------------------------------------------
+
+    def set_custom_properties(self, urn: str, properties: dict[str, str], *, prefix: str) -> bool:
+        from datahub.emitter.mcp import MetadataChangeProposalWrapper
+        from datahub.metadata.schema_classes import DataProductPropertiesClass, DatasetPropertiesClass
+
+        kinds = {"dataProduct": DataProductPropertiesClass, "dataset": DatasetPropertiesClass}
+        kind = urn.split(":")[2] if urn.count(":") >= 3 else ""
+        if kind not in kinds:
+            raise ValueError(f"{urn} is not a DataHub data product or dataset URN.")
+        current = self._graph.get_aspect(urn, kinds[kind])
+        if current is None:
+            return False
+        kept = {k: v for k, v in (current.customProperties or {}).items() if not k.startswith(prefix)}
+        wanted = kept | properties
+        if wanted == (current.customProperties or {}):
+            return True
+        current.customProperties = wanted
+        self._graph.emit_mcp(MetadataChangeProposalWrapper(entityUrn=urn, aspect=current))
+        return True

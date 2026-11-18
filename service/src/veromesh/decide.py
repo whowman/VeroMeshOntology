@@ -30,10 +30,10 @@ else allow (informing the owners below their thresholds).
 from __future__ import annotations
 
 import re
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from . import changesets, followup
+from . import changesets, clock, followup
 from . import provenance as prov
 from .decisions import DecisionLog
 from .rdf_store import RDFStore
@@ -128,7 +128,7 @@ def check(
 ) -> dict:
     """Decide, append the decision to the log, and return the log entry plus who to inform."""
     m = Model(store, base)
-    day = on or datetime.now(UTC).date()
+    day = on or clock.today()
     amt = _dec(amount)
     cur = currency.upper() if currency else None
     if amt is not None and amt < 0:

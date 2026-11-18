@@ -18,7 +18,19 @@ from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
 from starlette.routing import Route
 
-from . import __version__, auth, branding, changesets, decide, decisions, entities, followup, mcp_server
+from . import (
+    __version__,
+    auth,
+    branding,
+    catalog,
+    changesets,
+    clock,
+    decide,
+    decisions,
+    entities,
+    followup,
+    mcp_server,
+)
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -34,6 +46,10 @@ class ClassOut(BaseModel):
     definition: str | None
     parents: list[str]
     graph: str | None
+
+
+class CatalogPublishIn(BaseModel):
+    ids: list[str] | None = None  # only these data products; default all
 
 
 class BindingIn(BaseModel):
@@ -147,6 +163,8 @@ def create_app(
     app.state.settings = settings
     app.state.decision_log = decision_log
     branding.install(app, Path((settings or get_settings()).branding_dir))
+    # Dates people reason about follow the customer's calendar (clock.py).
+    clock.configure((settings or get_settings()).time_zone)
     # The steward screen: plain HTML and JavaScript, signed in in the browser (sign-in config below).
     app.mount(
         "/steward",
@@ -407,7 +425,7 @@ def create_app(
 
     @app.put("/api/v1/sources/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
     def source_register(s: Svc, c: Cfg, name: str, body: SourceIn) -> dict:
-        """Register a source's category (hr, iam, cmdb, erp, catalog, spreadsheet), owner role and description."""
+        """Register a source's category (hr, iam, cmdb, erp, catalog, governance, spreadsheet), owner role and description."""
         out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
         prov.refresh_effective(s.store, c.instance_base)
         return out
@@ -432,6 +450,18 @@ def create_app(
     def effective_rebuild(s: Svc, c: Cfg) -> dict:
         """Recompute the effective model (e.g. after valid-until dates pass)."""
         return prov.rebuild(s.store, c.instance_base)
+
+    @app.post("/api/v1/catalog/data-products", dependencies=need(auth.STEWARD), tags=["catalog"])
+    def catalog_publish_data_products(s: Svc, c: Cfg, body: CatalogPublishIn | None = None) -> dict:
+        """Write each data product's organizational context (owner and steward roles, capabilities,
+        KPIs, consuming agents, lineage, systems, data elements, sensitivity, policies) onto its
+        catalog entry, as veromesh.* custom properties. Roles only, never people."""
+        try:
+            return catalog.publish_data_products(
+                s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.get("/api/v1/authorities/{rid}/confirmation", dependencies=need(auth.READ), tags=["governance"])
     def authority_confirmation(s: Svc, rid: str) -> dict:
@@ -642,7 +672,7 @@ def create_app(
         dl: Log, since: str | None = None, until: str | None = None, agent: str | None = None
     ) -> dict:
         """Override rate, consultation precision and delegation extended, from the decision log
-        (dates YYYY-MM-DD, UTC; working definitions in followup.py)."""
+        (dates YYYY-MM-DD in the install's time zone, VEROMESH_TIME_ZONE; working definitions in followup.py)."""
         return followup.measures(dl, since=since, until=until, agent=agent)
 
     def the_decision(dl: decisions.DecisionLog, entry_id: str) -> dict:

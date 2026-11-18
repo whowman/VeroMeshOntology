@@ -87,6 +87,10 @@ ex:ErpPlatformLead
     a vmo:Role ;
     rdfs:label "ERP platform lead" .
 
+ex:AiReviewBoard
+    a vmo:Role ;
+    rdfs:label "AI review board" .
+
 ex:DanaExample
     a vmo:Person ;
     rdfs:label "Dana Example" ;
@@ -99,7 +103,7 @@ ex:LeeExample
     a vmo:Person ;
     rdfs:label "Lee Example" ;
     vmo:employeeId "E-0042" ;
-    vmo:fills ex:Controller , ex:ErpPlatformLead .
+    vmo:fills ex:Controller , ex:ErpPlatformLead , ex:AiReviewBoard .
 
 ex:ApApprovalAuthority
     a vmo:DelegatedAuthority ;
@@ -125,6 +129,18 @@ ex:InvoiceAssistant
     vmo:performs ex:ApproveSupplierInvoice ;
     vmo:consumes ex:SupplierInvoices ;
     vmo:runsOn ex:AgentPlatform .
+
+# The AI review board's decision that the invoice assistant may run (source: governance).
+ex:InvoiceAssistantUse
+    a vmo:AIUseCase ;
+    rdfs:label "Invoice approval assistant for accounts payable" ;
+    vmo:approvedBy ex:AiReviewBoard ;
+    vmo:approvalStatus "conditional" ;
+    vmo:coversAgent ex:InvoiceAssistant ;
+    vmo:allowsAction ex:ApproveSupplierInvoice ;
+    vmo:approvedOn "2026-09-15"^^xsd:date ;
+    vmo:reviewBy "2027-03-15"^^xsd:date ;
+    vmo:conditions "The AP manager reviews a weekly sample of approved invoices." .
 
 # The agent's authority: a bounded subset of the AP manager's role authority.
 ex:AssistantApprovalAuthority

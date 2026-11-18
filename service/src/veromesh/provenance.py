@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime, timedelta
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 
+from . import clock
 from . import entities as E
 from .ontology import literal
 from .rdf_store import RDFStore
@@ -43,7 +44,7 @@ SOURCE_BASE = "https://veromesh.ai/source/"
 CHANGESET_BASE = "https://veromesh.ai/changeset/"
 
 STEWARD_SOURCE = "steward"
-CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "spreadsheet", "steward")
+CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "spreadsheet", "steward")
 DEFAULT_CATEGORY = "spreadsheet"
 
 # ---------------------------------------------------------------------------- governance defaults
@@ -55,6 +56,7 @@ RANKING: dict[str, list[str]] = {
     "systems": ["cmdb", "catalog", "spreadsheet"],
     "authorities": ["erp", "iam", "spreadsheet"],
     "co-approvals": ["erp", "iam", "spreadsheet"],
+    "ai-use-cases": ["governance", "spreadsheet"],
 }
 DEFAULT_RANKING = ["spreadsheet"]
 
@@ -75,10 +77,26 @@ SOURCE_WINS: dict[str, set[str]] = {
     },
     "co-approvals": {"authority", "approverRole", "aboveAmount"},
     "systems": {"name", "cmdbId", "lifecycle"},
+    # The board decides; a steward can dispute, not overrule.
+    "ai-use-cases": {
+        "approvedBy",
+        "status",
+        "coversAgents",
+        "allowsActions",
+        "approvedOn",
+        "reviewBy",
+        "conditions",
+    },
 }
 
 # Re-confirmation cadence in days (decision 4).
-CADENCE_DAYS: dict[str, int] = {"authorities": 90, "co-approvals": 90, "people": 180, "roles": 180}
+CADENCE_DAYS: dict[str, int] = {
+    "authorities": 90,
+    "co-approvals": 90,
+    "people": 180,
+    "roles": 180,
+    "ai-use-cases": 365,
+}
 DEFAULT_CADENCE_DAYS = 365
 OWNERSHIP_FIELDS = {"ownerRole", "stewardRole", "businessOwner", "technicalOwner"}
 OWNERSHIP_CADENCE_DAYS = 180
@@ -150,7 +168,7 @@ def _dt(text: str | None) -> datetime | None:
 def _as_of_end(as_of: str) -> datetime:
     """'2026-10-01' means the end of that day; a timestamp means itself."""
     if len(as_of) == 10:
-        return datetime.fromisoformat(as_of).replace(tzinfo=UTC) + timedelta(days=1) - timedelta(seconds=1)
+        return clock.end_of_day(date.fromisoformat(as_of))
     return _dt(as_of)  # type: ignore[return-value]
 
 
@@ -558,7 +576,7 @@ def resolve(
 ) -> dict[tuple[str, str], Resolved]:
     """Per entity and field, the value VeroMesh believes, by the precedence rules.
     Claims outside their valid period on ``day`` (default today) do not count."""
-    day = day or datetime.now(UTC).date()
+    day = day or clock.today()
     by_entity: dict[tuple[str, str], list[Claim]] = {}
     for c in claims:
         if ignore_validity or c.valid_on(day):

@@ -1,6 +1,6 @@
 # Veromesh Ontology
 
-Formal ontologies (OWL/RDF) and a business semantic layer on top of the open source [DataHub](https://github.com/datahub-project/datahub) metadata platform.
+The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
 - Load OWL ontologies into a SPARQL store (Apache Jena Fuseki)
 - Publish ontology classes to DataHub as glossary terms

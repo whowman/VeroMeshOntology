@@ -2,6 +2,7 @@
   "entities": {
     "actions": 2,
     "agents": 1,
+    "ai-use-cases": 1,
     "authorities": 3,
     "capabilities": 1,
     "co-approvals": 1,
@@ -13,16 +14,16 @@
     "people": 2,
     "policies": 2,
     "processes": 1,
-    "roles": 3,
+    "roles": 4,
     "systems": 2
   },
-  "facts": 156,
+  "facts": 168,
   "findings": [],
   "summary": {
     "conflicts": 0,
     "deletes": 0,
     "errors": 0,
-    "upserts": 26,
+    "upserts": 28,
     "violations": 0,
     "warnings": 0
   },
