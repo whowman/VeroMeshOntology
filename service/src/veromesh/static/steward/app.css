@@ -66,4 +66,11 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: now
 .tile .label { color: var(--text2); font-size: 13px; }
 .tile .value { font-size: 30px; font-weight: 600; color: var(--teal); font-variant-numeric: tabular-nums; margin: 4px 0; }
 .tile .detail { color: var(--text2); font-size: 13px; }
+h2.section { font-size: 15px; font-weight: 600; margin: 26px 0 10px; color: var(--text); }
+#cov-table { margin-top: 14px; overflow-x: auto; }
+td.check { text-align: center; }
+.mark.ok { color: var(--teal); }
+.mark.gap { color: var(--danger); }
+.cols { color: var(--text2); font-size: 12px; word-break: break-all; }
+input[type=checkbox] { accent-color: var(--teal); }
 @media (max-width: 600px) { .top, .tabs, main, .devbar { padding-left: 16px; padding-right: 16px; } }

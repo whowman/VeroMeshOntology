@@ -26,6 +26,7 @@
   <button role="tab" data-tab="facts" data-steward>Facts to confirm <span id="facts-count" class="count"></span></button>
   <button role="tab" data-tab="log" data-steward>Decisions</button>
   <button role="tab" data-tab="measures" data-steward>Measures</button>
+  <button role="tab" data-tab="coverage" data-steward>Data elements <span id="suggest-count" class="count"></span></button>
 </nav>
 
 <main>
@@ -54,6 +55,17 @@
   <section id="tab-measures" class="tab" hidden>
     <p class="lead">From the decision log. Working definitions: see <code>followup.py</code>.</p>
     <div id="measures" class="tiles"></div>
+  </section>
+  <section id="tab-coverage" class="tab" hidden>
+    <p class="lead">The data element inventory: is each element defined, owned, sourced, classified, bound to catalog columns and attested? Columns the catalog marks for an element wait below for you to bind or reject.</p>
+    <div class="toolbar">
+      <label>Data product <select id="cov-product"><option value="">All</option></select></label>
+      <label><input type="checkbox" id="cov-critical"> Critical only</label>
+    </div>
+    <div id="cov-tiles" class="tiles"></div>
+    <div id="cov-table"></div>
+    <h2 class="section">Suggested columns</h2>
+    <div id="suggestions"></div>
   </section>
 </main>
 

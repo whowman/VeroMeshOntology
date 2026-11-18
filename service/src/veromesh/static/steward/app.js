@@ -271,9 +271,113 @@ async function showMeasures() {
   } catch (e) { box.replaceChildren(el("div", "empty", e.message)); }
 }
 
+// ------------------------------------------------------------------ data elements
+
+const CHECKS = [["defined", "Defined"], ["owned", "Owned"], ["sourced", "Sourced"], ["classified", "Classified"], ["bound", "Bound"], ["attested", "Attested"]];
+const shortCol = (urn) => { const m = /,([^,()]+)\)$/.exec(urn); const ds = /urn:li:dataset:\(urn:li:dataPlatform:([^,]+),([^,]+),/.exec(urn); return ds ? `${ds[1]} · ${ds[2]} · ${m ? m[1] : ""}` : urn; };
+
+async function showCoverage() {
+  const tiles = $("#cov-tiles");
+  const tableBox = $("#cov-table");
+  tableBox.replaceChildren(el("p", "lead", "Loading…"));
+  const productSel = $("#cov-product");
+  if (productSel.options.length === 1) {
+    const products = await api("/api/v1/data-products").catch(() => []);
+    for (const p of products) productSel.append(new Option(p.name || p.id, p.id));
+  }
+  const q = new URLSearchParams();
+  if (productSel.value) q.set("dataProduct", productSel.value);
+  if ($("#cov-critical").checked) q.set("criticalOnly", "true");
+  let cov;
+  try { cov = await api("/api/v1/data-elements/coverage" + (q.toString() ? "?" + q : "")); } catch (e) { tableBox.replaceChildren(el("div", "empty", e.message)); return; }
+  const pct = (x) => (x.share === null ? "–" : `${Math.round(x.share * 100)}%`);
+  const tile = (label, value, detail) => { const t = el("div", "tile"); t.append(el("div", "label", label), el("div", "value", value), el("div", "detail", detail)); return t; };
+  const crit = cov.critical;
+  tiles.replaceChildren(
+    tile("Critical data elements", String(crit.elements), `${crit.complete} complete · ${cov.all.elements} elements in all`),
+    tile("Owned", pct(crit.owned), `${crit.owned.count} of ${crit.elements} critical have an owner and a steward`),
+    tile("Bound to columns", pct(crit.bound), `${crit.bound.count} of ${crit.elements} critical are in the catalog`),
+    tile("Attested", pct(crit.attested), `${crit.attested.count} of ${crit.elements} critical confirmed by their owner or steward`),
+  );
+  if (!cov.elements.length) { tableBox.replaceChildren(el("div", "empty", "No data elements in this scope yet.")); }
+  else {
+    const table = el("table");
+    const hr = el("tr");
+    for (const h of ["Data element", ...CHECKS.map((c) => c[1]), "Columns"]) hr.append(el("th", null, h));
+    table.append(hr);
+    for (const e of cov.elements) {
+      const tr = el("tr");
+      const name = el("td");
+      name.append(el("div", null, e.name));
+      if (e.critical) name.append(el("span", "kind consult", "critical"));
+      tr.append(name);
+      for (const [k] of CHECKS) {
+        const td = el("td", "check");
+        const ok = e.checks[k];
+        const m = el("span", "mark " + (ok ? "ok" : "gap"), ok ? "✓" : "✗");
+        m.setAttribute("aria-label", ok ? "yes" : "no");
+        td.append(m);
+        tr.append(td);
+      }
+      const cols = el("td", "cols");
+      cols.textContent = e.columns.map(shortCol).join("\n") || "none";
+      cols.style.whiteSpace = "pre-line";
+      tr.append(cols);
+      table.append(tr);
+    }
+    tableBox.replaceChildren(table);
+  }
+  showSuggestions();
+}
+
+async function showSuggestions() {
+  const box = $("#suggestions");
+  box.replaceChildren(el("p", "lead", "Asking the catalog…"));
+  let got;
+  try { got = await api("/api/v1/data-elements/suggestions"); } catch (e) { box.replaceChildren(el("div", "empty", e.message)); return; }
+  $("#suggest-count").textContent = got.suggestions.length || "";
+  const parts = [];
+  for (const p of got.problems) parts.push(el("div", "message error", `${p.dataElement}: ${p.problem}`));
+  if (!got.elementsWithTerms) parts.push(el("div", "empty", "No data element names catalog terms yet. Add the glossary terms or tags that mark its columns (Catalog terms) and matching columns will appear here."));
+  else if (!got.suggestions.length) parts.push(el("div", "empty", "No new columns to review."));
+  for (const s of got.suggestions) parts.push(suggestionCard(s));
+  box.replaceChildren(...parts);
+}
+
+function suggestionCard(s) {
+  const node = el("article", "card");
+  const head = el("header");
+  head.append(el("span", "kind " + (s.critical ? "consult" : "pending"), s.critical ? "critical" : "element"), el("h3", null, `${s.name} in ${shortCol(s.column)}`));
+  node.append(head);
+  node.append(el("p", "meta", "The catalog marks this column with " + s.matched.join(", ")));
+  node.append(el("p", "cols", s.column));
+  const answer = el("div", "answer");
+  const note = el("input", "note");
+  note.type = "text";
+  note.placeholder = "Note (optional, kept with a rejection)";
+  note.setAttribute("aria-label", "Note");
+  const buttons = el("div", "buttons");
+  for (const [label, path, style] of [["Bind", "accept", "primary"], ["Not this element", "reject", "secondary"]]) {
+    const b = el("button", style, label);
+    b.type = "button";
+    b.addEventListener("click", async () => {
+      node.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+      try {
+        await api(`/api/v1/data-elements/suggestions/${path}`, { method: "POST", body: { items: [{ dataElement: s.dataElement, column: s.column }], note: note.value || null } });
+        say(`${path === "accept" ? "Bound" : "Rejected"}: ${s.name} in ${shortCol(s.column)}.`, "ok");
+        showCoverage();
+      } catch (e) { say(e.message, "error"); node.querySelectorAll("button").forEach((x) => { x.disabled = false; }); }
+    });
+    buttons.append(b);
+  }
+  answer.append(note, buttons);
+  node.append(answer);
+  return node;
+}
+
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures };
+const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -331,6 +435,8 @@ async function start() {
     document.querySelectorAll("[data-steward]").forEach((b) => { b.hidden = !state.steward; });
     document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => openTab(b.dataset.tab)));
     $("#facts-type").addEventListener("change", showFacts);
+    $("#cov-product").addEventListener("change", showCoverage);
+    $("#cov-critical").addEventListener("change", showCoverage);
     openTab("inbox");
     if (state.steward) api("/api/v1/attestations?limit=500").then((r) => { $("#facts-count").textContent = r.length || ""; }).catch(() => {});
   } catch (e) {

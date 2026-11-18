@@ -91,3 +91,11 @@ def test_inbox_is_the_signed_in_persons(client):
         f"{API}/decisions/inbox", params={"person": "LeeExample"}, headers=reader(email="dana@example.com")
     )
     assert r.status_code == 403
+
+
+def test_the_page_has_the_data_elements_tab(ctx):
+    client, _, _ = ctx
+    page = client.get("/steward/").text
+    assert 'data-tab="coverage"' in page and 'id="suggestions"' in page
+    js = client.get("/steward/app.js").text
+    assert "/api/v1/data-elements/coverage" in js and "/api/v1/data-elements/suggestions/" in js
