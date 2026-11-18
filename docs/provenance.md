@@ -109,7 +109,7 @@ Additions to `/api/v1` (existing endpoints unchanged):
 | `GET /{type}/{id}?asOf=2026-10-01` | The entity as it was believed on a date |
 | `POST /{type}/{id}/attestations` | Confirm or dispute: `{fields?, verdict, note?, role}`, as the signed-in person (who must fill `role`) |
 | `POST /{type}/{id}/corrections` | Steward correction: new values, recorded as a claim from the `steward` source and attested in the same step |
-| `GET /attestations?status=unconfirmed&type=&ownerRole=` | Review queue for the steward screen (Phase 1) |
+| `GET /attestations?status=unconfirmed&type=&ownerRole=` | Review queue, shown on the steward screen (`/steward`, Facts to confirm) |
 | `GET /authorities/{id}/confirmation` | Whether an agent may rely on an authority: every fact behind it attested and current (decision 3), with the reasons when not |
 | `GET /governance` | The rankings, steward-correction policy and cadence in force |
 | `POST /effective/rebuild` | Recompute the effective model, e.g. after valid-until dates pass |
