@@ -143,7 +143,25 @@ vmo:AIUseCase
 vmo:DataElement
     a owl:Class ;
     rdfs:label "Business data element" ;
-    skos:definition "A business-level data item, e.g. 'supplier bank account number'. Physical columns in the data catalog are bound to it with vm:represents." .
+    skos:definition "A business-level data item, e.g. 'supplier bank account number'. Physical columns in the data catalog are bound to it by column bindings." .
+
+vmo:ColumnBinding
+    a owl:Class ;
+    rdfs:label "Column binding" ;
+    skos:definition "A statement that a physical column in the data catalog (a DataHub schema field) holds a business data element. Kept per source like every other fact, so a binding from a steward, a spreadsheet or a catalog suggestion can be attested or disputed." .
+
+vmo:bindsElement
+    a owl:ObjectProperty ;
+    rdfs:label "binds element" ;
+    rdfs:domain vmo:ColumnBinding ;
+    rdfs:range vmo:DataElement .
+
+vmo:columnUrn
+    a owl:DatatypeProperty ;
+    rdfs:label "column URN" ;
+    rdfs:domain vmo:ColumnBinding ;
+    rdfs:range xsd:string ;
+    skos:definition "The DataHub URN of the column: urn:li:schemaField:(<dataset URN>,<field path>)." .
 
 # -----------------------------------------------------------------------------
 # Relationships

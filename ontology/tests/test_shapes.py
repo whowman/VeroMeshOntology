@@ -259,3 +259,29 @@ def test_an_approved_ai_use_case_review_date_and_actions_are_checked():
     ]
     assert "The review date comes before the approval date." in msgs
     assert any("is not one the covered agent" in m for m in msgs)
+
+
+def test_a_column_binding_needs_a_schema_field_urn():
+    msgs = [
+        m
+        for _, m in run(
+            """DELETE { ex:SupplierBankAccountInErp vmo:columnUrn ?c }
+               INSERT { ex:SupplierBankAccountInErp vmo:columnUrn "erp.lfbk.bankn" }
+               WHERE { ex:SupplierBankAccountInErp vmo:columnUrn ?c }"""
+        )
+    ]
+    assert any("schema field URN" in m for m in msgs)
+
+
+def test_a_column_bound_to_two_elements_is_flagged():
+    msgs = [
+        m
+        for _, m in run(
+            """INSERT DATA {
+                 ex:Other a vmo:DataElement ; rdfs:label "Other" .
+                 ex:Twice a vmo:ColumnBinding ; vmo:bindsElement ex:Other ;
+                   vmo:columnUrn "urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:sap,erp.lfbk,PROD),bankn)" .
+               }"""
+        )
+    ]
+    assert any("bound to more than one data element" in m for m in msgs)

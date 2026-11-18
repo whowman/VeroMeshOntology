@@ -82,6 +82,16 @@
       "422"
     ]
   },
+  "GET /api/v1/data-elements/coverage": {
+    "params": [
+      "criticalOnly? (query)",
+      "dataProduct? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/decisions": {
     "params": [
       "action? (query)",
@@ -247,6 +257,30 @@
     "params": [],
     "status": [
       "200"
+    ]
+  },
+  "POST /api/v1/catalog/columns": {
+    "body": {
+      "application/json": {
+        "anyOf": [
+          {
+            "ids?": {
+              "anyOf": [
+                {
+                  "array": "string"
+                },
+                "null"
+              ]
+            }
+          },
+          "null"
+        ]
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
     ]
   },
   "POST /api/v1/catalog/data-products": {

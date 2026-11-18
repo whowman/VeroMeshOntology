@@ -25,6 +25,7 @@ from . import (
     catalog,
     changesets,
     clock,
+    coverage,
     decide,
     decisions,
     entities,
@@ -459,6 +460,31 @@ def create_app(
         try:
             return catalog.publish_data_products(
                 s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/api/v1/catalog/columns", dependencies=need(auth.STEWARD), tags=["catalog"])
+    def catalog_publish_columns(s: Svc, c: Cfg, body: CatalogPublishIn | None = None) -> dict:
+        """Write each column binding onto its DataHub column, so the catalog shows the business
+        data element a column holds. `{"ids": [...]}` limits it to those data elements."""
+        try:
+            return catalog.publish_column_bindings(
+                s.store, c.instance_base, s.datahub, body.ids if body else None
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.get("/api/v1/data-elements/coverage", dependencies=need(auth.READ), tags=["governance"])
+    def data_element_coverage(
+        s: Svc, c: Cfg, dataProduct: str | None = None, criticalOnly: bool = False
+    ) -> dict:
+        """The data element inventory: for each element, whether it is defined, owned (owner and
+        steward roles), sourced, classified, bound to catalog columns and attested; totals for all
+        elements and for critical ones. `dataProduct` limits it to one product's elements."""
+        try:
+            return coverage.inventory(
+                s.store, c.instance_base, data_product=dataProduct, critical_only=criticalOnly
             )
         except LookupError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e

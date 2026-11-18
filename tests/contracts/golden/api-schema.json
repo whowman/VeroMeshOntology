@@ -1176,5 +1176,40 @@
     "keyed": true,
     "label": "Data elements",
     "type": "data-elements"
+  },
+  {
+    "fields": [
+      {
+        "help": "Optional; generated from the other fields when omitted.",
+        "key": "id",
+        "kind": "id",
+        "label": "ID",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "",
+        "key": "dataElement",
+        "kind": "ref",
+        "label": "Data element",
+        "multi": false,
+        "required": true,
+        "targets": [
+          "data-elements"
+        ]
+      },
+      {
+        "help": "DataHub column URN: urn:li:schemaField:(<dataset URN>,<field path>).",
+        "key": "column",
+        "kind": "text",
+        "label": "Column",
+        "multi": false,
+        "required": true
+      }
+    ],
+    "help": "Which physical columns in DataHub hold each business data element. One row per column.",
+    "keyed": false,
+    "label": "Column bindings",
+    "type": "column-bindings"
   }
 ]

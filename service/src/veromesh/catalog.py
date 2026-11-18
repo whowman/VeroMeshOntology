@@ -125,3 +125,53 @@ def publish_data_products(
         "summary": f"{len(published)} published, {len(not_in_catalog)} not found in the catalog, "
         f"{len(no_urn)} without a catalog URN",
     }
+
+
+# ---------------------------------------------------------------------------- columns
+
+ELEMENT_RELATION = "holdsDataElement"
+
+
+def publish_column_bindings(
+    store: RDFStore, base: str, datahub: DataHubPort, ids: list[str] | None = None
+) -> dict:
+    """Write each column binding onto its DataHub column (the veromeshOntologyBindings
+    aspect, relation 'holdsDataElement'), so the catalog shows which business data
+    element a column holds. Ontology-class bindings on the same column are kept;
+    the column's data element entries are replaced. ``ids``: only these data elements."""
+    from .datahub import Binding
+    from .entities import iri_for
+
+    elements = {e["id"]: e for e in changesets.list_entities(store, "data-elements", base)}
+    if ids is not None:
+        unknown = sorted(set(ids) - set(elements))
+        if unknown:
+            raise LookupError(f"No data element {', '.join(unknown)} in the model.")
+    by_column: dict[str, list[str]] = {}
+    for b in changesets.list_entities(store, "column-bindings", base):
+        if ids is not None and b.get("dataElement") not in ids:
+            continue
+        by_column.setdefault(b["column"], []).append(b["dataElement"])
+
+    published, failed = [], []
+    for column, els in sorted(by_column.items()):
+        try:
+            keep = [x for x in datahub.get_bindings(column) if x.relation != ELEMENT_RELATION]
+            mine = [
+                Binding(
+                    class_iri=str(iri_for(base, el)),
+                    ontology_iri="veromesh:data-elements",
+                    label=elements.get(el, {}).get("name") or el,
+                    relation=ELEMENT_RELATION,
+                )
+                for el in sorted(set(els))
+            ]
+            datahub.put_bindings(column, keep + mine)
+            published.append({"column": column, "dataElements": sorted(set(els))})
+        except Exception as exc:  # one bad column must not stop the rest
+            failed.append({"column": column, "problem": str(exc)})
+    return {
+        "published": published,
+        "failed": failed,
+        "summary": f"{len(published)} columns published, {len(failed)} failed",
+    }

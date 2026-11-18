@@ -200,6 +200,12 @@ ex:SupplierBankAccount
     vmo:dataCategory vmo:FinancialReportingData ;
     vmo:retention "P7Y"^^xsd:duration .
 
+# Where the supplier bank account number is held in the catalog.
+ex:SupplierBankAccountInErp
+    a vmo:ColumnBinding ;
+    vmo:bindsElement ex:SupplierBankAccount ;
+    vmo:columnUrn "urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:sap,erp.lfbk,PROD),bankn)" .
+
 ex:Erp
     a vmo:System ;
     rdfs:label "ERP" ;

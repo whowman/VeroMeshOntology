@@ -334,3 +334,32 @@ def test_data_product_context_reaches_the_catalog(api, gms, clean_source):
         assert props["veromesh.agents consuming it"] == "Invoice assistant"
     finally:
         graph.delete_entity(urn, hard=True)
+
+
+def test_column_bindings_reach_the_catalog(api, gms, clean_source):
+    """The data element a column holds appears on the column in DataHub."""
+    column = f"urn:li:schemaField:({DATASET},regtest_bank_account)"
+    _, ents = _prefixed_example(api)
+    items = [{"type": t, "op": "upsert", "entity": e} for t, es in ents.items() for e in es]
+    items.append(
+        {
+            "type": "column-bindings",
+            "op": "upsert",
+            "entity": {"dataElement": f"{PREFIX}SupplierBankAccount", "column": column},
+        }
+    )
+    cs = api.post("/api/v1/changesets", json={"source": SOURCE}).json()["id"]
+    api.post(f"/api/v1/changesets/{cs}/items", json={"items": items})
+    assert api.post(f"/api/v1/changesets/{cs}/commit").status_code == 200
+
+    r = api.post("/api/v1/catalog/columns", json={"ids": [f"{PREFIX}SupplierBankAccount"]})
+    assert r.status_code == 200 and not r.json()["failed"], r.text
+
+    def holds():
+        aspect = entity(gms, column).get("aspects", {}).get("veromeshOntologyBindings", {})
+        return [
+            b for b in aspect.get("value", {}).get("bindings", []) if b.get("relation") == "holdsDataElement"
+        ]
+
+    assert wait_until(holds), f"no data element on {column} in DataHub"
+    assert holds()[0]["label"] == "Supplier bank account number"
