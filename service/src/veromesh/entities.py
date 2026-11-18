@@ -443,6 +443,14 @@ SHEETS: tuple[Sheet, ...] = (
             Col("Sensitivity", "iri_enum", VMO.sensitivity, values=SENSITIVITY),
             Col("Data categories", "iri_enum", VMO.dataCategory, multi=True, values=DATA_CATEGORY),
             Col("Retention", "duration", VMO.retention, help="ISO 8601 duration, e.g. P7Y for seven years."),
+            Col(
+                "Catalog terms",
+                "text",
+                VMO.catalogTerm,
+                multi=True,
+                help="DataHub glossary term or tag URNs that mark this element's columns; "
+                "columns carrying them are suggested as bindings.",
+            ),
         ),
         help="Business-level data items. Physical columns in DataHub are bound to these.",
     ),

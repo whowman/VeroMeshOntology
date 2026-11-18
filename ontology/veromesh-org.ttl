@@ -505,6 +505,13 @@ vmo:jurisdiction
     rdfs:domain vmo:Regulation ;
     rdfs:range xsd:string .
 
+vmo:catalogTerm
+    a owl:DatatypeProperty ;
+    rdfs:label "catalog term" ;
+    rdfs:domain vmo:DataElement ;
+    rdfs:range xsd:string ;
+    skos:definition "The URN of a DataHub glossary term or tag that marks columns holding this element (often set by a classifier). Columns carrying it are suggested as bindings for a steward to confirm." .
+
 vmo:criticalDataElement
     a owl:DatatypeProperty ;
     rdfs:label "critical data element" ;

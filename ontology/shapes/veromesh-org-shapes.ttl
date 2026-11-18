@@ -408,6 +408,8 @@ vms:DataElementShape
     sh:property [ sh:path vmo:dataCategory ; sh:in ( vmo:PersonalData vmo:HealthData vmo:PaymentCardData vmo:FinancialReportingData ) ;
                   sh:message "Use a value from vmo:DataCategoryScheme (extension packs may add more)." ] ;
     sh:property [ sh:path vmo:retention ; sh:datatype xsd:duration ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:catalogTerm ; sh:pattern "^urn:li:(glossaryTerm|tag):.+$" ;
+                  sh:message "A catalog term is a DataHub glossary term or tag URN (urn:li:glossaryTerm:... or urn:li:tag:...)." ] ;
     sh:sparql [
         sh:message "A critical data element must have an owner, a steward and an authoritative source system." ;
         sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;

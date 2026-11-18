@@ -28,6 +28,7 @@ class FakeDataHub:
         self.terms: dict[str, dict] = {}
         self.asset_terms: dict[str, list[str]] = {}
         self.properties: dict[str, dict[str, str]] = {}
+        self.column_terms: dict[str, list[str]] = {}  # column URN -> term or tag URNs on it
 
     def get_bindings(self, urn: str) -> list[Binding]:
         return list(self.bindings.get(urn, []))
@@ -51,6 +52,15 @@ class FakeDataHub:
         current = [t for t in self.asset_terms.get(urn, []) if t not in remove]
         current += [t for t in add if t not in current]
         self.asset_terms[urn] = current
+
+    def columns_with_terms(self, terms: list[str]) -> list[dict]:
+        out = []
+        for col, have in sorted(self.column_terms.items()):
+            hit = sorted(set(have) & set(terms))
+            if hit:
+                ds, _, path = col[len("urn:li:schemaField:(") : -1].rpartition(",")
+                out.append({"column": col, "dataset": ds, "fieldPath": path, "terms": hit})
+        return out
 
     def set_custom_properties(self, urn: str, properties: dict[str, str], *, prefix: str) -> bool:
         if urn not in self.properties:  # tests register catalog entries in self.properties first

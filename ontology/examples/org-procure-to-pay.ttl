@@ -196,6 +196,7 @@ ex:SupplierBankAccount
     vmo:ownedBy ex:Controller ;
     vmo:steward ex:ApManager ;
     vmo:authoritativeSource ex:Erp ;
+    vmo:catalogTerm "urn:li:glossaryTerm:Classification.BankAccountNumber" ;
     vmo:sensitivity vmo:Restricted ;
     vmo:dataCategory vmo:FinancialReportingData ;
     vmo:retention "P7Y"^^xsd:duration .

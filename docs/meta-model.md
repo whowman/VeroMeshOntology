@@ -90,6 +90,7 @@ Four supporting types: **Impact** (attaches a materiality threshold to "action a
 | Sensitivity and data category use the controlled lists | Violation |
 | A column binding names one data element and a DataHub schema field URN | Violation |
 | A column is bound to more than one data element | Warning |
+| A data element's catalog terms are DataHub glossary term or tag URNs | Violation |
 | An approved AI use case names one approving board (a role), a status from the list and at least one agent; it allows only actions its agents perform; its review date is not before its approval date | Violation |
 | Every impact with a threshold is also listed under "affects" | Violation |
 | Whoever delegated an authority holds one covering the same actions (top-level grants come from a policy) | Warning |

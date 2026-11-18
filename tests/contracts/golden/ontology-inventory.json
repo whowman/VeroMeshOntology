@@ -200,6 +200,9 @@
           "severity": "sh:Warning"
         },
         {
+          "path": "vmo:catalogTerm"
+        },
+        {
           "path": "vmo:dataCategory"
         }
       ],
@@ -874,6 +877,15 @@
         "domain": [],
         "kind": "owl:ObjectProperty",
         "range": []
+      },
+      "vmo:catalogTerm": {
+        "domain": [
+          "vmo:DataElement"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
       },
       "vmo:catalogUrn": {
         "domain": [],

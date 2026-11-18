@@ -101,3 +101,59 @@ def test_columns_are_published_to_the_catalog(client, fake_datahub):  # noqa: F8
         "SupplierBankAccount"
     )
     assert client.post(f"{API}/catalog/columns", json={"ids": ["Nope"]}).status_code == 404
+
+
+# ---------------------------------------------------------------------------- suggestions
+
+TERM = "urn:li:glossaryTerm:Classification.BankAccountNumber"
+SUGGESTED = "urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:snowflake,pay.vendors,PROD),acct_no)"
+OTHER = "urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:snowflake,pay.vendors,PROD),vendor_name)"
+
+
+def test_columns_the_catalog_marks_are_suggested(client, fake_datahub):  # noqa: F811
+    fake_datahub.column_terms = {
+        COL: [TERM],  # already bound in the example: not suggested again
+        SUGGESTED: [TERM, "urn:li:tag:pii"],
+        OTHER: ["urn:li:tag:pii"],  # no data element names this tag
+    }
+    got = client.get(f"{API}/data-elements/suggestions").json()
+    assert got["elementsWithTerms"] == 1 and got["problems"] == []
+    assert [(x["dataElement"], x["column"], x["matched"]) for x in got["suggestions"]] == [
+        ("SupplierBankAccount", SUGGESTED, [TERM])
+    ]
+    assert got["suggestions"][0]["fieldPath"] == "acct_no"
+
+
+def test_accepting_binds_and_rejecting_hides(client, fake_datahub):  # noqa: F811
+    fake_datahub.column_terms = {SUGGESTED: [TERM], OTHER: [TERM]}
+    r = client.post(
+        f"{API}/data-elements/suggestions/accept",
+        json={"items": [{"dataElement": "SupplierBankAccount", "column": SUGGESTED}]},
+    )
+    assert r.status_code == 200, r.text
+    rows = client.get(f"{API}/column-bindings", params={"source": "catalog-suggestions"}).json()
+    assert [r["column"] for r in rows] == [SUGGESTED]
+    cov = client.get(f"{API}/data-elements/coverage").json()["elements"][0]
+    assert SUGGESTED in cov["columns"]
+
+    r = client.post(
+        f"{API}/data-elements/suggestions/reject",
+        json={"items": [{"dataElement": "SupplierBankAccount", "column": OTHER}], "note": "vendor name"},
+    )
+    assert r.status_code == 200, r.text
+    assert client.get(f"{API}/data-elements/suggestions").json()["suggestions"] == []
+    assert (
+        client.post(
+            f"{API}/data-elements/suggestions/accept", json={"items": [{"column": OTHER}]}
+        ).status_code
+        == 400
+    )
+
+
+def test_a_catalog_failure_is_reported_not_fatal(client, fake_datahub, monkeypatch):  # noqa: F811
+    def boom(terms):
+        raise RuntimeError("DataHub is not answering")
+
+    monkeypatch.setattr(fake_datahub, "columns_with_terms", boom)
+    got = client.get(f"{API}/data-elements/suggestions").json()
+    assert got["suggestions"] == [] and "not answering" in got["problems"][0]["problem"]

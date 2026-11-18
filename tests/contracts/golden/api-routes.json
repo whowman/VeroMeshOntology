@@ -92,6 +92,12 @@
       "422"
     ]
   },
+  "GET /api/v1/data-elements/suggestions": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/decisions": {
     "params": [
       "action? (query)",
@@ -374,6 +380,46 @@
     "params": [
       "cs (path)"
     ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/data-elements/suggestions/accept": {
+    "body": {
+      "application/json": {
+        "items": {
+          "array": "object"
+        },
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/data-elements/suggestions/reject": {
+    "body": {
+      "application/json": {
+        "items": {
+          "array": "object"
+        },
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [],
     "status": [
       "200",
       "422"

@@ -1170,6 +1170,14 @@
         "label": "Retention",
         "multi": false,
         "required": false
+      },
+      {
+        "help": "DataHub glossary term or tag URNs that mark this element's columns; columns carrying them are suggested as bindings.",
+        "key": "catalogTerms",
+        "kind": "text",
+        "label": "Catalog terms",
+        "multi": true,
+        "required": false
       }
     ],
     "help": "Business-level data items. Physical columns in DataHub are bound to these.",

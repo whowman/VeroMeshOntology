@@ -363,3 +363,65 @@ def test_column_bindings_reach_the_catalog(api, gms, clean_source):
 
     assert wait_until(holds), f"no data element on {column} in DataHub"
     assert holds()[0]["label"] == "Supplier bank account number"
+
+
+def test_catalog_marks_become_suggestions(api, gms, clean_source):
+    """A column DataHub marks with a data element's catalog term is suggested for binding."""
+    from datahub.emitter.mcp import MetadataChangeProposalWrapper
+    from datahub.ingestion.graph.client import DatahubClientConfig, DataHubGraph
+    from datahub.metadata.schema_classes import (
+        AuditStampClass,
+        GlossaryTermAssociationClass,
+        GlossaryTermsClass,
+        OtherSchemaClass,
+        SchemaFieldClass,
+        SchemaFieldDataTypeClass,
+        SchemaMetadataClass,
+        StringTypeClass,
+    )
+
+    term = "urn:li:glossaryTerm:regtest.BankAccountNumber"
+    ds = "urn:li:dataset:(urn:li:dataPlatform:snowflake,regtest.pay.vendors,PROD)"
+    token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None
+    graph = DataHubGraph(DatahubClientConfig(server=GMS, token=token))
+    stamp = AuditStampClass(time=0, actor="urn:li:corpuser:regtest")
+    graph.emit_mcp(
+        MetadataChangeProposalWrapper(
+            entityUrn=ds,
+            aspect=SchemaMetadataClass(
+                schemaName="vendors",
+                platform="urn:li:dataPlatform:snowflake",
+                version=0,
+                hash="",
+                platformSchema=OtherSchemaClass(rawSchema=""),
+                fields=[
+                    SchemaFieldClass(
+                        fieldPath="acct_no",
+                        type=SchemaFieldDataTypeClass(type=StringTypeClass()),
+                        nativeDataType="varchar",
+                        glossaryTerms=GlossaryTermsClass(
+                            terms=[GlossaryTermAssociationClass(urn=term)], auditStamp=stamp
+                        ),
+                    )
+                ],
+            ),
+        )
+    )
+    try:
+        _, ents = _prefixed_example(api)
+        for el in ents["data-elements"]:
+            if el["id"] == f"{PREFIX}SupplierBankAccount":
+                el["catalogTerms"] = [term]
+        items = [{"type": t, "op": "upsert", "entity": e} for t, es in ents.items() for e in es]
+        cs = api.post("/api/v1/changesets", json={"source": SOURCE}).json()["id"]
+        api.post(f"/api/v1/changesets/{cs}/items", json={"items": items})
+        assert api.post(f"/api/v1/changesets/{cs}/commit").status_code == 200
+
+        def mine():
+            got = api.get("/api/v1/data-elements/suggestions").json()
+            return [x for x in got["suggestions"] if x["dataset"] == ds]
+
+        assert wait_until(mine, seconds=90), "the marked column was not suggested"
+        assert mine()[0]["fieldPath"] == "acct_no" and mine()[0]["matched"] == [term]
+    finally:
+        graph.delete_entity(ds, hard=True)
