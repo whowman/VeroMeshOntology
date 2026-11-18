@@ -2,9 +2,17 @@
 
 The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
-- Load OWL ontologies into a SPARQL store (Apache Jena Fuseki)
-- Publish ontology classes to DataHub as glossary terms
-- Bind DataHub assets (datasets, columns, dashboards…) to ontology classes, visible in DataHub and queryable with SPARQL
+What it does today (main, 18 November 2026):
+
+- **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
+- **Kept true:** loaded from spreadsheets, CSV and connectors, one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
+- **Sign-in and need to know:** tokens from any OpenID Connect provider (Entra ID first), five roles, and answers that leave out personal details for callers not allowed them.
+- **The agent decision check:** before acting, an agent asks and gets allow, consult (named owners) or refuse, with reasons, decided from attested facts only. Every answer goes into an append-only, hash-chained decision log; people approve or reject, agents report outcomes, and the first measures come from the log. Over REST and MCP (`/mcp`, [docs/copilot-studio.md](docs/copilot-studio.md)).
+- **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions and measures.
+- **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
+- **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
+
+Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, the data element inventory, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
 
 DataHub runs **unmodified** from its official images; Veromesh extends it with a custom-model plugin and its APIs. See [docs/architecture.md](docs/architecture.md).
 

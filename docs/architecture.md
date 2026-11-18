@@ -1,20 +1,25 @@
 # Architecture
 
-Veromesh adds a formal ontology layer to DataHub without forking it.
+Veromesh adds the organizational ontology beside DataHub without forking it.
 
 ```
-                 ┌──────────────────────────────┐
-  users / apps → │   Veromesh service (FastAPI)  │ ← SPARQL, REST
-                 └───────┬──────────────┬───────┘
-                         │              │
-          SPARQL 1.1     │              │  DataHub SDK (REST / GraphQL)
-                         ▼              ▼
-             ┌──────────────────┐   ┌──────────────────────────────────┐
-             │ Jena Fuseki      │   │ DataHub v1.8.0 (unmodified)       │
-             │ ontologies +     │   │  GMS + frontend + actions         │
-             │ bindings graph   │   │  + veromesh-ontology-model plugin │
-             └──────────────────┘   │  Postgres · OpenSearch            │
-                                    └──────────────────────────────────┘
+  people (steward screen /steward)   agents (MCP /mcp)   connectors, spreadsheets
+                     │                      │                     │
+                     └──── OpenID Connect sign-in (Entra ID first, any provider) ───┘
+                                            ▼
+                 ┌────────────────────────────────────────────────┐
+                 │   Veromesh service (FastAPI)                    │
+                 │   model API · changesets · provenance           │
+                 │   decision check · follow-up · measures         │
+                 └──────┬──────────────────┬──────────────┬───────┘
+          SPARQL 1.1    │                  │ SQL          │  DataHub SDK
+                        ▼                  ▼              ▼
+          ┌───────────────────────┐ ┌──────────────┐ ┌──────────────────────────────────┐
+          │ Jena Fuseki           │ │ PostgreSQL   │ │ DataHub v1.8.0 (unmodified)       │
+          │ writer + read replicas│ │ decision log │ │  GMS + frontend + actions         │
+          │ (Kafka) · model,      │ │ (append-only,│ │  + veromesh-ontology-model plugin │
+          │ sources, bindings     │ │  hash chain) │ │  glossary · bindings · products   │
+          └───────────────────────┘ └──────────────┘ └──────────────────────────────────┘
 ```
 
 ## Responsibilities
@@ -25,6 +30,10 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 | Data assets, lineage, ownership, schemas | DataHub | That's what DataHub is for |
 | Business vocabulary for search and the UI | DataHub glossary (published from the ontology) | People find concepts where they already look |
 | Asset ↔ class bindings | Both: `https://veromesh.ai/graph/bindings` graph **and** DataHub (`veromeshOntologyBindings` aspect + `glossaryTerms`) | SPARQL can answer "all assets that hold any kind of Party"; DataHub shows the concept on the asset page |
+| The organizational model and where each fact came from | Fuseki: one named graph per source, an effective graph, attestations | Precedence between sources and owner attestation need per-source claims |
+| Decisions about agents' actions, overrides and outcomes | PostgreSQL, the service's own database (`veromesh_decision_log`) | Append-only with a hash chain; auditors need it tamper-evident |
+| Data products' organizational context in the catalog | DataHub data product custom properties (`veromesh.*`) | People see owner roles and consumers where they browse data |
+| Sign-in | The customer's OpenID Connect provider | No user store of our own; roles come from the token |
 
 ## The two ontology modes
 
@@ -42,4 +51,5 @@ Veromesh adds a formal ontology layer to DataHub without forking it.
 2. **Reasoning.** Add an OWL 2 RL materialization step (e.g. owlrl, W3C-licensed) or plug in a reasoner when ontologies need more than subclass closure.
 3. **Auth.** Done for the API: tokens from any OpenID Connect provider, Entra ID first, with five roles (`service/README.md`, "Sign-in"). Readers and agents get need-to-know answers: roles and limits, not personal details. Attestations and corrections are recorded as the signed-in person. An agent's sign-in is linked to its Agent in the model by its client ID (`GET /api/v1/me`). Decisions are recorded in an append-only, hash-chained log (`service/README.md`, "Decision log"). The decision check (`POST /api/v1/decisions/check`) answers allow, consult or refuse for an agent's action and writes to that log. Agents reach it through MCP at `/mcp` (docs/copilot-studio.md). People answer and overrule decisions, agents report outcomes, and the first measures come from the log (`service/README.md`, "After a decision"). People answer on the steward screen (`/steward`). Next: DataHub calls made as the caller rather than with a service token.
 4. **Ontology versioning.** Store `owl:versionInfo` on bindings and add a diff/impact endpoint ("which assets are affected if this class changes").
-5. **Production deploy.** DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with Fuseki replicated through Kafka (one writer, read replicas; see deploy/helm/README.md).
+5. **Production deploy.** Done as charts: DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with Fuseki replicated through Kafka (one writer, read replicas; see deploy/helm/README.md). Not yet installed anywhere but kind in CI and local Docker; the first cloud install (Azure, beside the assessment) is what the Copilot Studio test waits for (issue #19).
+6. **Enforcement.** The decision check is advisory: an agent could skip it. A gateway in front of target systems, and optionally refusing agents with no current approved AI use case, come next.
