@@ -309,9 +309,13 @@ restore() {
     else
       want="$(jq -r .decisionLog.entries "$m")"
       log "Decision log: restoring $want entries"
-      # Streamed, so the decrypted log never lands on disk.
-      decrypt "$dir/$file" | pg_restore --clean --if-exists --no-owner --no-privileges \
-        --single-transaction --exit-on-error -d "$DECISION_LOG_URL"
+      # Streamed, so the decrypted log never lands on disk; applied as SQL in one
+      # transaction. pg_dump 17 writes a setting older servers do not know
+      # (transaction_timeout), which is dropped so the log restores into them too.
+      decrypt "$dir/$file" \
+        | pg_restore --clean --if-exists --no-owner --no-privileges -f - \
+        | grep -v '^SET transaction_timeout' \
+        | PGOPTIONS='-c client_min_messages=warning' psql "$DECISION_LOG_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction >/dev/null
       have="$(log_state)"
       have="${have% *}"
       [ "$have" -ge "$want" ] || die "after the restore the decision log holds $have entries, the backup at least $want"
