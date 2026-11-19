@@ -24,6 +24,7 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | quick | `ontology` | `ontology/` | SHACL validation rules fire as intended; every Turtle file parses |
 | quick | `branding` | `branding/` | DataHub theme generator (palette mapping, contrast) and asset injector |
 | quick | `contracts` | interfaces | golden snapshots (below) |
+| quick | `perf` | the service's speed | a synthetic organization of about 200 people loads, and an edit, a decision check, a person lookup and reading all people stay within the budgets in `tests/perf/targets.json` |
 | quick | `licenses` | dependencies | no GPL / AGPL / SSPL / Elastic License package; report in the results folder |
 | quick | `helm` | `deploy/helm/` | the chart lints and renders for every value set in `ci/`; bad values are refused by the schema; services, selectors and the Fuseki NetworkPolicy line up; backups need the customer's key and go where they are told; with the mesh on, every pod is enrolled, Fuseki takes mutual TLS from the service's and backup job's identities only, and the NetworkPolicy lets the mesh through; every container runs unprivileged with limits; manifests pass Kubernetes schemas (kubeconform); the DataHub overlays render against DataHub's official charts at the pinned versions and load the plugin, brand and PostgreSQL |
 | quick | `scripts`, `compose` | `scripts/`, `deploy/` | shell scripts parse; compose file is valid |
@@ -42,6 +43,27 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 `scripts/test.sh --list` prints the same table from the registry. You can run one suite or one component by name: `scripts/test.sh connectors`, `scripts/test.sh fuseki`, `scripts/test.sh stack`.
 
 The e2e suites work against your development stack. Everything they create is named `regtest`, and they remove it afterwards, so your own sources are left alone.
+
+## Performance
+
+`tests/perf/bench.py` builds a synthetic organization (copies of the worked example, one per domain, plus people filling its roles) and times what users and agents do: load it one domain at a time, edit one fact, read all people, find a person, ask the decision check, and read straight after an edit.
+
+```bash
+PYTHONPATH=service/src python tests/perf/bench.py --size small      # smoke, small, medium, large
+PYTHONPATH=service/src python tests/perf/bench.py --size smoke --check
+PYTHONPATH=service/src python tests/perf/bench.py --domains 20 --people 500 --store fuseki:http://localhost:3030/veromesh
+```
+
+CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are tightened as the work lands so it cannot slip back. `goals` are what each size must reach; `baseline` and `measured` record before and after. On the in-memory store:
+
+| Size | People | Edit one fact | Decision check | Read all people | Find a person |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small, before | 2,020 | 13.1 s | 1.82 s | 300 ms | 100 ms |
+| Small | 2,020 | 53 ms | 3 ms | 3 ms | 1 ms |
+| Medium | 20,080 | 25 ms | 4 ms | 18 ms | 11 ms |
+| Large | 100,200 | 40 ms | 143 ms, before shared entity lists | 118 ms | 49 ms |
+
+Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 
 ## Contract snapshots
 

@@ -49,6 +49,16 @@ Veromesh adds the organizational ontology beside DataHub without forking it.
 
 `datahub-model/` defines `veromeshOntologyBindings` (on datasets, schema fields, dashboards, charts and containers). It records class IRI, ontology IRI and version, which glossary terms alone can't carry. It's built as a DataHub custom-model plugin and mounted into GMS from `~/.datahub/plugins/models/` (or a ConfigMap on Kubernetes); see DataHub's `metadata-models-custom` docs.
 
+## Performance
+
+An edit, a decision check or a read takes time that depends on what it touches, not on the size of the model (`docs/testing.md`, "Performance", for the numbers):
+
+- **Validation** checks only the nodes a change can affect: those within three links of a changed triple (any depth along capability nesting), plus the other holders of values that must be unique. The RDFS entailments the shapes need are computed directly, and each SPARQL constraint is parsed once.
+- **Changesets** that upsert in merge mode are planned from the entities they touch (`service/src/veromesh/incremental.py`). They re-resolve only those entities, validate the exact change, and write the difference to the source graph, the claims and the effective model. Replace loads, deletes and anything the fast path cannot show to be equivalent take the full path.
+- **Reads** are kept in memory until the model changes. Every write records a model version in the store, so a write by another replica is seen at once. A commit writes the version once, by compare-and-swap, and carries its state and the readers' lists forward only when nobody else wrote in between.
+
+Bulk loads are still slow: adding a domain of 1,000 new people to 100,000 takes 26 s. SHACL on the new entities is about 5 ms each, and part of the rest grows with the model; that is the next piece of work.
+
 ## Next steps
 
 1. **DataHub → Veromesh events.** Subscribe to DataHub's change stream (DataHub Actions framework, Apache-2.0) to keep bindings in sync when someone edits glossary terms in the DataHub UI, and to remove bindings for deleted assets.
