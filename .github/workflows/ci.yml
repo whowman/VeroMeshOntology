@@ -68,6 +68,27 @@ jobs:
           name: results-k8s
           path: .build/test-results/
 
+  k8s-mesh:
+    # Encryption in transit: OpenBao, cert-manager, istio-csr and Istio ambient in
+    # a kind cluster, with the chart in the mesh (tests/k8s/mesh_smoke.sh).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind (pinned in deploy/versions.env)
+        run: |
+          source deploy/versions.env
+          base="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION"
+          curl -fsSLo kind "$base/kind-linux-amd64"
+          echo "$(curl -fsSL "$base/kind-linux-amd64.sha256sum" | cut -d' ' -f1)  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+      - run: scripts/test.sh k8s-mesh --strict -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-k8s-mesh
+          path: .build/test-results/
+
   datahub-model:
     # Compiles the custom aspect inside DataHub's Gradle build at the pinned tag.
     runs-on: ubuntu-latest

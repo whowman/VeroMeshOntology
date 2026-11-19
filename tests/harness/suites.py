@@ -133,7 +133,7 @@ SUITES: list[Suite] = [
         where="host",
         description="Shell scripts parse (bash -n)",
         steps=(
-            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh tests/backup/*.sh branding/datahub/*.sh deploy/helm/*.sh deploy/fuseki/*.sh deploy/backup/*.sh; do bash -n "$f" || exit 1; done',
+            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh tests/backup/*.sh branding/datahub/*.sh deploy/helm/*.sh deploy/fuseki/*.sh deploy/backup/*.sh deploy/mesh/*.sh; do bash -n "$f" || exit 1; done',
         ),
     ),
     Suite(
@@ -234,6 +234,15 @@ SUITES: list[Suite] = [
         needs=frozenset({"docker", "kind"}),
         description="Helm chart in a throwaway kind cluster with Kafka and PostgreSQL: helm test, example load, replicas match the writer, reads while the writer restarts, replica rebuild, NetworkPolicy, encrypted backup and restore",
         steps=("tests/k8s/kind_smoke.sh {results}",),
+    ),
+    Suite(
+        name="k8s-mesh",
+        component="deploy",
+        tier="integration",
+        where="host",
+        needs=frozenset({"docker", "kind"}),
+        description="Encryption in transit in kind: OpenBao as the CA, cert-manager and istio-csr, Istio ambient; mutual TLS only, Fuseki by identity, backups through the mesh (needs internet)",
+        steps=("tests/k8s/mesh_smoke.sh {results}",),
     ),
     # ------------------------------------------------------------------ build
     Suite(

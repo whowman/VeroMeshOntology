@@ -1,0 +1,10 @@
+# istiod (chart istio/istiod) in ambient mode, without its own CA: certificates
+# come from istio-csr, so OpenBao is the only CA in the mesh.
+profile: ambient
+global:
+  caAddress: cert-manager-istio-csr.cert-manager.svc:443
+pilot:
+  env:
+    ENABLE_CA_SERVER: "false"
+meshConfig:
+  trustDomain: cluster.local

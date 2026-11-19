@@ -1,0 +1,2 @@
+# Istio CNI node agent (chart istio/cni): sends each enrolled pod's traffic through ztunnel.
+profile: ambient

@@ -1,0 +1,61 @@
+# cert-manager's Issuer for the mesh: certificates signed by the customer's OpenBao
+# (deploy/mesh/openbao-pki.sh sets OpenBao up). istio-csr asks this Issuer for every
+# workload certificate and for istiod's own.
+#
+# Before applying: set spec.vault.server to the customer's OpenBao, and create the
+# Secret openbao-ca (key ca.crt) with the CA of OpenBao's own TLS certificate.
+#   kubectl create namespace istio-system
+#   kubectl -n istio-system create secret generic openbao-ca --from-file=ca.crt=openbao-tls-ca.pem
+#   kubectl apply -f deploy/mesh/openbao-issuer.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-issuer
+  namespace: istio-system
+automountServiceAccountToken: false
+---
+# cert-manager signs in to OpenBao as this service account (a short-lived token,
+# audience vault://istio-system/openbao-mesh); it may create tokens for it and no other.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-issuer-token
+  namespace: istio-system
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["openbao-issuer"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-issuer-token
+  namespace: istio-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-issuer-token
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager
+    namespace: cert-manager
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: openbao-mesh
+  namespace: istio-system
+spec:
+  vault:
+    server: https://openbao.openbao.svc:8200
+    path: pki_mesh/sign/istio
+    caBundleSecretRef:
+      name: openbao-ca
+      key: ca.crt
+    auth:
+      kubernetes:
+        role: cert-manager-mesh
+        mountPath: /v1/auth/kubernetes
+        serviceAccountRef:
+          name: openbao-issuer
