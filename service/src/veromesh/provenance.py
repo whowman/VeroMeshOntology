@@ -440,7 +440,7 @@ def record_source(
                 WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{ <{iri}> <{VMP.observedAt}> ?o }} }}"""
         )
     if len(g):
-        store.load_turtle(g.serialize(format="turtle"), CLAIMS_GRAPH, replace=False)
+        store.load_turtle(g.serialize(format="nt"), CLAIMS_GRAPH, replace=False)
     return {"added": added, "superseded": len(supersede), "unchanged": unchanged}
 
 
@@ -525,7 +525,7 @@ def write_attestation(
         g.add((s, VMP.expiresAt, Literal(expires, datatype=XSD.dateTime)))
     if note:
         g.add((s, VMP.note, Literal(note)))
-    store.load_turtle(g.serialize(format="turtle"), ATTESTATIONS_GRAPH, replace=False)
+    store.load_turtle(g.serialize(format="nt"), ATTESTATIONS_GRAPH, replace=False)
     return a
 
 
@@ -619,7 +619,7 @@ def to_graph(resolved: dict[tuple[str, str], Resolved], base: str) -> tuple[Grap
 
 
 def store_effective(store: RDFStore, graph: Graph) -> None:
-    store.load_turtle(graph.serialize(format="turtle"), EFFECTIVE_GRAPH)
+    store.load_turtle(graph.serialize(format="nt"), EFFECTIVE_GRAPH)
 
 
 def effective_graph(store: RDFStore) -> Graph:

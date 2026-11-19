@@ -36,16 +36,15 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 
-from pyshacl import validate as shacl_validate
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
 from . import entities as E
 from . import provenance as P
+from . import validation
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -424,7 +423,7 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
                 f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
                     WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
             )
-        store.load_turtle(g.serialize(format="turtle"), _items_graph(cs), replace=False)
+        store.load_turtle(g.serialize(format="nt"), _items_graph(cs), replace=False)
     _set_status(store, cs, "open")
     return get(store, cs, with_report=False)
 
@@ -457,29 +456,8 @@ def discard(store: RDFStore, cs: str) -> dict:
 # --------------------------------------------------------------------------- validation
 
 
-@lru_cache(maxsize=4)
-def _model(ontology_dir: str) -> tuple[Graph, Graph]:
-    root = Path(ontology_dir)
-    ont = Graph().parse(root / "veromesh-core.ttl").parse(root / "veromesh-org.ttl")
-    shapes = Graph().parse(root / "shapes" / "veromesh-org-shapes.ttl")
-    return ont, shapes
-
-
-def _shacl(data: Graph, ontology_dir: str) -> list[tuple[str, object, str]]:
-    ont, shapes = _model(ontology_dir)
-    _, results, _ = shacl_validate(
-        data, shacl_graph=shapes, ont_graph=ont, inference="rdfs", advanced=True, allow_warnings=True
-    )
-    out = []
-    for r in results.subjects(SH.resultSeverity, None):
-        out.append(
-            (
-                str(results.value(r, SH.resultSeverity)).split("#")[-1],
-                results.value(r, SH.focusNode),
-                str(results.value(r, SH.resultMessage) or "Validation rule failed."),
-            )
-        )
-    return out
+def _shacl(data: Graph, ontology_dir: str, focus=None) -> list[tuple[str, object, str]]:
+    return validation.validate(data, ontology_dir, focus)
 
 
 def _tidy(message: str, base: str) -> str:
@@ -662,8 +640,13 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
         return _Plan(target, errors, report)
 
     before, _, _ = _effective({**graphs, target_iri: current}, base, stored=stored, atts=atts, cats=cats)
-    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir)}
     touched = {E.iri_for(base, it.id) for it in upserts}
+    # Validate only what this change can affect (validation.affected), unless told to
+    # validate everything. Same verdict either way; the tests check that they agree.
+    focus = None
+    if not validation.full_validation():
+        focus = validation.affected([before, after], validation.changed_nodes(before, after) | touched)
+    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir, focus)}
 
     def describe(sev: str, focus, message: str) -> dict:
         types = E.types_of(after, focus) if isinstance(focus, URIRef) else []
@@ -674,12 +657,15 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
             "severity": sev,
         }
 
-    for sev, focus, message in _shacl(after, ontology_dir):
-        if sev == "Violation" and (sev, str(focus), message) not in before_findings:
-            report["violations"].append(describe(sev, focus, message))
-        elif sev != "Violation" and focus in touched:
-            report["warnings"].append(describe(sev, focus, message))
+    for sev, node, message in _shacl(after, ontology_dir, focus):
+        if sev == "Violation" and (sev, str(node), message) not in before_findings:
+            report["violations"].append(describe(sev, node, message))
+        elif sev != "Violation" and node in touched:
+            report["warnings"].append(describe(sev, node, message))
+    # Violations that were already there, among the entities this change could affect
+    # (the whole model under full validation).
     report["preexistingViolations"] = sum(1 for sev, _, _ in before_findings if sev == "Violation")
+    report["validated"] = "all" if focus is None else len(focus)
     for k in ("violations", "warnings"):
         report[k].sort(key=lambda f: (f["type"] or "", f["id"], f["message"]))
         report["summary"][k] = len(report[k])
@@ -732,7 +718,7 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
     store.load_turtle((root / "veromesh-core.ttl").read_text(), CORE_GRAPH)
     store.load_turtle((root / "veromesh-org.ttl").read_text(), ORG_GRAPH)
     graph_iri = source_graph(meta["source"])
-    store.load_turtle(plan.target.serialize(format="turtle"), graph_iri)
+    store.load_turtle(plan.target.serialize(format="nt"), graph_iri)
     at = now()
     file_triple = f"; dcterms:source {literal(meta['file'])}" if meta.get("file") else ""
     store.update(
