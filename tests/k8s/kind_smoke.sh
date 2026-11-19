@@ -50,6 +50,8 @@ cleanup() {
     for p in $(k get pods -o name 2>/dev/null); do
       echo "---- $p" >>"$RESULTS/k8s-logs.txt"; k logs "$p" --all-containers >>"$RESULTS/k8s-logs.txt" 2>&1 || true
     done
+    echo "!! The service's log (last 40 lines):" >&2
+    k logs deployment/"$RELEASE"-api --tail 40 >&2 || true
     echo "!! Pod descriptions and logs: $RESULTS/k8s-describe.txt, $RESULTS/k8s-logs.txt" >&2
   fi
   rm -f "$KEY"
