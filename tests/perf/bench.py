@@ -91,6 +91,14 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
             require_attested=False,
         )
 
+    def cold(fn):
+        """Median time of fn right after an edit, when nothing read from the model is cached."""
+        times = []
+        for _ in range(repeat):
+            edit()
+            times.append(timed(fn)[0])
+        return statistics.median(times)
+
     results = {
         "load_total_s": sum(load_times),
         "load_last_domain_s": load_times[-1],
@@ -100,6 +108,8 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
             0
         ],
         "check_s": timed(check, repeat)[0],
+        "check_after_edit_s": cold(check),
+        "read_people_after_edit_s": cold(lambda: changesets.list_entities(store, "people", BASE)),
         "coverage_s": timed(lambda: coverage.inventory(store, BASE), repeat)[0],
     }
     outcome = check()["outcome"]
@@ -121,7 +131,7 @@ def report(r: dict) -> str:
         f"({r['domains']} domains, store: {r['store']})",
     ]
     for k, v in r["timings"].items():
-        lines.append(f"  {k:<20} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<20} {v:>10.2f} s")
+        lines.append(f"  {k:<26} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<26} {v:>10.2f} s")
     return "\n".join(lines)
 
 

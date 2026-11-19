@@ -45,6 +45,7 @@ from rdflib.namespace import XSD
 from . import entities as E
 from . import provenance as P
 from . import validation
+from .modelcache import cached
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -106,7 +107,12 @@ def _term(b: dict):
 
 
 def read_sources(store: RDFStore) -> dict[str, Graph]:
-    """All source graphs, keyed by graph IRI."""
+    """All source graphs, keyed by graph IRI. The graphs are shared until the model
+    changes: read them, or copy before changing one."""
+    return dict(cached(store, "sources", lambda: _read_sources(store)))
+
+
+def _read_sources(store: RDFStore) -> dict[str, Graph]:
     res = store.query(
         f"""SELECT ?g ?s ?p ?o WHERE {{ GRAPH ?g {{ ?s ?p ?o }}
             FILTER(STRSTARTS(STR(?g), "{SOURCE_GRAPH_BASE}")) }}"""
@@ -127,8 +133,17 @@ def model_graph(store: RDFStore, source: str | None = None, *, base: str = "") -
 
 def list_entities(store: RDFStore, type_: str, base: str, source: str | None = None) -> list[dict]:
     E.check_type(type_)
-    g = model_graph(store, source, base=base)
-    return [E.to_entity(g, s, type_, base) for s in E.subjects_of_type(g, type_)]
+
+    def compute():
+        g = model_graph(store, source, base=base)
+        return [E.to_entity(g, s, type_, base) for s in E.subjects_of_type(g, type_)]
+
+    # Copies, so a caller changing one cannot change what the next caller gets.
+    return [_copy(e) for e in cached(store, ("entities", type_, base, source), compute)]
+
+
+def _copy(entity: dict) -> dict:
+    return {k: list(v) if isinstance(v, list) else v for k, v in entity.items()}
 
 
 def get_entity(store: RDFStore, type_: str, rid: str, base: str, as_of: str | None = None) -> dict:

@@ -29,6 +29,7 @@ from rdflib.namespace import RDF, XSD
 
 from . import clock
 from . import entities as E
+from .modelcache import cached
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -262,6 +263,10 @@ class Resolved:
 
 
 def categories(store: RDFStore) -> dict[str, str]:
+    return dict(cached(store, "categories", lambda: _categories(store)))
+
+
+def _categories(store: RDFStore) -> dict[str, str]:
     res = store.query(
         f"""SELECT ?name ?cat WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
               ?s <{VMP.name}> ?name ; <{VMP.category}> ?cat }} }}"""
@@ -367,6 +372,12 @@ def read_claims(
         where += f" FILTER(?src = {literal(source)})"
     if entity:
         where += f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})"
+    if current and not source and not entity:
+        return list(cached(store, "claims", lambda: _read_claims(store, where)))
+    return _read_claims(store, where)
+
+
+def _read_claims(store: RDFStore, where: str) -> list[Claim]:
     cats = categories(store)
     out = _claim_rows(store, where)
     for c in out:
@@ -448,6 +459,12 @@ def record_source(
 
 
 def read_attestations(store: RDFStore, entity: tuple[str, str] | None = None) -> list[Attestation]:
+    if entity is None:
+        return list(cached(store, "attestations", lambda: _read_attestations(store, None)))
+    return _read_attestations(store, entity)
+
+
+def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[Attestation]:
     where = f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})" if entity else ""
     res = store.query(
         f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
@@ -623,6 +640,11 @@ def store_effective(store: RDFStore, graph: Graph) -> None:
 
 
 def effective_graph(store: RDFStore) -> Graph:
+    """The effective model (read-only: the same Graph is shared until the model changes)."""
+    return cached(store, "effective", lambda: _effective_graph(store))
+
+
+def _effective_graph(store: RDFStore) -> Graph:
     from .changesets import _term
 
     res = store.query(f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
@@ -800,8 +822,13 @@ def review_queue(
 
 
 def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Attestation]]:
-    atts = read_attestations(store)
-    return resolve(read_claims(store), atts), atts
+    """What VeroMesh believes today (shared and read-only until the model or the day changes)."""
+
+    def compute():
+        atts = read_attestations(store)
+        return resolve(read_claims(store), atts), atts
+
+    return cached(store, ("current", clock.today()), compute)
 
 
 def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case: bool = False) -> list[str]:
