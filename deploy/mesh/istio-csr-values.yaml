@@ -1,0 +1,24 @@
+# istio-csr (cert-manager's Istio agent), chart jetstack/cert-manager-istio-csr:
+# takes Istio's certificate requests (istiod's, ztunnel's for each workload) and
+# has them signed through the openbao-mesh Issuer.
+app:
+  certmanager:
+    namespace: istio-system
+    issuer:
+      name: openbao-mesh
+      kind: Issuer
+      group: cert-manager.io
+  tls:
+    trustDomain: cluster.local
+    # The trust anchor, from a Secret, not from whatever the issuer returns.
+    rootCAFile: /var/run/secrets/istio-csr/ca.pem
+  server:
+    # Ambient mode: ztunnel requests certificates on behalf of the pods on its node.
+    caTrustedNodeAccounts: istio-system/ztunnel
+volumeMounts:
+  - name: root-ca
+    mountPath: /var/run/secrets/istio-csr
+volumes:
+  - name: root-ca
+    secret:
+      secretName: istio-root-ca

@@ -7,3 +7,9 @@ fuseki:
     enabled: false
 networkPolicy:
   enabled: false
+backup:
+  volume:
+    existingClaim: veromesh-backups
+  encryption:
+    # Development only: backups in the clear.
+    enabled: false

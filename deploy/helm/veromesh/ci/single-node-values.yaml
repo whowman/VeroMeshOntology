@@ -3,3 +3,9 @@
 fuseki:
   replication:
     enabled: false
+backup:
+  volume:
+    existingClaim: veromesh-backups
+  encryption:
+    # A test key; nobody holds its private key.
+    recipients: [age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9]

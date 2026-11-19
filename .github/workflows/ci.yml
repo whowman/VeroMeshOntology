@@ -35,11 +35,11 @@ jobs:
 
   integration:
     # Service and connector suites on a real Fuseki; container images; the
-    # Fuseki writer module's own tests.
+    # Fuseki writer module's own tests; backup and restore on a real Fuseki and PostgreSQL.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test.sh fuseki-replication fuseki decision-log images datahub-frontend --strict
+      - run: scripts/test.sh fuseki-replication fuseki decision-log backup images datahub-frontend --strict
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -66,6 +66,27 @@ jobs:
         if: always()
         with:
           name: results-k8s
+          path: .build/test-results/
+
+  k8s-mesh:
+    # Encryption in transit: OpenBao, cert-manager, istio-csr and Istio ambient in
+    # a kind cluster, with the chart in the mesh (tests/k8s/mesh_smoke.sh).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind (pinned in deploy/versions.env)
+        run: |
+          source deploy/versions.env
+          base="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION"
+          curl -fsSLo kind "$base/kind-linux-amd64"
+          echo "$(curl -fsSL "$base/kind-linux-amd64.sha256sum" | cut -d' ' -f1)  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+      - run: scripts/test.sh k8s-mesh --strict -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-k8s-mesh
           path: .build/test-results/
 
   datahub-model:

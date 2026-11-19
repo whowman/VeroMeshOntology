@@ -1,0 +1,191 @@
+{{- if include "veromesh.backupEnabled" . }}
+{{- $b := .Values.backup -}}
+{{- $name := include "veromesh.backupName" . -}}
+{{- $remote := ne $b.rclone.existingSecret "" -}}
+{{- if and $b.encryption.enabled (not $b.encryption.recipients) }}
+{{- fail "backup.encryption.recipients is required: the customer's public key(s), from `age-keygen` (age1...) or SSH. Backups hold people's names; set backup.encryption.enabled=false only for development." }}
+{{- end }}
+{{- if not (or $remote $b.volume.existingClaim) }}
+{{- fail "backups need somewhere to go: backup.rclone.existingSecret and backup.rclone.remote (object storage, for production), or backup.volume.existingClaim (a PersistentVolumeClaim you create; not off-site)" }}
+{{- end }}
+{{- if and $remote (not $b.rclone.remote) }}
+{{- fail "backup.rclone.remote is required with backup.rclone.existingSecret, e.g. azure:veromesh-backups/prod" }}
+{{- end }}
+{{- if and (eq $b.graphFrom "replicas") (not (include "veromesh.replicated" .)) }}
+{{- fail "backup.graphFrom=replicas needs fuseki.replication.enabled" }}
+{{- end }}
+# Backups of the knowledge graph and the decision log (deploy/backup/veromesh-backup.sh).
+# Its own service account: no Kubernetes API access, and its own identity in the mesh.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+automountServiceAccountToken: false
+---
+{{- if $b.encryption.enabled }}
+# Public keys only: what the backups are encrypted to. The private keys stay with the customer.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-recipients
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+data:
+  recipients: |
+    {{- range $b.encryption.recipients }}
+    {{ . }}
+    {{- end }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ $b.schedule | quote }}
+  timeZone: {{ .Values.api.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  # A backup missed by more than an hour (cluster down) waits for the next night.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "veromesh.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backup
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 21600
+      template:
+        metadata:
+          labels:
+            {{- include "veromesh.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+            {{- if .Values.mesh.enabled }}
+            istio.io/dataplane-mode: ambient
+            {{- end }}
+          {{- with $b.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10003
+            runAsGroup: 10003
+            fsGroup: 10003
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+              imagePullPolicy: {{ $b.image.pullPolicy }}
+              args: ["backup"]
+              env:
+                {{- if .Values.fuseki.enabled }}
+                - name: FUSEKI_URL
+                  value: {{ include "veromesh.backupGraphUrl" . | quote }}
+                # A restore always writes through the writer.
+                - name: FUSEKI_WRITER_URL
+                  value: "http://{{ include "veromesh.fusekiName" . }}:3030/{{ .Values.fuseki.dataset }}"
+                {{- end }}
+                {{- with .Values.api.decisionLog.existingSecret }}
+                - name: DECISION_LOG_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ . }}
+                      key: {{ $.Values.api.decisionLog.key }}
+                {{- end }}
+                - name: BACKUP_TARGET
+                  value: {{ ternary $b.rclone.remote "/backups" $remote | quote }}
+                {{- if $remote }}
+                - name: RCLONE_CONFIG
+                  value: /etc/rclone/rclone.conf
+                {{- end }}
+                - name: BACKUP_KEEP
+                  value: {{ $b.keep | quote }}
+                - name: BACKUP_ENCRYPT
+                  value: {{ $b.encryption.enabled | quote }}
+                {{- if $b.encryption.enabled }}
+                - name: AGE_RECIPIENTS_FILE
+                  value: /etc/veromesh-backup/recipients
+                {{- end }}
+                - name: BACKUP_RELEASE
+                  value: {{ .Release.Name | quote }}
+                - name: BACKUP_CHART
+                  value: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+                - name: BACKUP_APP_VERSION
+                  value: {{ .Chart.AppVersion | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+                {{- if $b.encryption.enabled }}
+                - name: recipients
+                  mountPath: /etc/veromesh-backup
+                  readOnly: true
+                {{- end }}
+                {{- if $remote }}
+                - name: rclone
+                  mountPath: /etc/rclone
+                  readOnly: true
+                {{- else }}
+                - name: backups
+                  mountPath: /backups
+                {{- end }}
+              resources:
+                {{- toYaml $b.resources | nindent 16 }}
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: {{ $b.workSize | quote }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            {{- if $b.encryption.enabled }}
+            - name: recipients
+              configMap:
+                name: {{ $name }}-recipients
+            {{- end }}
+            {{- if $remote }}
+            - name: rclone
+              secret:
+                secretName: {{ $b.rclone.existingSecret }}
+                items:
+                  - key: rclone.conf
+                    path: rclone.conf
+            {{- else }}
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ $b.volume.existingClaim }}
+            {{- end }}
+          {{- with $b.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $b.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

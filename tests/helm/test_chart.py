@@ -30,6 +30,17 @@ KUBE_VERSION = "1.30.0"
 
 pytestmark = pytest.mark.skipif(not shutil.which("helm"), reason="Helm is not on PATH")
 
+# Every install must name the customer's backup key (backup.encryption.recipients)
+# and where backups go. "Defaults" below means the chart's defaults plus this test
+# key, whose private key nobody holds, and a volume claim.
+TEST_KEY = "age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9"
+WITH_KEY = (
+    "--set",
+    f"backup.encryption.recipients={{{TEST_KEY}}}",
+    "--set",
+    "backup.volume.existingClaim=veromesh-backups",
+)
+
 
 def versions() -> dict[str, str]:
     return dict(
@@ -54,6 +65,8 @@ def render(
     *values: str, sets: tuple[str, ...] = (), chart: Path | str = CHART, name: str = "veromesh"
 ) -> list[dict]:
     args = ["template", name, str(chart), "--namespace", "veromesh", "--kube-version", KUBE_VERSION]
+    if not values and chart == CHART:
+        args += WITH_KEY
     for v in values:
         args += ["-f", str(v if Path(v).is_absolute() else CI / v)]
     for s in sets:
@@ -72,6 +85,12 @@ def one(docs: list[dict], kind: str, name: str | None = None) -> dict:
         f"expected one {kind} {name or ''}, found {[d['metadata']['name'] for d in found]}"
     )
     return found[0]
+
+
+def fuseki_cm(docs: list[dict]) -> dict:
+    """The Fuseki configuration (writer.ttl, replica.ttl)."""
+    (cm,) = [d for d in by_kind(docs, "ConfigMap") if d["metadata"]["name"].endswith("-fuseki-config")]
+    return cm
 
 
 def env_of(container: dict) -> dict[str, dict]:
@@ -103,6 +122,10 @@ def pod_specs(docs: list[dict]) -> list[tuple[str, dict]]:
     for d in docs:
         if d["kind"] in ("Deployment", "StatefulSet"):
             out.append((f"{d['kind']}/{d['metadata']['name']}", d["spec"]["template"]["spec"]))
+        elif d["kind"] == "CronJob":
+            out.append(
+                (f"CronJob/{d['metadata']['name']}", d["spec"]["jobTemplate"]["spec"]["template"]["spec"])
+            )
         elif d["kind"] == "Pod":
             out.append((f"Pod/{d['metadata']['name']}", d["spec"]))
     return out
@@ -117,8 +140,7 @@ VARIANTS = sorted(p.name for p in CI.glob("*.yaml"))
 @pytest.mark.parametrize("variant", ["(defaults)", *VARIANTS])
 def test_lint(variant):
     args = ["lint", str(CHART), "--strict", "--kube-version", KUBE_VERSION]
-    if variant != "(defaults)":
-        args += ["-f", str(CI / variant)]
+    args += WITH_KEY if variant == "(defaults)" else ["-f", str(CI / variant)]
     helm(*args)
 
 
@@ -157,7 +179,9 @@ def test_default_install_resources():
     docs = render()
     kinds = sorted(f"{d['kind']}/{d['metadata']['name']}" for d in docs)
     assert kinds == [
+        "ConfigMap/veromesh-backup-recipients",
         "ConfigMap/veromesh-fuseki-config",
+        "CronJob/veromesh-backup",
         "Deployment/veromesh-api",
         "NetworkPolicy/veromesh-fuseki",
         "Pod/veromesh-test",
@@ -168,6 +192,7 @@ def test_default_install_resources():
         "Service/veromesh-fuseki-replica-headless",
         "Service/veromesh-fuseki-replicas",
         "ServiceAccount/veromesh",
+        "ServiceAccount/veromesh-backup",
         "StatefulSet/veromesh-fuseki",
         "StatefulSet/veromesh-fuseki-replica",
     ], kinds
@@ -215,10 +240,11 @@ def test_selectors_match_their_pods():
     assert not selects(pdb["spec"]["selector"], pod_labels(one(docs, "StatefulSet", WRITER)))
 
 
-def test_only_the_service_may_reach_fuseki():
+def test_only_the_service_and_the_backup_job_may_reach_fuseki():
     docs = render()
     policy = one(docs, "NetworkPolicy")
     api_labels = one(docs, "Deployment")["spec"]["template"]["metadata"]["labels"]
+    backup_labels = one(docs, "CronJob")["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["labels"]
     test_labels = one(docs, "Pod")["metadata"]["labels"]
     # Covers the writer and every replica, and nothing else.
     for sts in by_kind(docs, "StatefulSet"):
@@ -227,9 +253,15 @@ def test_only_the_service_may_reach_fuseki():
     assert policy["spec"]["policyTypes"] == ["Ingress"]
     (rule,) = policy["spec"]["ingress"]
     selectors = [p["podSelector"]["matchLabels"] for p in rule["from"]]
-    assert len(selectors) == 1 and selectors[0].items() <= api_labels.items()
-    assert not selectors[0].items() <= test_labels.items(), "the test pod must not be allowed in"
+    assert len(selectors) == 2
+    assert selectors[0].items() <= api_labels.items()
+    assert selectors[1].items() <= backup_labels.items()
+    for sel in selectors:
+        assert not sel.items() <= test_labels.items(), "the test pod must not be allowed in"
     assert rule["ports"] == [{"port": 3030, "protocol": "TCP"}]
+    # Backups off: only the service.
+    (rule,) = one(render(sets=("backup.enabled=false",)), "NetworkPolicy")["spec"]["ingress"]
+    assert len(rule["from"]) == 1
 
 
 @pytest.mark.parametrize("name", [WRITER, REPLICA])
@@ -266,6 +298,8 @@ def test_images_default_to_the_pinned_versions():
     docs = render()
     api = one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0]
     assert api["image"] == f"veromesh/service:{project_version('service')}"
+    backup = one(docs, "CronJob")["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    assert backup["image"] == f"veromesh/backup:{(ROOT / 'deploy/backup/VERSION').read_text().strip()}"
     for sts in by_kind(docs, "StatefulSet"):
         fuseki = sts["spec"]["template"]["spec"]["containers"][0]
         assert fuseki["image"] == f"veromesh/fuseki:{versions()['JENA_VERSION']}"
@@ -356,8 +390,6 @@ def test_production_shape():
         claim = sts["spec"]["volumeClaimTemplates"][0]["spec"]
         assert claim["storageClassName"] == "premium-rwo"
         assert claim["resources"]["requests"]["storage"] == "50Gi"
-    froms = one(docs, "NetworkPolicy")["spec"]["ingress"][0]["from"]
-    assert {"podSelector": {"matchLabels": {"app": "fuseki-backup"}}} in froms
     # Replication over a managed Kafka with TLS/SASL settings from a Secret
     assert one(docs, "StatefulSet", "prod-veromesh-fuseki-replica")["spec"]["replicas"] == 3
     for sts in by_kind(docs, "StatefulSet"):
@@ -372,12 +404,208 @@ def test_production_shape():
         assert {"name": "kafka", "mountPath": "/etc/fuseki/kafka", "readOnly": True} in spec["containers"][0][
             "volumeMounts"
         ]
-    config = one(docs, "ConfigMap")["data"]
+    config = fuseki_cm(docs)["data"]
     for f in ("writer.ttl", "replica.ttl"):
         assert '"/etc/fuseki/kafka/kafka.properties"' in config[f]
         assert '"b-1.kafka.acme.example:9094,b-2.kafka.acme.example:9094"' in config[f]
         assert '"acme.veromesh.graph"' in config[f]
     assert 'vmr:replicationFactor "3"' in config["writer.ttl"]
+
+
+# ---------------------------------------------------------------------------- backups
+
+
+def backup_pod(docs: list[dict]) -> dict:
+    return one(docs, "CronJob")["spec"]["jobTemplate"]["spec"]["template"]
+
+
+def test_backups_need_the_customers_key_and_a_destination():
+    r = helm("template", "veromesh", str(CHART), check=False)
+    assert r.returncode != 0 and "backup.encryption.recipients is required" in r.stderr, r.stderr
+    r = helm(
+        "template",
+        "veromesh",
+        str(CHART),
+        "--set",
+        f"backup.encryption.recipients={{{TEST_KEY}}}",
+        check=False,
+    )
+    assert r.returncode != 0 and "backups need somewhere to go" in r.stderr, r.stderr
+    # Development only: no key, backups in the clear.
+    docs = render(sets=("backup.encryption.enabled=false",))
+    env = env_of(backup_pod(docs)["spec"]["containers"][0])
+    assert env["BACKUP_ENCRYPT"]["value"] == "false" and "AGE_RECIPIENTS_FILE" not in env
+    assert not [c for c in by_kind(docs, "ConfigMap") if "recipients" in c["metadata"]["name"]]
+
+
+@pytest.mark.parametrize("bad", ["not-a-key", "age1short", "ssh-dss AAAA"])
+def test_schema_rejects_a_malformed_key(bad):
+    r = helm(
+        "template", "veromesh", str(CHART), "--set", f"backup.encryption.recipients={{{bad}}}", check=False
+    )
+    assert r.returncode != 0 and "schema" in r.stderr, r.stderr
+
+
+def test_nightly_encrypted_backup_to_a_volume():
+    docs = render(sets=("api.timeZone=America/New_York",))
+    job = one(docs, "CronJob")
+    assert job["spec"]["schedule"] == "17 2 * * *"
+    assert job["spec"]["timeZone"] == "America/New_York", "the schedule follows the customer's time zone"
+    assert job["spec"]["concurrencyPolicy"] == "Forbid"
+    pod = backup_pod(docs)
+    spec = pod["spec"]
+    assert spec["serviceAccountName"] == "veromesh-backup" and spec["automountServiceAccountToken"] is False
+    (c,) = spec["containers"]
+    assert c["args"] == ["backup"]
+    assert c["securityContext"]["readOnlyRootFilesystem"] is True
+    env = env_of(c)
+    assert env["FUSEKI_URL"]["value"] == "http://veromesh-fuseki:3030/veromesh", "the writer by default"
+    assert env["BACKUP_TARGET"]["value"] == "/backups"
+    assert env["BACKUP_KEEP"]["value"] == "30"
+    assert env["BACKUP_ENCRYPT"]["value"] == "true"
+    assert "DECISION_LOG_URL" not in env, "no decision log database given"
+    assert one(docs, "ConfigMap", "veromesh-backup-recipients")["data"]["recipients"].split() == [TEST_KEY]
+    assert not by_kind(docs, "PersistentVolumeClaim"), "the claim is created outside the release"
+    vols = {v["name"]: v for v in spec["volumes"]}
+    assert vols["backups"]["persistentVolumeClaim"]["claimName"] == "veromesh-backups"
+    assert vols["recipients"]["configMap"]["name"] == "veromesh-backup-recipients"
+    assert pod["metadata"]["labels"]["app.kubernetes.io/component"] == "backup"
+    assert "istio.io/dataplane-mode" not in pod["metadata"]["labels"]
+
+
+def test_backup_to_object_storage_with_the_decision_log():
+    docs = render("production-values.yaml", name="prod")
+    spec = backup_pod(docs)["spec"]
+    env = env_of(spec["containers"][0])
+    assert env["BACKUP_TARGET"]["value"] == "azure:veromesh-backups/acme-prod"
+    assert env["RCLONE_CONFIG"]["value"] == "/etc/rclone/rclone.conf"
+    assert env["FUSEKI_URL"]["value"] == "http://prod-veromesh-fuseki-replicas:3030/veromesh", (
+        "graphFrom: replicas"
+    )
+    assert env["DECISION_LOG_URL"]["valueFrom"]["secretKeyRef"] == {
+        "name": "veromesh-decision-log",
+        "key": "url",
+    }
+    vols = {v["name"]: v for v in spec["volumes"]}
+    assert vols["rclone"]["secret"]["secretName"] == "veromesh-backup-storage"
+    assert spec["containers"][0]["image"].startswith("registry.example.com/veromesh/backup:")
+    assert spec["imagePullSecrets"] == [{"name": "registry-credentials"}]
+    keys = (
+        one(docs, "ConfigMap", "prod-veromesh-backup-recipients")["data"]["recipients"].strip().splitlines()
+    )
+    assert len(keys) == 2 and keys[1].startswith("ssh-ed25519 ")
+
+
+def test_backup_settings_that_cannot_work_are_refused():
+    r = helm(
+        "template", "veromesh", str(CHART), *WITH_KEY, "--set", "backup.rclone.existingSecret=s", check=False
+    )
+    assert r.returncode != 0 and "backup.rclone.remote is required" in r.stderr, r.stderr
+    r = helm(
+        "template",
+        "veromesh",
+        str(CHART),
+        *WITH_KEY,
+        "--set",
+        "backup.graphFrom=replicas",
+        "--set",
+        "fuseki.replication.enabled=false",
+        check=False,
+    )
+    assert r.returncode != 0 and "needs fuseki.replication.enabled" in r.stderr, r.stderr
+
+
+def test_what_is_backed_up_follows_what_the_chart_runs():
+    assert not by_kind(render(sets=("backup.enabled=false",)), "CronJob")
+    # Your own store and no decision log: nothing for the chart to back up.
+    assert not by_kind(render("external-store-values.yaml"), "CronJob")
+    # Your own store, our decision log: the log only.
+    docs = render(
+        "external-store-values.yaml",
+        sets=(
+            "api.decisionLog.existingSecret=dl",
+            f"backup.encryption.recipients={{{TEST_KEY}}}",
+            "backup.volume.existingClaim=b",
+        ),
+    )
+    env = env_of(backup_pod(docs)["spec"]["containers"][0])
+    assert "FUSEKI_URL" not in env and env["DECISION_LOG_URL"]["valueFrom"]["secretKeyRef"]["name"] == "dl"
+
+
+# ---------------------------------------------------------------------------- encryption in transit
+
+
+def all_pod_labels(docs: list[dict]) -> dict[str, dict]:
+    out = {}
+    for d in docs:
+        if d["kind"] in ("Deployment", "StatefulSet"):
+            out[d["metadata"]["name"]] = d["spec"]["template"]["metadata"]["labels"]
+        elif d["kind"] == "CronJob":
+            out[d["metadata"]["name"]] = d["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["labels"]
+        elif d["kind"] == "Pod":
+            out[d["metadata"]["name"]] = d["metadata"]["labels"]
+    return out
+
+
+def test_mesh_off_by_default():
+    docs = render()
+    assert not [d for d in docs if d["apiVersion"].startswith("security.istio.io")]
+    for name, labels in all_pod_labels(docs).items():
+        assert "istio.io/dataplane-mode" not in labels, name
+
+
+def test_every_pod_joins_the_mesh_and_fuseki_takes_only_mutual_tls():
+    docs = render("mesh-values.yaml")
+    pods = all_pod_labels(docs)
+    assert set(pods) == {"veromesh-api", WRITER, REPLICA, "veromesh-backup", "veromesh-test"}
+    for name, labels in pods.items():
+        assert labels["istio.io/dataplane-mode"] == "ambient", name
+
+    peer = {p["metadata"]["name"]: p for p in by_kind(docs, "PeerAuthentication")}
+    graph = peer["veromesh-fuseki"]["spec"]
+    assert graph["mtls"]["mode"] == "STRICT"
+    for name in (WRITER, REPLICA):
+        assert selects(graph["selector"], pods[name]), name
+    assert not selects(graph["selector"], pods["veromesh-api"])
+    api = peer["veromesh-api"]["spec"]
+    assert api["mtls"]["mode"] == "STRICT" and selects(api["selector"], pods["veromesh-api"])
+    assert not selects(api["selector"], pods[WRITER])
+    permissive = render("mesh-values.yaml", sets=("mesh.apiMtls=PERMISSIVE",))
+    assert one(permissive, "PeerAuthentication", "veromesh-api")["spec"]["mtls"]["mode"] == "PERMISSIVE"
+    assert one(permissive, "PeerAuthentication", "veromesh-fuseki")["spec"]["mtls"]["mode"] == "STRICT"
+
+
+def test_only_the_service_and_backup_identities_reach_fuseki():
+    docs = render("mesh-values.yaml")
+    policy = one(docs, "AuthorizationPolicy")["spec"]
+    pods = all_pod_labels(docs)
+    for name in (WRITER, REPLICA):
+        assert selects(policy["selector"], pods[name]), name
+    assert policy["action"] == "ALLOW"
+    (rule,) = policy["rules"]
+    assert rule["from"][0]["source"]["principals"] == [
+        "cluster.local/ns/veromesh/sa/veromesh",
+        "cluster.local/ns/veromesh/sa/veromesh-backup",
+    ]
+    api_sa = one(docs, "Deployment")["spec"]["template"]["spec"]["serviceAccountName"]
+    assert api_sa == "veromesh"
+    other = render("mesh-values.yaml", sets=("mesh.trustDomain=acme.example", "backup.enabled=false"))
+    assert one(other, "AuthorizationPolicy")["spec"]["rules"][0]["from"][0]["source"]["principals"] == [
+        "acme.example/ns/veromesh/sa/veromesh"
+    ]
+
+
+def test_network_policy_lets_the_mesh_through():
+    """Ambient traffic arrives on ztunnel's HBONE port, and probes from Istio's probe address."""
+    rules = one(render("mesh-values.yaml"), "NetworkPolicy")["spec"]["ingress"]
+    assert rules[0]["ports"] == [{"port": 3030, "protocol": "TCP"}]
+    assert rules[1]["ports"] == [{"port": 15008, "protocol": "TCP"}]
+    assert rules[1]["from"] == rules[0]["from"], "the same peers, through the mesh"
+    assert rules[2] == {
+        "from": [{"ipBlock": {"cidr": "169.254.7.127/32"}}],
+        "ports": [{"port": 3030, "protocol": "TCP"}],
+    }
+    assert len(one(render(), "NetworkPolicy")["spec"]["ingress"]) == 1
 
 
 # ---------------------------------------------------------------------------- replication
@@ -392,7 +620,7 @@ def fuseki_config(docs: list[dict], name: str):
     """One of the rendered Fuseki configuration files, parsed."""
     rdflib = pytest.importorskip("rdflib")
     g = rdflib.Graph()
-    g.parse(data=one(docs, "ConfigMap")["data"][name], format="turtle", publicID="file:///etc/fuseki/x")
+    g.parse(data=fuseki_cm(docs)["data"][name], format="turtle", publicID="file:///etc/fuseki/x")
     return g, rdflib
 
 
@@ -453,7 +681,7 @@ def test_replicas_are_read_only_and_follow_the_topic():
 
 def test_writer_and_replicas_run_their_configuration():
     docs = render()
-    cm = one(docs, "ConfigMap")
+    cm = fuseki_cm(docs)
     for name, role in ((WRITER, "writer"), (REPLICA, "replica")):
         sts = one(docs, "StatefulSet", name)
         spec = sts["spec"]["template"]["spec"]
@@ -486,7 +714,8 @@ def test_single_node_without_replication():
     docs = render("single-node-values.yaml")
     (sts,) = by_kind(docs, "StatefulSet")
     assert sts["metadata"]["name"] == WRITER
-    assert not by_kind(docs, "ConfigMap") and not by_kind(docs, "PodDisruptionBudget")
+    configs = [c["metadata"]["name"] for c in by_kind(docs, "ConfigMap")]
+    assert configs == ["veromesh-backup-recipients"] and not by_kind(docs, "PodDisruptionBudget")
     c = sts["spec"]["template"]["spec"]["containers"][0]
     assert "FUSEKI_CONFIG" not in env_of(c)
     assert c["startupProbe"]["failureThreshold"] == 36
@@ -519,12 +748,21 @@ def test_replication_versions_agree():
 @pytest.mark.parametrize("variant", ["(defaults)", *VARIANTS])
 def test_manifests_match_kubernetes_schemas(variant, tmp_path):
     args = ["template", "veromesh", str(CHART), "--kube-version", KUBE_VERSION, "--include-crds"]
-    if variant != "(defaults)":
-        args += ["-f", str(CI / variant)]
+    args += WITH_KEY if variant == "(defaults)" else ["-f", str(CI / variant)]
     out = tmp_path / "out.yaml"
     out.write_text(helm(*args).stdout)
     r = subprocess.run(
-        ["kubeconform", "-strict", "-summary", "-kubernetes-version", KUBE_VERSION, str(out)],
+        # Istio's resources are checked by the mesh tests above and on a real mesh (k8s-mesh).
+        [
+            "kubeconform",
+            "-strict",
+            "-summary",
+            "-kubernetes-version",
+            KUBE_VERSION,
+            "-skip",
+            "PeerAuthentication,AuthorizationPolicy",
+            str(out),
+        ],
         text=True,
         capture_output=True,
     )

@@ -1,0 +1,64 @@
+{{- if .Values.mesh.enabled }}
+{{- /*
+  Encryption in transit through Istio's ambient mesh (deploy/mesh/README.md).
+  Every pod of this release carries istio.io/dataplane-mode=ambient, so ztunnel
+  wraps its traffic in mutual TLS with certificates from cert-manager (istio-csr),
+  signed by the customer's OpenBao. These policies make that mandatory.
+*/}}
+# Fuseki has no authentication of its own: only mutual TLS reaches it.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "veromesh.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      veromesh.ai/graph: "true"
+  mtls:
+    mode: STRICT
+---
+# The service: STRICT, or PERMISSIVE while its callers are being enrolled (mesh.apiMtls).
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ include "veromesh.apiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    matchLabels:
+      {{- include "veromesh.selectorLabels" (list . "api") | nindent 6 }}
+  mtls:
+    mode: {{ .Values.mesh.apiMtls }}
+---
+# Who may talk to Fuseki, by mesh identity (the caller's service account), not
+# by address: the service, and the backup job. Kubelet probes are not affected.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "veromesh.fusekiName" . }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fuseki
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "veromesh.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      veromesh.ai/graph: "true"
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - {{ include "veromesh.principal" (list . (include "veromesh.serviceAccountName" .)) | quote }}
+              {{- if include "veromesh.backupEnabled" . }}
+              - {{ include "veromesh.principal" (list . (include "veromesh.backupName" .)) | quote }}
+              {{- end }}
+{{- end }}

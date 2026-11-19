@@ -29,6 +29,9 @@ spec:
       labels:
         {{- include "veromesh.labels" . | nindent 8 }}
         app.kubernetes.io/component: api
+        {{- if .Values.mesh.enabled }}
+        istio.io/dataplane-mode: ambient
+        {{- end }}
       annotations:
         # Roll the pods when the token changes.
         checksum/token: {{ .Values.api.datahub.token | sha256sum | trunc 16 }}

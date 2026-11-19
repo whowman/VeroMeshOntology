@@ -7,6 +7,9 @@ metadata:
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
     app.kubernetes.io/component: test
+    {{- if .Values.mesh.enabled }}
+    istio.io/dataplane-mode: ambient
+    {{- end }}
   annotations:
     helm.sh/hook: test
     # Kept after a run so `helm test --logs` can read it; replaced on the next run.
@@ -32,7 +35,17 @@ spec:
           def get(path):
               with urllib.request.urlopen(base + path, timeout=30) as r:
                   return json.load(r)
-          assert get("/health")["status"] == "ok"
+          import time
+          # Right after an install the Service's endpoints can lag the pod by a few seconds.
+          for attempt in range(30):
+              try:
+                  health = get("/health")
+                  break
+              except OSError:
+                  if attempt == 29:
+                      raise
+                  time.sleep(2)
+          assert health["status"] == "ok"
           {{- if .Values.api.auth.disabled }}
           assert any(t["type"] == "roles" for t in get("/api/v1/schema")), "schema has no roles"
           # Reads the source registry from the knowledge graph.

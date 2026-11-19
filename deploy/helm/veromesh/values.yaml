@@ -165,12 +165,79 @@ fuseki:
 store:
   url: ""
 
+# ---------------------------------------------------------------------------- backups
+# A nightly backup of the knowledge graph and the decision log, encrypted to
+# the customer's own public keys: nobody without the matching private key, us
+# included, can read a backup. Restore with scripts/veromesh-backup.sh; see
+# deploy/helm/README.md, "Backups and restore".
+backup:
+  enabled: true
+  image:
+    repository: veromesh/backup
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  # Cron schedule, in api.timeZone.
+  schedule: "17 2 * * *"
+  # Backups kept; older ones are deleted after each successful backup.
+  keep: 30
+  # Read the graph from the writer (always current) or from the read replicas
+  # (spares the writer; may be a moment behind). Replicas need replication on.
+  graphFrom: writer
+
+  encryption:
+    # Off only for development: backups would hold people's names in the clear.
+    enabled: true
+    # The customer's public keys, from `age-keygen` (age1...) or SSH (ssh-ed25519 ...).
+    # Any one of the matching private keys can restore. Keep the private keys
+    # out of the cluster: a key held offline, or in the customer's own vault.
+    recipients: []
+
+  # Where backups go; one of the two is required.
+  # Object storage (production): Azure Blob, S3, Google Cloud Storage, ... A
+  # Secret with a key rclone.conf, and the remote path in rclone.remote, e.g.
+  # "azure:veromesh-backups/prod". The bucket's own encryption can use a
+  # customer-managed key as well.
+  rclone:
+    existingSecret: ""
+    remote: ""
+  # Or a PersistentVolumeClaim you create (a pilot, or a test: not off-site).
+  # Created outside the release, so backups outlive it.
+  volume:
+    existingClaim: ""
+
+  # Scratch space for one backup (the compressed, encrypted files before upload).
+  workSize: 4Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 512Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+
 # ---------------------------------------------------------------------------- network
 networkPolicy:
-  # Fuseki has no authentication, so only the VeroMesh service may reach the
-  # writer and the replicas.
+  # Fuseki has no authentication, so only the VeroMesh service (and the backup
+  # job) may reach the writer and the replicas.
   # Needs a CNI that enforces NetworkPolicy (Calico, Cilium, cloud CNIs).
   enabled: true
-  # Further pods allowed to reach Fuseki, e.g. a backup job:
-  # [{podSelector: {matchLabels: {app: fuseki-backup}}}]
+  # Further pods allowed to reach Fuseki, e.g.
+  # [{podSelector: {matchLabels: {app: graph-explorer}}}]
   fusekiAllowFrom: []
+
+# ---------------------------------------------------------------------------- encryption in transit
+# Mutual TLS between every VeroMesh pod through Istio's ambient mesh, with
+# workload certificates issued by cert-manager (istio-csr) and signed by the
+# customer's OpenBao, so every certificate is managed in one place. Install
+# OpenBao, cert-manager, istio-csr and Istio first: see deploy/mesh/README.md.
+mesh:
+  enabled: false
+  # Plain-text connections to the service: STRICT refuses them, so whatever
+  # calls the API (ingress controller, connectors, agents' gateway) must be in
+  # the mesh too. PERMISSIVE accepts both, while those callers are enrolled.
+  # Fuseki is always STRICT.
+  apiMtls: STRICT
+  # The mesh's trust domain (Istio's meshConfig.trustDomain).
+  trustDomain: cluster.local

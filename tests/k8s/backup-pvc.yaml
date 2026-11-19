@@ -1,0 +1,11 @@
+# The backup volume for the kind tests (backup.volume.existingClaim). Created
+# outside the release, as an operator would, so backups outlive it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: veromesh-backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,3 @@
+# ztunnel (chart istio/ztunnel): the per-node proxy that encrypts pod-to-pod
+# traffic; gets workload certificates from istio-csr.
+caAddress: cert-manager-istio-csr.cert-manager.svc:443

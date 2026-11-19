@@ -12,6 +12,7 @@ What it does today (main, 18 November 2026):
 - **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions, measures and the data element inventory.
 - **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
 - **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
+- **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
 Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
 

@@ -11,6 +11,12 @@
 #   6. a replica whose volume is deleted rebuilds itself from the Kafka topic
 #   7. a pod that is not the service cannot reach the writer or the replicas
 #      (NetworkPolicy)
+#   8. backups: a decision is recorded in PostgreSQL; a backup job (from the
+#      CronJob, encrypted to a key made for the test) holds the graph and the log
+#   9. restore: after more changes, the graph returns exactly to the backup on the
+#      writer and both replicas; the decision log, which holds entries, is kept
+#  10. disaster: with the decision log database emptied, a restore brings it back
+#      with its hash chain intact
 #
 # Run with scripts/test.sh k8s. Needs Docker, kind, kubectl and Helm.
 #   KIND_CLUSTER=name   cluster to use (created if missing; default veromesh-test)
@@ -23,6 +29,7 @@ RELEASE=veromesh
 RESULTS="${1:-$ROOT/.build/test-results}"
 mkdir -p "$RESULTS"
 CTX="kind-$CLUSTER"
+KEY="$(mktemp)"
 k() { kubectl --context "$CTX" -n "$NS" "$@"; }
 # shellcheck source=../../deploy/versions.env
 source "$ROOT/deploy/versions.env"
@@ -43,8 +50,11 @@ cleanup() {
     for p in $(k get pods -o name 2>/dev/null); do
       echo "---- $p" >>"$RESULTS/k8s-logs.txt"; k logs "$p" --all-containers >>"$RESULTS/k8s-logs.txt" 2>&1 || true
     done
+    echo "!! The service's log (last 40 lines):" >&2
+    k logs deployment/"$RELEASE"-api --tail 40 >&2 || true
     echo "!! Pod descriptions and logs: $RESULTS/k8s-describe.txt, $RESULTS/k8s-logs.txt" >&2
   fi
+  rm -f "$KEY"
   if [[ -n "$created" && -z "${KEEP_CLUSTER:-}" ]]; then
     kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
   fi
@@ -61,23 +71,36 @@ fi
 echo ">> Building images and loading them into kind"
 TAG=test SKIP_DATAHUB=1 "$ROOT/deploy/helm/build-images.sh" --kind "$CLUSTER" >/dev/null
 
-echo ">> Starting a single-node Kafka ($KAFKA_TEST_IMAGE)"
-docker pull -q "$KAFKA_TEST_IMAGE" >/dev/null
 # A pulled image is a multi-platform index whose other platforms are not on
 # disk; "kind load docker-image" then fails with "content digest not found".
 # Save only this machine's platform and load the archive.
-archive=$(mktemp)
-docker save --platform "$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}')" -o "$archive" "$KAFKA_TEST_IMAGE"
-kind load image-archive "$archive" --name "$CLUSTER" >/dev/null
-rm -f "$archive"
+load_pulled() {
+  local archive
+  docker pull -q "$1" >/dev/null
+  archive=$(mktemp)
+  docker save --platform "$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}')" -o "$archive" "$1"
+  kind load image-archive "$archive" --name "$CLUSTER" >/dev/null
+  rm -f "$archive"
+}
+
+echo ">> Starting a single-node Kafka ($KAFKA_TEST_IMAGE) and PostgreSQL ($POSTGRES_TEST_IMAGE)"
+load_pulled "$KAFKA_TEST_IMAGE"
+load_pulled "$POSTGRES_TEST_IMAGE"
 kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f - >/dev/null
 sed "s|KAFKA_IMAGE|$KAFKA_TEST_IMAGE|" "$ROOT/tests/k8s/kafka.yaml" | k apply -f - >/dev/null
+sed "s|POSTGRES_IMAGE|$POSTGRES_TEST_IMAGE|" "$ROOT/tests/k8s/postgres.yaml" | k apply -f - >/dev/null
+k apply -f "$ROOT/tests/k8s/backup-pvc.yaml" >/dev/null
 k rollout status deployment/kafka --timeout 5m
+k rollout status deployment/postgres --timeout 5m
+
+# The customer's backup key, made for this test; only the public half goes into the cluster.
+docker run --rm --entrypoint age-keygen veromesh/backup:test >"$KEY" 2>/dev/null
+PUBLIC_KEY="$(sed -n 's/^# public key: //p' "$KEY")"
 
 echo ">> Installing the chart"
 helm --kube-context "$CTX" upgrade --install "$RELEASE" "$ROOT/deploy/helm/veromesh" \
   -n "$NS" --create-namespace -f "$ROOT/deploy/helm/veromesh/ci/kind-values.yaml" \
-  --wait --timeout 10m
+  --set "backup.encryption.recipients={$PUBLIC_KEY}" --wait --timeout 10m
 
 echo ">> helm test"
 helm --kube-context "$CTX" test "$RELEASE" -n "$NS" --logs --timeout 3m
@@ -173,5 +196,40 @@ for target in "$RELEASE-fuseki" "$RELEASE-fuseki-replicas"; do
   echo "   $target refused the probe pod, as intended"
 done
 k delete pod np-probe >/dev/null
+
+api() { python3 "$ROOT/tests/k8s/smoke.py" http://127.0.0.1:18700 "$@"; }
+backups() { "$ROOT/scripts/veromesh-backup.sh" --context "$CTX" -n "$NS" -r "$RELEASE" --timeout 15m "$@"; }
+
+echo ">> Backup: a decision in PostgreSQL, then a backup job encrypted to the test key"
+api decide
+entries="$(api log)"
+backups now | tee "$RESULTS/k8s-backup.log"
+id="$(sed -n 's/^BACKUP_ID=//p' "$RESULTS/k8s-backup.log")"
+[[ -n "$id" ]] || { echo "!! the backup job printed no id" >&2; exit 1; }
+quads="$(count_on "$WRITER")"
+echo "   backup $id: $quads quads, $entries decision log entries"
+
+echo ">> Restore: later changes to the graph are undone; the decision log keeps its entries"
+api note
+api decide
+changed="$(count_on "$WRITER")"
+[[ "$changed" != "$quads" ]] || { echo "!! the model did not change after the backup" >&2; exit 1; }
+backups restore "$id" --identity "$KEY" --yes | tee "$RESULTS/k8s-restore.log"
+port_forward
+have="$(count_on "$WRITER")"
+[[ "$have" == "$quads" ]] || { echo "!! after the restore the writer holds $have quads, the backup $quads" >&2; exit 1; }
+replicas_match_writer
+api check
+[[ "$(api log)" == "$((entries + 1))" ]] || { echo "!! the decision log lost entries" >&2; exit 1; }
+grep -q "Decision log: NOT restored" "$RESULTS/k8s-restore.log"
+echo "   graph back to $quads quads everywhere; the decision log kept its $((entries + 1)) entries"
+
+echo ">> Disaster: the decision log database is lost; a restore brings it back, chain intact"
+k exec deploy/postgres -- psql -q -U veromesh -d decisions -c "DROP TABLE veromesh_decision_log CASCADE"
+backups restore "$id" --identity "$KEY" --yes | tee "$RESULTS/k8s-restore-2.log"
+port_forward
+[[ "$(api log)" == "$entries" ]] || { echo "!! the decision log was not restored" >&2; exit 1; }
+backups list | grep -q "^$id" || { echo "!! list does not show $id" >&2; exit 1; }
+echo "   decision log restored: $entries entries, hash chain verified"
 
 echo ">> k8s smoke test passed"
