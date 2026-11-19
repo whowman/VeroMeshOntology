@@ -13,8 +13,19 @@ Components Veromesh ships or runs, and their licenses. Keep this file current: C
 | Eclipse Temurin JRE 21 (Fuseki base image) | 21 | GPL-2.0 with Classpath Exception | Unmodified runtime; the Classpath Exception permits running Apache-licensed code on it without affecting its license |
 | Fuseki-Kafka (`io.telicent.jena:jena-fmod-kafka`, Telicent) | 3.4.3 | Apache-2.0 | Fuseki module in the Fuseki image; read replicas apply the writer's changes from Kafka. Bundles the Apache Kafka client (Apache-2.0) and Telicent Smart Caches Core (Apache-2.0). LICENSE + NOTICE in `third_party/fuseki-kafka/` and in the image at `/opt/fuseki/licenses/fuseki-kafka` |
 | Apache Kafka | per DataHub prerequisites chart (Bitnami image) | Apache-2.0 | Message broker: DataHub's events on Kubernetes, and the knowledge graph's change log (writer to replicas) |
+| Backup image (`deploy/backup/`): Alpine Linux 3.22 packages age, rclone, postgresql17-client, curl, jq | per Alpine 3.22 | BSD-3-Clause (age), MIT (rclone, jq), PostgreSQL License, curl License | Unmodified packages; the base image's BusyBox (GPL-2.0) runs the script unmodified, as the OS of a container, not linked into our code |
 
 Deliberately **not** used, because of their licenses: MySQL (GPL-2.0), Elasticsearch (SSPL / Elastic License / AGPL), Neo4j Community (GPL-3.0). DataHub's `quickstart-postgres` profile uses pgQueue instead of Kafka locally; on Kubernetes, Kafka (Apache-2.0) is used, by DataHub and for Fuseki replication.
+
+### Installed by the customer, not shipped by us
+
+For encryption in transit (`deploy/mesh/`), from their own charts at the versions in `deploy/versions.env`. None is in our images or linked with our code.
+
+| Component | License |
+| --- | --- |
+| Istio (istiod, CNI agent, ztunnel) | Apache-2.0 |
+| cert-manager, istio-csr | Apache-2.0 |
+| OpenBao | MPL-2.0 (allowed: file-level copyleft, used unmodified) |
 
 ## Veromesh service (Python)
 

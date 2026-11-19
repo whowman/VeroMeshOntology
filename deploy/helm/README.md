@@ -6,16 +6,16 @@ Everything runs in the customer's own cluster. Three Helm releases, installed in
 | --- | --- | --- | --- |
 | `prerequisites` | DataHub's official `datahub-prerequisites` | PostgreSQL, OpenSearch, Kafka (also VeroMesh's change log) | [datahub/prerequisites-values.yaml](datahub/prerequisites-values.yaml) |
 | `datahub` | DataHub's official `datahub` | DataHub GMS, UI, Actions, with the VeroMesh model plugin and theme | [datahub/datahub-values.yaml](datahub/datahub-values.yaml) |
-| `veromesh` | [veromesh/](veromesh/) (this repository) | VeroMesh service and its knowledge graph (Apache Jena Fuseki: a writer and read replicas) | [veromesh/values.yaml](veromesh/values.yaml) |
+| `veromesh` | [veromesh/](veromesh/) (this repository) | VeroMesh service, its knowledge graph (Apache Jena Fuseki: a writer and read replicas) and nightly encrypted backups | [veromesh/values.yaml](veromesh/values.yaml) |
 
 DataHub runs unmodified from its own charts; the overlays only add our plugin, the branded frontend image and the theme settings, the same way `scripts/dev-up.sh` does for the local stack. Chart versions are pinned in [deploy/versions.env](../versions.env) (`DATAHUB_CHART_VERSION`, `DATAHUB_PREREQUISITES_CHART_VERSION`) and match `DATAHUB_VERSION`.
 
-Status: installs and passes its tests on a kind cluster in CI, including Fuseki replication over Kafka (see [Replication](#replication)); not yet installed in a cloud. Sign-in: the API takes tokens from any OpenID Connect provider (`api.auth`; Entra ID first), and the service will not start without it unless `api.auth.disabled` is set, which the kind test does. The decision log needs a PostgreSQL database (`api.decisionLog.existingSecret`); without one it is kept in memory. Dates follow `api.timeZone` (default UTC). Not yet included: secrets from OpenBao, and the scheduled connector jobs.
+Status: installs and passes its tests on a kind cluster in CI, including Fuseki replication over Kafka (see [Replication](#replication)); not yet installed in a cloud. Sign-in: the API takes tokens from any OpenID Connect provider (`api.auth`; Entra ID first), and the service will not start without it unless `api.auth.disabled` is set, which the kind test does. The decision log needs a PostgreSQL database (`api.decisionLog.existingSecret`); without one it is kept in memory. Dates follow `api.timeZone` (default UTC). Backups run nightly, encrypted to the customer's own key ([Backups and restore](#backups-and-restore)); encryption at rest can use the customer's keys and encryption in transit runs through Istio's ambient mesh with certificates from OpenBao ([Encryption](#encryption)). Not yet included: the service's own secrets from OpenBao, and the scheduled connector jobs.
 
 ## 1. Images
 
 ```bash
-deploy/helm/build-images.sh                                  # build all five
+deploy/helm/build-images.sh                                  # build all six
 REGISTRY=registry.example.com deploy/helm/build-images.sh --push
 ```
 
@@ -24,10 +24,11 @@ REGISTRY=registry.example.com deploy/helm/build-images.sh --push
 | `veromesh/service:<service version>` | `veromesh` chart, `api.image` |
 | `veromesh/fuseki:<Jena version>` | `veromesh` chart, `fuseki.image` (writer and replicas) |
 | `veromesh/connectors:<connectors version>` | connector runs (`kubectl run`, or your scheduler) |
+| `veromesh/backup:<version in deploy/backup/VERSION>` | `veromesh` chart, `backup.image` (backups and restores) |
 | `veromesh/datahub-frontend-react:<DataHub version>` | `datahub-values.yaml`, `datahub-frontend.image` |
 | `veromesh/datahub-model-plugin:<service version>` | `datahub-values.yaml`, GMS init container |
 
-The last two need the DataHub build (JDK 25 or Docker, as for the local stack); `SKIP_DATAHUB=1` builds only the first three. With a private registry, set the image repositories in each values file (and `imagePullSecrets` in the `veromesh` chart).
+The last two need the DataHub build (JDK 25 or Docker, as for the local stack); `SKIP_DATAHUB=1` builds only the first four. With a private registry, set the image repositories in each values file (and `imagePullSecrets` in the `veromesh` chart).
 
 ## 2. DataHub
 
@@ -57,8 +58,10 @@ kubectl -n veromesh create secret generic veromesh-datahub --from-literal=token=
 ## 3. VeroMesh
 
 ```bash
+age-keygen -o backup-key.txt     # the customer's backup key: keep this file safe, out of the cluster
 helm -n veromesh install veromesh deploy/helm/veromesh \
-  --set api.datahub.existingSecret=veromesh-datahub
+  --set api.datahub.existingSecret=veromesh-datahub \
+  --set "backup.encryption.recipients={$(age-keygen -y backup-key.txt)}"
 helm -n veromesh test veromesh
 kubectl -n veromesh port-forward svc/veromesh-api 8700:8700   # http://localhost:8700/docs
 ```
@@ -79,9 +82,14 @@ With DataHub installed as release `datahub` in the same namespace, the default `
 | `fuseki.replication.kafka.bootstrapServers` | `prerequisites-kafka:9092` | DataHub's prerequisites Kafka; or your own |
 | `fuseki.replication.kafka.topic` | `veromesh.graph` | the change log; one per install |
 | `fuseki.replication.kafka.existingSecret` | empty | Secret with `kafka.properties` (TLS, SASL settings) |
-| `networkPolicy.enabled` | on | only the service may reach the writer and the replicas, which have no authentication of their own |
+| `backup.encryption.recipients` | none: required | the customer's public keys (`age-keygen`, or SSH); backups are encrypted to them |
+| `backup.schedule` / `backup.keep` | `17 2 * * *` / `30` | nightly in `api.timeZone`; backups kept |
+| `backup.rclone.existingSecret` / `remote` | empty: a volume in the cluster | off-site: a Secret with `rclone.conf`, and e.g. `azure:veromesh-backups/prod` |
+| `backup.graphFrom` | `writer` | or `replicas`, to spare the writer |
+| `networkPolicy.enabled` | on | only the service and the backup job may reach the writer and the replicas, which have no authentication of their own |
+| `mesh.enabled` / `mesh.apiMtls` | off / `STRICT` | every pod in Istio's ambient mesh, mutual TLS only ([Encryption](#encryption)) |
 
-Examples of complete value sets are in [veromesh/ci/](veromesh/ci/); `production-values.yaml` shows a production shape (token Secret, ingress with TLS, private registry, storage class).
+Examples of complete value sets are in [veromesh/ci/](veromesh/ci/); `production-values.yaml` shows a production shape (token Secret, ingress with TLS, private registry, storage class, encrypted backups to object storage); `mesh-values.yaml` the mesh.
 
 ### Replication
 
@@ -112,8 +120,52 @@ To turn replication off (one Fuseki, no Kafka), use `--set fuseki.replication.en
 
 ### Data and upgrades
 
-The model lives on the PersistentVolumeClaim `data-veromesh-fuseki-0` (the writer), with a copy on each `data-veromesh-fuseki-replica-<n>`. These are kept on `helm uninstall`; delete them to discard the model, and delete the Kafka topic too, or the next install's writer refuses to start: its volume would be empty while the topic holds changes. Upgrading from chart 0.1.0 (a single Fuseki) to 0.2.0 switches replication on as described above. Snapshots that would let the topic be compacted are not built yet, so the topic grows with every change. That is fine for models of this size (about 1.1 million triples for 50,000 people), but worth watching.
+The model lives on the PersistentVolumeClaim `data-veromesh-fuseki-0` (the writer), with a copy on each `data-veromesh-fuseki-replica-<n>`. These are kept on `helm uninstall`; delete them to discard the model, and delete the Kafka topic too, or the next install's writer refuses to start: its volume would be empty while the topic holds changes. Upgrading from chart 0.1.0 (a single Fuseki) to 0.2.0 switches replication on as described above. Chart 0.3.0 adds backups, on by default: an upgrade needs `backup.encryption.recipients` (or `backup.enabled=false`), or it stops with a message saying so. Snapshots that would let the topic be compacted are not built yet, so the topic grows with every change. That is fine for models of this size (about 1.1 million triples for 50,000 people), but worth watching.
+
+## Backups and restore
+
+A CronJob (`<release>-backup`, nightly at 02:17 in `api.timeZone`) backs up two things:
+
+- **the knowledge graph:** every quad, read from the writer (or the replicas, `backup.graphFrom`) through Fuseki's Graph Store Protocol, as compressed N-Quads;
+- **the decision log:** its database, with `pg_dump` (when `api.decisionLog.existingSecret` is set).
+
+Both are encrypted with [age](https://age-encryption.org) to the customer's public keys (`backup.encryption.recipients`) before they leave the pod. Only someone with a matching private key can read or restore a backup; the private key is never in the cluster except, briefly, during a restore. Each backup is a folder named after its UTC time holding the two files and a `manifest.json` (counts, checksums, versions, the public keys used), written last so a folder without it is unfinished. The newest `backup.keep` (30) are kept.
+
+Where they go: by default a volume in the cluster (`<release>-backups`, kept when the release is uninstalled), which suits a pilot but is not off-site. For production, set `backup.rclone.existingSecret` to a Secret holding an [rclone](https://rclone.org) configuration for the customer's storage (Azure Blob, S3, Google Cloud Storage and others) and `backup.rclone.remote` to the bucket and path. The storage account's own encryption can use the customer's key as well (below).
+
+```bash
+scripts/veromesh-backup.sh -n veromesh now                     # a backup now
+scripts/veromesh-backup.sh -n veromesh list                    # the backups held
+scripts/veromesh-backup.sh -n veromesh restore 20261119T021700Z --identity backup-key.txt
+```
+
+A restore, from the operator's machine (kubectl and jq):
+
+1. checks the backup's checksums and that the key opens it, before changing anything;
+2. stops the service, so nothing writes meanwhile;
+3. replaces the whole knowledge graph through the writer in one transaction (a Graph Store Protocol PUT). The replicas follow through Kafka like after any other write, so the topic keeps being the record;
+4. restores the decision log only into an empty database (for example, a new one after the old was lost). The log is append-only, so a database that already holds entries is left alone. `--decision-log replace` overrides that, losing the decisions recorded after the backup; `skip` leaves it out;
+5. checks the counts against the manifest, and starts the service again (also if something failed). Then check the log's hash chain: `GET /api/v1/decisions/verify`.
+
+A full rebuild (cluster lost): install the release again with empty volumes and a new Kafka topic, then restore. The restore is the first write, so it is what the new topic starts with.
+
+Watch the CronJob: a failed run leaves a failed Job (`kubectl get jobs -l app.kubernetes.io/component=backup`), which most cluster monitoring already alerts on. Test a restore regularly, into a scratch install.
+
+## Encryption
+
+**At rest, with the customer's keys.** VeroMesh's data lives in four places; each can be encrypted with a key the customer holds in their own key service:
+
+| Where | What | How |
+| --- | --- | --- |
+| Fuseki's volumes (`fuseki.persistence.storageClass`) | the model | a storage class whose disks use the customer's key: Azure Disk with a disk encryption set (`diskEncryptionSetID`), AWS EBS with `kmsKeyId`, Google Persistent Disk with `disk-encryption-kms-key` |
+| The decision log's PostgreSQL | decisions | the managed database's customer-managed key (Azure Database for PostgreSQL, Amazon RDS, Cloud SQL) |
+| Backups | both, copied | always encrypted to the customer's own age keys (above); the bucket can also use their key |
+| Kafka | the model's change log | the managed service's customer-managed key, or a storage class as for Fuseki |
+
+Without those settings everything is still encrypted at rest by the cloud platform, with the platform's keys. Field-level encryption of personal data inside the model is not done (issue #35).
+
+**In transit.** With `mesh.enabled`, every pod joins Istio's ambient mesh: traffic between them is mutual TLS, Fuseki accepts only the service's and the backup job's identities, and every certificate comes from cert-manager, signed by the customer's OpenBao. Setting that up, in order, is in [../mesh/README.md](../mesh/README.md). Without the mesh, traffic inside the cluster is plain HTTP behind the NetworkPolicy, and TLS starts at the ingress.
 
 ## Tests
 
-`scripts/test.sh helm` lints and renders the chart for every value set, checks the manifests against the Kubernetes schemas, and renders the DataHub overlays against DataHub's official charts at the pinned versions. `scripts/test.sh k8s` installs the chart into a throwaway kind cluster alongside a single-node Kafka. It runs `helm test`, loads the worked example and checks that both replicas hold exactly what the writer holds. It then takes the writer down and reads through the API (served by the replicas), restarts the writer and writes again, rebuilds a replica from an empty volume, and checks that other pods cannot reach the writer or the replicas. `scripts/test.sh fuseki-replication` runs the writer module's own tests. CI runs all three; see [docs/testing.md](../../docs/testing.md).
+`scripts/test.sh helm` lints and renders the chart for every value set, checks the manifests against the Kubernetes schemas, and renders the DataHub overlays against DataHub's official charts at the pinned versions. `scripts/test.sh k8s` installs the chart into a throwaway kind cluster alongside a single-node Kafka. It runs `helm test`, loads the worked example and checks that both replicas hold exactly what the writer holds. It then takes the writer down and reads through the API (served by the replicas), restarts the writer and writes again, rebuilds a replica from an empty volume, checks that other pods cannot reach the writer or the replicas, and then takes an encrypted backup, changes the model, restores it (writer and replicas), and restores a lost decision log. `scripts/test.sh backup` tests the backup image against a real Fuseki and PostgreSQL (retention, a wrong key, a damaged backup). `scripts/test.sh k8s-mesh` installs OpenBao, cert-manager, istio-csr and Istio ambient in kind, then the chart in the mesh, and checks the certificates come from OpenBao, plain text is refused, and Fuseki refuses other identities. `scripts/test.sh fuseki-replication` runs the writer module's own tests. CI runs all of them; see [docs/testing.md](../../docs/testing.md).
