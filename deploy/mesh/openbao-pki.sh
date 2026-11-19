@@ -47,7 +47,7 @@ elif [ -n "${MESH_SIGNED_CERT:-}" ]; then
   say "Installing the signed intermediate"
   bao write "$PKI/intermediate/set-signed" certificate=@"$MESH_SIGNED_CERT" >&2
   root="$(cat "${ROOT_CERT:?set ROOT_CERT to the root certificate of the customer CA}")"
-elif ! bao read "$PKI/cert/ca" >/dev/null 2>&1; then
+elif [ -z "$(bao read -field=certificate "$PKI/cert/ca" 2>/dev/null || true)" ]; then
   say "Generating the mesh's root CA in OpenBao (its key never leaves OpenBao)"
   bao write -field=certificate "$PKI/root/generate/internal" \
     common_name="$CA_NAME" key_type=ec key_bits=256 ttl=87600h >/dev/null
@@ -73,5 +73,6 @@ bao write "auth/$AUTH/role/cert-manager-mesh" \
 if [ -z "${root:-}" ]; then
   root="$(bao read -field=certificate "$PKI/cert/ca")"
 fi
+[ -n "$root" ] || { echo "openbao-pki.sh: no CA certificate in $PKI" >&2; exit 1; }
 say "Done. The mesh root certificate follows (store it as the istio-root-ca Secret)."
 printf '%s\n' "$root"
