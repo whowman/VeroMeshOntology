@@ -864,13 +864,18 @@ def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case
     def norm(v: str) -> str:
         return v.strip().casefold() if ignore_case else v.strip()
 
-    want = norm(value)
-    resolved, _ = _current(store)
-    return sorted(
-        rid
-        for (t, rid), r in resolved.items()
-        if t == type_ and isinstance(r.values.get(field), str) and norm(r.values[field]) == want
-    )
+    def build() -> dict[str, list[str]]:
+        resolved, _ = _current(store)
+        index: dict[str, list[str]] = {}
+        for (t, rid), r in resolved.items():
+            v = r.values.get(field)
+            if t == type_ and isinstance(v, str):
+                index.setdefault(norm(v), []).append(rid)
+        return {k: sorted(ids) for k, ids in index.items()}
+
+    # One index per field, kept until the model (or the day) changes.
+    index = cached(store, ("matching", type_, field, ignore_case, clock.today()), build)
+    return list(index.get(norm(value), []))
 
 
 def person_matching(store: RDFStore, field: str, value: str) -> str | None:

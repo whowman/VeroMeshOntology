@@ -61,7 +61,7 @@ CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are
 | Small, before | 2,020 | 13.1 s | 1.82 s | 300 ms | 100 ms |
 | Small | 2,020 | 53 ms | 3 ms | 3 ms | 1 ms |
 | Medium | 20,080 | 25 ms | 4 ms | 18 ms | 11 ms |
-| Large | 100,200 | 40 ms | 143 ms, before shared entity lists | 118 ms | 49 ms |
+| Large | 100,200 | 41 ms | 24 ms | 119 ms | 61 ms, before the person index |
 
 Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 
