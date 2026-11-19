@@ -121,6 +121,8 @@ echo "   istiod's certificate is signed by OpenBao ($istiod_issuer)"
 echo ">> 3. VeroMesh in the mesh (single Fuseki, encrypted backups)"
 docker run --rm --entrypoint age-keygen veromesh/backup:test >"$WORK/backup.key" 2>/dev/null
 pub="$(sed -n 's/^# public key: //p' "$WORK/backup.key")"
+kc create namespace "$NS" --dry-run=client -o yaml | kc apply -f - >/dev/null
+k apply -f "$ROOT/tests/k8s/backup-pvc.yaml" >/dev/null
 h upgrade --install "$RELEASE" "$ROOT/deploy/helm/veromesh" -n "$NS" --create-namespace \
   -f "$ROOT/deploy/helm/veromesh/ci/kind-values.yaml" \
   --set fuseki.replication.enabled=false --set api.decisionLog.existingSecret= \

@@ -7,6 +7,8 @@ api:
     className: nginx
     host: veromesh.acme.example
 backup:
+  volume:
+    existingClaim: veromesh-backups
   encryption:
     recipients: [age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9]
 mesh:

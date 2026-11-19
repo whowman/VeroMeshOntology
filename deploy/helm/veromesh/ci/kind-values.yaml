@@ -38,6 +38,7 @@ backup:
   # The smoke test replaces this with a key it generates, so it can restore.
   encryption:
     recipients: [age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9]
+  # Created by the smoke test (tests/k8s/backup-pvc.yaml).
   volume:
-    size: 1Gi
+    existingClaim: veromesh-backups
   workSize: 512Mi

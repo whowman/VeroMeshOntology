@@ -199,8 +199,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "size": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$"},
-            "storageClass": {"type": "string"}
+            "existingClaim": {"type": "string"}
           }
         },
         "workSize": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$"},

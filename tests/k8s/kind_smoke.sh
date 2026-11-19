@@ -87,6 +87,7 @@ load_pulled "$POSTGRES_TEST_IMAGE"
 kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f - >/dev/null
 sed "s|KAFKA_IMAGE|$KAFKA_TEST_IMAGE|" "$ROOT/tests/k8s/kafka.yaml" | k apply -f - >/dev/null
 sed "s|POSTGRES_IMAGE|$POSTGRES_TEST_IMAGE|" "$ROOT/tests/k8s/postgres.yaml" | k apply -f - >/dev/null
+k apply -f "$ROOT/tests/k8s/backup-pvc.yaml" >/dev/null
 k rollout status deployment/kafka --timeout 5m
 k rollout status deployment/postgres --timeout 5m
 

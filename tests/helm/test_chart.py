@@ -30,11 +30,16 @@ KUBE_VERSION = "1.30.0"
 
 pytestmark = pytest.mark.skipif(not shutil.which("helm"), reason="Helm is not on PATH")
 
-# Every install must name the customer's backup key (backup.encryption.recipients).
-# "Defaults" below means the chart's defaults plus this test key, whose private
-# key nobody holds.
+# Every install must name the customer's backup key (backup.encryption.recipients)
+# and where backups go. "Defaults" below means the chart's defaults plus this test
+# key, whose private key nobody holds, and a volume claim.
 TEST_KEY = "age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9"
-WITH_KEY = ("--set", f"backup.encryption.recipients={{{TEST_KEY}}}")
+WITH_KEY = (
+    "--set",
+    f"backup.encryption.recipients={{{TEST_KEY}}}",
+    "--set",
+    "backup.volume.existingClaim=veromesh-backups",
+)
 
 
 def versions() -> dict[str, str]:
@@ -179,7 +184,6 @@ def test_default_install_resources():
         "CronJob/veromesh-backup",
         "Deployment/veromesh-api",
         "NetworkPolicy/veromesh-fuseki",
-        "PersistentVolumeClaim/veromesh-backups",
         "Pod/veromesh-test",
         "PodDisruptionBudget/veromesh-fuseki-replica",
         "Service/veromesh-api",
@@ -415,9 +419,18 @@ def backup_pod(docs: list[dict]) -> dict:
     return one(docs, "CronJob")["spec"]["jobTemplate"]["spec"]["template"]
 
 
-def test_backups_need_the_customers_key():
+def test_backups_need_the_customers_key_and_a_destination():
     r = helm("template", "veromesh", str(CHART), check=False)
     assert r.returncode != 0 and "backup.encryption.recipients is required" in r.stderr, r.stderr
+    r = helm(
+        "template",
+        "veromesh",
+        str(CHART),
+        "--set",
+        f"backup.encryption.recipients={{{TEST_KEY}}}",
+        check=False,
+    )
+    assert r.returncode != 0 and "backups need somewhere to go" in r.stderr, r.stderr
     # Development only: no key, backups in the clear.
     docs = render(sets=("backup.encryption.enabled=false",))
     env = env_of(backup_pod(docs)["spec"]["containers"][0])
@@ -452,8 +465,7 @@ def test_nightly_encrypted_backup_to_a_volume():
     assert env["BACKUP_ENCRYPT"]["value"] == "true"
     assert "DECISION_LOG_URL" not in env, "no decision log database given"
     assert one(docs, "ConfigMap", "veromesh-backup-recipients")["data"]["recipients"].split() == [TEST_KEY]
-    pvc = one(docs, "PersistentVolumeClaim", "veromesh-backups")
-    assert pvc["metadata"]["annotations"]["helm.sh/resource-policy"] == "keep", "backups outlive the release"
+    assert not by_kind(docs, "PersistentVolumeClaim"), "the claim is created outside the release"
     vols = {v["name"]: v for v in spec["volumes"]}
     assert vols["backups"]["persistentVolumeClaim"]["claimName"] == "veromesh-backups"
     assert vols["recipients"]["configMap"]["name"] == "veromesh-backup-recipients"
@@ -463,7 +475,6 @@ def test_nightly_encrypted_backup_to_a_volume():
 
 def test_backup_to_object_storage_with_the_decision_log():
     docs = render("production-values.yaml", name="prod")
-    assert not by_kind(docs, "PersistentVolumeClaim"), "no backup volume when backups go off-site"
     spec = backup_pod(docs)["spec"]
     env = env_of(spec["containers"][0])
     assert env["BACKUP_TARGET"]["value"] == "azure:veromesh-backups/acme-prod"
@@ -511,7 +522,11 @@ def test_what_is_backed_up_follows_what_the_chart_runs():
     # Your own store, our decision log: the log only.
     docs = render(
         "external-store-values.yaml",
-        sets=("api.decisionLog.existingSecret=dl", f"backup.encryption.recipients={{{TEST_KEY}}}"),
+        sets=(
+            "api.decisionLog.existingSecret=dl",
+            f"backup.encryption.recipients={{{TEST_KEY}}}",
+            "backup.volume.existingClaim=b",
+        ),
     )
     env = env_of(backup_pod(docs)["spec"]["containers"][0])
     assert "FUSEKI_URL" not in env and env["DECISION_LOG_URL"]["valueFrom"]["secretKeyRef"]["name"] == "dl"

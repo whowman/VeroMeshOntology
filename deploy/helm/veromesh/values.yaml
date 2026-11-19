@@ -192,18 +192,18 @@ backup:
     # out of the cluster: a key held offline, or in the customer's own vault.
     recipients: []
 
-  # Where backups go. With rclone.existingSecret set, to object storage (Azure
-  # Blob, S3, Google Cloud Storage, ...): a Secret with a key rclone.conf, and
-  # the remote path in rclone.remote, e.g. "azure:veromesh-backups/prod". The
-  # bucket's own encryption can use a customer-managed key as well.
-  # Otherwise, to a volume in the cluster (not off-site: a pilot, or a test).
+  # Where backups go; one of the two is required.
+  # Object storage (production): Azure Blob, S3, Google Cloud Storage, ... A
+  # Secret with a key rclone.conf, and the remote path in rclone.remote, e.g.
+  # "azure:veromesh-backups/prod". The bucket's own encryption can use a
+  # customer-managed key as well.
   rclone:
     existingSecret: ""
     remote: ""
+  # Or a PersistentVolumeClaim you create (a pilot, or a test: not off-site).
+  # Created outside the release, so backups outlive it.
   volume:
-    size: 20Gi
-    # Empty: the cluster's default storage class.
-    storageClass: ""
+    existingClaim: ""
 
   # Scratch space for one backup (the compressed, encrypted files before upload).
   workSize: 4Gi

@@ -59,9 +59,12 @@ kubectl -n veromesh create secret generic veromesh-datahub --from-literal=token=
 
 ```bash
 age-keygen -o backup-key.txt     # the customer's backup key: keep this file safe, out of the cluster
+kubectl -n veromesh create secret generic veromesh-backup-storage --from-file=rclone.conf   # where backups go
 helm -n veromesh install veromesh deploy/helm/veromesh \
   --set api.datahub.existingSecret=veromesh-datahub \
-  --set "backup.encryption.recipients={$(age-keygen -y backup-key.txt)}"
+  --set "backup.encryption.recipients={$(age-keygen -y backup-key.txt)}" \
+  --set backup.rclone.existingSecret=veromesh-backup-storage \
+  --set backup.rclone.remote=azure:veromesh-backups/prod
 helm -n veromesh test veromesh
 kubectl -n veromesh port-forward svc/veromesh-api 8700:8700   # http://localhost:8700/docs
 ```
@@ -84,7 +87,8 @@ With DataHub installed as release `datahub` in the same namespace, the default `
 | `fuseki.replication.kafka.existingSecret` | empty | Secret with `kafka.properties` (TLS, SASL settings) |
 | `backup.encryption.recipients` | none: required | the customer's public keys (`age-keygen`, or SSH); backups are encrypted to them |
 | `backup.schedule` / `backup.keep` | `17 2 * * *` / `30` | nightly in `api.timeZone`; backups kept |
-| `backup.rclone.existingSecret` / `remote` | empty: a volume in the cluster | off-site: a Secret with `rclone.conf`, and e.g. `azure:veromesh-backups/prod` |
+| `backup.rclone.existingSecret` / `remote` | none: this or a volume is required | off-site: a Secret with `rclone.conf`, and e.g. `azure:veromesh-backups/prod` |
+| `backup.volume.existingClaim` | empty | or a PersistentVolumeClaim you create (a pilot; not off-site) |
 | `backup.graphFrom` | `writer` | or `replicas`, to spare the writer |
 | `networkPolicy.enabled` | on | only the service and the backup job may reach the writer and the replicas, which have no authentication of their own |
 | `mesh.enabled` / `mesh.apiMtls` | off / `STRICT` | every pod in Istio's ambient mesh, mutual TLS only ([Encryption](#encryption)) |
@@ -120,7 +124,7 @@ To turn replication off (one Fuseki, no Kafka), use `--set fuseki.replication.en
 
 ### Data and upgrades
 
-The model lives on the PersistentVolumeClaim `data-veromesh-fuseki-0` (the writer), with a copy on each `data-veromesh-fuseki-replica-<n>`. These are kept on `helm uninstall`; delete them to discard the model, and delete the Kafka topic too, or the next install's writer refuses to start: its volume would be empty while the topic holds changes. Upgrading from chart 0.1.0 (a single Fuseki) to 0.2.0 switches replication on as described above. Chart 0.3.0 adds backups, on by default: an upgrade needs `backup.encryption.recipients` (or `backup.enabled=false`), or it stops with a message saying so. Snapshots that would let the topic be compacted are not built yet, so the topic grows with every change. That is fine for models of this size (about 1.1 million triples for 50,000 people), but worth watching.
+The model lives on the PersistentVolumeClaim `data-veromesh-fuseki-0` (the writer), with a copy on each `data-veromesh-fuseki-replica-<n>`. These are kept on `helm uninstall`; delete them to discard the model, and delete the Kafka topic too, or the next install's writer refuses to start: its volume would be empty while the topic holds changes. Upgrading from chart 0.1.0 (a single Fuseki) to 0.2.0 switches replication on as described above. Chart 0.3.0 adds backups, on by default: an upgrade needs `backup.encryption.recipients` and a destination (`backup.rclone.*` or `backup.volume.existingClaim`), or `backup.enabled=false`; otherwise it stops with a message saying which. Snapshots that would let the topic be compacted are not built yet, so the topic grows with every change. That is fine for models of this size (about 1.1 million triples for 50,000 people), but worth watching.
 
 ## Backups and restore
 
@@ -131,7 +135,7 @@ A CronJob (`<release>-backup`, nightly at 02:17 in `api.timeZone`) backs up two 
 
 Both are encrypted with [age](https://age-encryption.org) to the customer's public keys (`backup.encryption.recipients`) before they leave the pod. Only someone with a matching private key can read or restore a backup; the private key is never in the cluster except, briefly, during a restore. Each backup is a folder named after its UTC time holding the two files and a `manifest.json` (counts, checksums, versions, the public keys used), written last so a folder without it is unfinished. The newest `backup.keep` (30) are kept.
 
-Where they go: by default a volume in the cluster (`<release>-backups`, kept when the release is uninstalled), which suits a pilot but is not off-site. For production, set `backup.rclone.existingSecret` to a Secret holding an [rclone](https://rclone.org) configuration for the customer's storage (Azure Blob, S3, Google Cloud Storage and others) and `backup.rclone.remote` to the bucket and path. The storage account's own encryption can use the customer's key as well (below).
+Where they go, one of two, given at install: for production, `backup.rclone.existingSecret`, a Secret holding an [rclone](https://rclone.org) configuration for the customer's storage (Azure Blob, S3, Google Cloud Storage and others), and `backup.rclone.remote`, the bucket and path. The storage account's own encryption can use the customer's key as well (below). For a pilot, `backup.volume.existingClaim`, a PersistentVolumeClaim you create in the namespace: not off-site, and outside the release so it outlives it. (The chart does not create the claim: on storage classes that bind on first use, as most cloud ones do, an unused claim would hold up `helm install --wait`.)
 
 ```bash
 scripts/veromesh-backup.sh -n veromesh now                     # a backup now

@@ -5,6 +5,9 @@
 {{- if and $b.encryption.enabled (not $b.encryption.recipients) }}
 {{- fail "backup.encryption.recipients is required: the customer's public key(s), from `age-keygen` (age1...) or SSH. Backups hold people's names; set backup.encryption.enabled=false only for development." }}
 {{- end }}
+{{- if not (or $remote $b.volume.existingClaim) }}
+{{- fail "backups need somewhere to go: backup.rclone.existingSecret and backup.rclone.remote (object storage, for production), or backup.volume.existingClaim (a PersistentVolumeClaim you create; not off-site)" }}
+{{- end }}
 {{- if and $remote (not $b.rclone.remote) }}
 {{- fail "backup.rclone.remote is required with backup.rclone.existingSecret, e.g. azure:veromesh-backups/prod" }}
 {{- end }}
@@ -36,27 +39,6 @@ data:
     {{- range $b.encryption.recipients }}
     {{ . }}
     {{- end }}
----
-{{- end }}
-{{- if not $remote }}
-# Backups on a volume in the cluster. Kept when the release is uninstalled.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ $name }}s
-  labels:
-    {{- include "veromesh.labels" . | nindent 4 }}
-    app.kubernetes.io/component: backup
-  annotations:
-    helm.sh/resource-policy: keep
-spec:
-  accessModes: ["ReadWriteOnce"]
-  {{- with $b.volume.storageClass }}
-  storageClassName: {{ . | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ $b.volume.size | quote }}
 ---
 {{- end }}
 apiVersion: batch/v1
@@ -196,7 +178,7 @@ spec:
             {{- else }}
             - name: backups
               persistentVolumeClaim:
-                claimName: {{ $name }}s
+                claimName: {{ $b.volume.existingClaim }}
             {{- end }}
           {{- with $b.nodeSelector }}
           nodeSelector:
