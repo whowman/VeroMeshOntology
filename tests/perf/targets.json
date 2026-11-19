@@ -69,6 +69,20 @@
       "check_after_edit_s": 0.047,
       "read_people_after_edit_s": 0.036,
       "coverage_s": 0.0
+    },
+    "large": {
+      "people": 100200,
+      "triples": 617200,
+      "load_total_s": 1316.753,
+      "load_last_domain_s": 26.066,
+      "edit_s": 0.04,
+      "read_people_s": 0.118,
+      "find_person_s": 0.049,
+      "check_s": 0.143,
+      "check_after_edit_s": 0.173,
+      "read_people_after_edit_s": 0.125,
+      "coverage_s": 0.002,
+      "_note": "before shared entity lists for the decision check (check_s was over the 0.1 s goal)"
     }
   }
 }

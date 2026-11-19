@@ -44,19 +44,23 @@ OWNER_FIELDS = ("ownerRole", "businessOwner", "stewardRole")
 
 
 class Model:
-    """The effective model, read once per check."""
+    """The effective model, read once per check. The entities are shared with other
+    readers (changesets.shared_entities): a check reads them and never changes them."""
 
     def __init__(self, store: RDFStore, base: str) -> None:
-        self._by_type: dict[str, list[dict]] = {}
+        self._by_type: dict[str, tuple[list[dict], dict[str, dict]]] = {}
         self._store, self._base = store, base
 
-    def all(self, type_: str) -> list[dict]:
+    def _load(self, type_: str) -> tuple[list[dict], dict[str, dict]]:
         if type_ not in self._by_type:
-            self._by_type[type_] = changesets.list_entities(self._store, type_, self._base)
+            self._by_type[type_] = changesets.shared_entities(self._store, type_, self._base)
         return self._by_type[type_]
 
+    def all(self, type_: str) -> list[dict]:
+        return self._load(type_)[0]
+
     def get(self, type_: str, rid: str | None) -> dict | None:
-        return next((e for e in self.all(type_) if e.get("id") == rid), None) if rid else None
+        return self._load(type_)[1].get(rid) if rid else None
 
     def name(self, type_: str, rid: str) -> str:
         e = self.get(type_, rid)

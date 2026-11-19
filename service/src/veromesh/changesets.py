@@ -154,6 +154,21 @@ def list_entities(store: RDFStore, type_: str, base: str, source: str | None = N
     return [_copy(e) for _, e in cached(store, ("entities", type_, base, source), compute)]
 
 
+def shared_entities(store: RDFStore, type_: str, base: str) -> tuple[list[dict], dict[str, dict]]:
+    """Every entity of ``type_`` in the effective model, and the same by ID, without
+    copying: shared with every other reader until the model changes. Read only."""
+    E.check_type(type_)
+
+    def rows():
+        return entity_rows(model_graph(store, None, base=base), type_, base)
+
+    def compute():
+        ents = [e for _, e in cached(store, ("entities", type_, base, None), rows)]
+        return ents, {e["id"]: e for e in ents if "id" in e}
+
+    return cached(store, ("shared-entities", type_, base), compute)
+
+
 def entity_rows(g: Graph, type_: str, base: str) -> list[tuple[str, dict]]:
     """(subject IRI, entity) for every entity of ``type_`` in ``g``, in subject order."""
     return [(str(s), E.to_entity(g, s, type_, base)) for s in E.subjects_of_type(g, type_)]
