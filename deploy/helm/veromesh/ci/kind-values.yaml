@@ -13,6 +13,9 @@ api:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
+  # The PostgreSQL the smoke test starts (tests/k8s/postgres.yaml).
+  decisionLog:
+    existingSecret: veromesh-decision-log
 fuseki:
   image:
     tag: test
@@ -28,3 +31,13 @@ fuseki:
     kafka:
       bootstrapServers: kafka:9092
       replicationFactor: 1
+backup:
+  image:
+    tag: test
+    pullPolicy: Never
+  # The smoke test replaces this with a key it generates, so it can restore.
+  encryption:
+    recipients: [age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9]
+  volume:
+    size: 1Gi
+  workSize: 512Mi

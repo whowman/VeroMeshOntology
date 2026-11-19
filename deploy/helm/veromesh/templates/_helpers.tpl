@@ -94,3 +94,43 @@ http://{{ include "veromesh.fusekiName" . }}:3030/$/ping
 {{- define "veromesh.apiImage" -}}
 {{ .Values.api.image.repository }}:{{ default .Chart.AppVersion .Values.api.image.tag }}
 {{- end }}
+
+{{/* Backups: on, and something to back up (the chart's Fuseki or a decision log database) */}}
+{{- define "veromesh.backupEnabled" -}}
+{{- if and .Values.backup.enabled (or .Values.fuseki.enabled .Values.api.decisionLog.existingSecret) }}true{{ end }}
+{{- end }}
+
+{{- define "veromesh.backupName" -}}
+{{- printf "%s-backup" (include "veromesh.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/* Where the backup job reads the graph: the writer, or the read replicas */}}
+{{- define "veromesh.backupGraphUrl" -}}
+{{- if and (eq .Values.backup.graphFrom "replicas") (include "veromesh.replicated" .) -}}
+{{ include "veromesh.readFallback" . }}
+{{- else -}}
+http://{{ include "veromesh.fusekiName" . }}:3030/{{ .Values.fuseki.dataset }}
+{{- end -}}
+{{- end }}
+
+
+{{/* Mesh identity of a service account, as Istio's authorization policies name it */}}
+{{- define "veromesh.principal" -}}
+{{- $ctx := index . 0 -}}
+{{- printf "%s/ns/%s/sa/%s" $ctx.Values.mesh.trustDomain $ctx.Release.Namespace (index . 1) }}
+{{- end }}
+
+{{/* The pods allowed to reach Fuseki (NetworkPolicy peers): the service, the backup job, and fusekiAllowFrom */}}
+{{- define "veromesh.fusekiPeers" -}}
+- podSelector:
+    matchLabels:
+      {{- include "veromesh.selectorLabels" (list . "api") | nindent 6 }}
+{{- if include "veromesh.backupEnabled" . }}
+- podSelector:
+    matchLabels:
+      {{- include "veromesh.selectorLabels" (list . "backup") | nindent 6 }}
+{{- end }}
+{{- with .Values.networkPolicy.fusekiAllowFrom }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}

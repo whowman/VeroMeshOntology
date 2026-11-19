@@ -36,6 +36,11 @@ spec:
       labels:
         {{- include "veromesh.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ $component }}
+        # Writer and replicas alike: the knowledge graph (mesh policies select on it).
+        veromesh.ai/graph: "true"
+        {{- if .Values.mesh.enabled }}
+        istio.io/dataplane-mode: ambient
+        {{- end }}
       annotations:
         {{- if $replicated }}
         # Restart when the Fuseki configuration changes.
@@ -262,14 +267,24 @@ spec:
     - Ingress
   ingress:
     - from:
-        - podSelector:
-            matchLabels:
-              {{- include "veromesh.selectorLabels" (list . "api") | nindent 14 }}
-        {{- with .Values.networkPolicy.fusekiAllowFrom }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+        {{- include "veromesh.fusekiPeers" . | nindent 8 }}
       ports:
         - port: 3030
           protocol: TCP
+    {{- if .Values.mesh.enabled }}
+    # Ambient mesh: the same peers' traffic arrives through ztunnel on the HBONE
+    # port, and kubelet probes come from Istio's fixed probe address.
+    - from:
+        {{- include "veromesh.fusekiPeers" . | nindent 8 }}
+      ports:
+        - port: 15008
+          protocol: TCP
+    - from:
+        - ipBlock:
+            cidr: 169.254.7.127/32
+      ports:
+        - port: 3030
+          protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}

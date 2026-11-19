@@ -3,6 +3,8 @@
     python tests/k8s/smoke.py <api-url> load    # commit the example as source k8s-smoke
     python tests/k8s/smoke.py <api-url> check   # the committed model is still there
     python tests/k8s/smoke.py <api-url> note    # one more small write (a new changeset)
+    python tests/k8s/smoke.py <api-url> decide  # one decision check (a decision log entry)
+    python tests/k8s/smoke.py <api-url> log     # entries in the decision log; fails unless its chain is intact
     python tests/k8s/smoke.py <fuseki-dataset-url> count   # quads in one Fuseki
 
 Standard library only, so it runs anywhere Python does.
@@ -54,6 +56,20 @@ def note(base: str) -> None:
     print(f"opened changeset {cs}")
 
 
+def decide(base: str) -> None:
+    """Ask the decision check once, so the decision log has an entry."""
+    body = {"agent": "InvoiceAssistant", "action": "ApproveSupplierInvoice", "amount": 5, "currency": "USD"}
+    answer = call(base, "POST", "/api/v1/decisions/check", body)
+    print(f"decision: {answer.get('outcome') or answer}")
+
+
+def log(base: str) -> None:
+    """Entries in the decision log; fails unless its hash chain is intact."""
+    v = call(base, "GET", "/api/v1/decisions/verify")
+    assert v["ok"], v
+    print(v["entries"])
+
+
 def count(dataset: str) -> None:
     """Number of quads in a Fuseki dataset (writer or replica), straight from its query endpoint."""
     q = "SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } }"
@@ -69,4 +85,4 @@ def count(dataset: str) -> None:
 
 if __name__ == "__main__":
     base, what = sys.argv[1].rstrip("/"), sys.argv[2]
-    {"load": load, "check": check, "note": note, "count": count}[what](base)
+    {"load": load, "check": check, "note": note, "decide": decide, "log": log, "count": count}[what](base)

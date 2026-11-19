@@ -7,6 +7,9 @@ metadata:
   labels:
     {{- include "veromesh.labels" . | nindent 4 }}
     app.kubernetes.io/component: test
+    {{- if .Values.mesh.enabled }}
+    istio.io/dataplane-mode: ambient
+    {{- end }}
   annotations:
     helm.sh/hook: test
     # Kept after a run so `helm test --logs` can read it; replaced on the next run.

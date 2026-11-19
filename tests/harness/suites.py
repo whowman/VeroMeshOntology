@@ -133,7 +133,7 @@ SUITES: list[Suite] = [
         where="host",
         description="Shell scripts parse (bash -n)",
         steps=(
-            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh branding/datahub/*.sh deploy/helm/*.sh deploy/fuseki/*.sh; do bash -n "$f" || exit 1; done',
+            'for f in scripts/*.sh datahub-model/*.sh tests/e2e/*.sh tests/k8s/*.sh tests/backup/*.sh branding/datahub/*.sh deploy/helm/*.sh deploy/fuseki/*.sh deploy/backup/*.sh; do bash -n "$f" || exit 1; done',
         ),
     ),
     Suite(
@@ -200,6 +200,24 @@ SUITES: list[Suite] = [
         ),
     ),
     Suite(
+        name="backup",
+        component="deploy",
+        tier="integration",
+        where="host",
+        needs=frozenset({"docker", "fuseki", "postgres"}),
+        description="Backup image: encrypted backup and restore of a real Fuseki and PostgreSQL, retention, refusals",
+        steps=(
+            "docker build -q -t veromesh/backup:test deploy/backup >/dev/null",
+            "mkdir -p {results}/backup && python3 tests/backup/schema.py >{results}/backup/schema.sql",
+            "docker run --rm --network veromesh-test --entrypoint sh"
+            " -v $PWD/tests/backup:/tests:ro -v {results}/backup:/schema:ro"
+            " -e FUSEKI_URL=http://veromesh-test-fuseki:3030/veromesh"
+            " -e DECISION_LOG_URL=postgresql://veromesh:test-only@veromesh-test-postgres:5432/decisions"
+            " -e SCHEMA_SQL=/schema/schema.sql veromesh/backup:test /tests/backup_test.sh",
+        ),
+        covers=("tests/backup",),
+    ),
+    Suite(
         name="datahub-frontend",
         component="branding",
         tier="integration",
@@ -214,7 +232,7 @@ SUITES: list[Suite] = [
         tier="integration",
         where="host",
         needs=frozenset({"docker", "kind"}),
-        description="Helm chart in a throwaway kind cluster with Kafka: helm test, example load, replicas match the writer, reads while the writer restarts, replica rebuild, NetworkPolicy",
+        description="Helm chart in a throwaway kind cluster with Kafka and PostgreSQL: helm test, example load, replicas match the writer, reads while the writer restarts, replica rebuild, NetworkPolicy, encrypted backup and restore",
         steps=("tests/k8s/kind_smoke.sh {results}",),
     ),
     # ------------------------------------------------------------------ build

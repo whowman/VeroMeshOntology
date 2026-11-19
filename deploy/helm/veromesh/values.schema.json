@@ -159,12 +159,72 @@
         "url": {"type": "string", "pattern": "^$|^(fuseki|oxigraph):https?://"}
       }
     },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {"type": "string", "minLength": 1},
+            "tag": {"type": "string", "minLength": 1},
+            "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]}
+          }
+        },
+        "schedule": {"type": "string", "minLength": 9},
+        "keep": {"type": "integer", "minimum": 1, "maximum": 3650},
+        "graphFrom": {"type": "string", "enum": ["writer", "replicas"]},
+        "encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "recipients": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^(age1[0-9a-z]{58}|ssh-(ed25519|rsa) [A-Za-z0-9+/=]+( .*)?)$"}
+            }
+          }
+        },
+        "rclone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "remote": {"type": "string"}
+          }
+        },
+        "volume": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$"},
+            "storageClass": {"type": "string"}
+          }
+        },
+        "workSize": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$"},
+        "resources": {"type": "object"},
+        "podAnnotations": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"}
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
         "fusekiAllowFrom": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "mesh": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "apiMtls": {"type": "string", "enum": ["STRICT", "PERMISSIVE"]},
+        "trustDomain": {"type": "string", "minLength": 1}
       }
     }
   }

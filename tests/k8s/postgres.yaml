@@ -1,0 +1,47 @@
+# A single PostgreSQL for the decision log in the kind smoke test (tests/k8s/kind_smoke.sh).
+# Not for production: no volume, a fixed test password.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: {app: postgres}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: POSTGRES_IMAGE
+          env:
+            - {name: POSTGRES_USER, value: veromesh}
+            - {name: POSTGRES_PASSWORD, value: test-only}
+            - {name: POSTGRES_DB, value: decisions}
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["psql", "-U", "veromesh", "-d", "decisions", "-c", "select 1"]
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: postgres}
+  ports:
+    - port: 5432
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: veromesh-decision-log
+stringData:
+  url: postgresql://veromesh:test-only@postgres:5432/decisions

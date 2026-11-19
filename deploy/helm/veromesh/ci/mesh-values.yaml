@@ -1,0 +1,14 @@
+# Encryption in transit: every pod in Istio's ambient mesh (mutual TLS, with
+# certificates from cert-manager signed by OpenBao; see deploy/mesh/README.md).
+# The ingress controller is enrolled too, so the API takes mutual TLS only.
+api:
+  ingress:
+    enabled: true
+    className: nginx
+    host: veromesh.acme.example
+backup:
+  encryption:
+    recipients: [age129qez9lp8qakwpaapv7af6ncqzw0g8a5lz4k9elc6njem29j0afs2v8mx9]
+mesh:
+  enabled: true
+  apiMtls: STRICT

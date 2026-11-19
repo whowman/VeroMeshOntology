@@ -7,7 +7,7 @@ description: >-
   charts; see deploy/helm/README.md.
 type: application
 # Chart version: bump on any change to the chart.
-version: 0.2.0
+version: 0.3.0
 # The VeroMesh service version (service/pyproject.toml); the default image tag.
 appVersion: "0.1.0"
 home: https://github.com/whowman/VeroMeshOntology

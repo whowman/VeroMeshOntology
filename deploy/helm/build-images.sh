@@ -9,10 +9,11 @@
 #   veromesh/service                  the VeroMesh service          (chart: api.image)
 #   veromesh/fuseki                   Apache Jena Fuseki, writer and replicas (chart: fuseki.image)
 #   veromesh/connectors               connector CLI, for jobs       (run with kubectl)
+#   veromesh/backup                   encrypted backups and restore (chart: backup.image)
 #   veromesh/datahub-frontend-react   branded DataHub UI            (datahub-values.yaml)
 #   veromesh/datahub-model-plugin     custom DataHub aspect         (datahub-values.yaml)
 #
-# SKIP_DATAHUB=1 builds only the first three (no JDK/Gradle build needed).
+# SKIP_DATAHUB=1 builds only the first four (no JDK/Gradle build needed).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -44,6 +45,7 @@ build service "$SERVICE_VERSION" -f "$ROOT/service/Dockerfile" "$ROOT"
 build fuseki "$JENA_VERSION" --build-arg JENA_VERSION="$JENA_VERSION" \
   --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" "$ROOT/deploy/fuseki"
 build connectors "$CONNECTORS_VERSION" "$ROOT/connectors"
+build backup "$(cat "$ROOT/deploy/backup/VERSION")" "$ROOT/deploy/backup"
 
 if [[ -z "${SKIP_DATAHUB:-}" ]]; then
   "$ROOT/branding/datahub/build.sh"
