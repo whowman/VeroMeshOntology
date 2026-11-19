@@ -236,6 +236,17 @@ SUITES: list[Suite] = [
         steps=("tests/k8s/kind_smoke.sh {results}",),
     ),
     Suite(
+        name="perf",
+        component="service",
+        tier="quick",
+        description="Performance smoke: a synthetic organization (2 domains, about 200 people), timings within budget (tests/perf/targets.json)",
+        steps=(
+            "PYTHONPATH=service/src python tests/perf/bench.py --size smoke --check"
+            " --out {results}/perf-smoke.json",
+        ),
+        covers=("tests/perf",),
+    ),
+    Suite(
         name="k8s-mesh",
         component="deploy",
         tier="integration",

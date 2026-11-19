@@ -1,0 +1,16 @@
+{
+  "_comment": "Seconds. 'goals' are where each size must get to (issues #37-#39); 'budgets' are what CI enforces today, tightened as the work lands so it cannot slip back.",
+  "goals": {
+    "small":  {"edit_s": 0.5, "check_s": 0.05, "find_person_s": 0.02, "read_people_s": 0.2},
+    "medium": {"edit_s": 1.0, "check_s": 0.1, "find_person_s": 0.05, "read_people_s": 1.0},
+    "large":  {"edit_s": 2.0, "check_s": 0.1, "find_person_s": 0.05, "read_people_s": 5.0}
+  },
+  "budgets": {
+    "smoke": {"edit_s": 6.0, "check_s": 1.0, "find_person_s": 0.2, "read_people_s": 0.5, "load_total_s": 20.0}
+  },
+  "baseline": {
+    "_date": "2026-11-19, before any performance work; in-memory store",
+    "smoke": {"people": 204, "triples": 1544, "load_total_s": 2.3, "edit_s": 2.02, "read_people_s": 0.022, "find_person_s": 0.011, "check_s": 0.22, "coverage_s": 0.051},
+    "small": {"people": 2020, "triples": 13720, "load_total_s": 69.7, "edit_s": 13.1, "read_people_s": 0.30, "find_person_s": 0.10, "check_s": 1.82, "coverage_s": 0.54}
+  }
+}
