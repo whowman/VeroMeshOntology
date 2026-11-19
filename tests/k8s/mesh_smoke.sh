@@ -97,6 +97,12 @@ h upgrade --install cert-manager-istio-csr cert-manager-istio-csr --repo "$JETST
   --set app.certmanager.preserveCertificateRequests=true --wait --timeout 5m >/dev/null
 
 echo ">> 2. Istio $ISTIO_VERSION in ambient mode, without its own CA"
+if ! helm show chart base --repo "$ISTIO_REPO" --version "$ISTIO_VERSION" >/dev/null 2>&1; then
+  echo "!! Istio chart $ISTIO_VERSION is not in $ISTIO_REPO; the newest there:" >&2
+  helm repo add istio-test "$ISTIO_REPO" >/dev/null 2>&1 && helm repo update istio-test >/dev/null 2>&1
+  helm search repo istio-test/base --versions 2>&1 | head -12 >&2
+  exit 1
+fi
 h upgrade --install istio-base base --repo "$ISTIO_REPO" --version "$ISTIO_VERSION" -n istio-system --wait >/dev/null
 h upgrade --install istiod istiod --repo "$ISTIO_REPO" --version "$ISTIO_VERSION" -n istio-system \
   -f "$MESH/istiod-values.yaml" --wait --timeout 5m >/dev/null
