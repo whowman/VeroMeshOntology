@@ -11,13 +11,23 @@ so a cached value is never served after the model it came from has changed.
 A value is read after the version, so a write that lands in between makes the
 cached value newer than its version: the next call sees the newer version and
 reads again. It can only ever cost a re-read, never a stale answer.
+
+Two refinements keep a commit from throwing away more than it must:
+
+* ``batch()``: the writes inside change the version once, at the end, by a
+  compare-and-swap from the version the batch expected. ``clean`` then says
+  whether nobody else wrote in between, so the writer may ``prime`` the cache
+  with what it knows the new state to be.
+* ``unversioned()``: writes that are not part of the model (changeset
+  bookkeeping) do not change the version.
 """
 
 from __future__ import annotations
 
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 VERSION_GRAPH = "https://veromesh.ai/graph/version"
@@ -27,6 +37,14 @@ _VERSION = "https://veromesh.ai/ontology/core#modelVersion"
 T = TypeVar("T")
 
 
+class Batch:
+    def __init__(self, expect: str | None) -> None:
+        self.expect = expect
+        self.wrote = False
+        self.version: str | None = None
+        self.clean = False
+
+
 class VersionedStore:
     """An RDFStore whose writes bump a model version kept in the store itself."""
 
@@ -34,6 +52,65 @@ class VersionedStore:
         self.inner = inner
         self._cache: dict[Any, tuple[str, Any]] = {}
         self._lock = threading.Lock()
+        self._local = threading.local()
+
+    def _batch(self) -> Batch | None:
+        return getattr(self._local, "batch", None)
+
+    @contextmanager
+    def batch(self, expect: str | None = None) -> Iterator[Batch]:
+        """Writes inside change the version once, when the batch ends (this thread only).
+        ``expect``: the version the caller's knowledge is from (default: now)."""
+        if self._batch() is not None:
+            raise RuntimeError("batches do not nest")
+        b = Batch(expect if expect is not None else self.version())
+        self._local.batch = b
+        try:
+            yield b
+        finally:
+            self._local.batch = None
+            if b.wrote:
+                new = str(uuid.uuid4())
+                self.inner.update(
+                    f"""DELETE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
+                        INSERT {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> "{new}" }} }}
+                        WHERE {{ OPTIONAL {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
+                                 FILTER(COALESCE(STR(?old), "0") = "{b.expect}") }}"""
+                )
+                b.clean = self.version() == new
+                if not b.clean:
+                    self._bump()  # someone else wrote: make sure the version moves anyway
+                b.version = self.version()
+            else:
+                b.version = b.expect
+                b.clean = self.version() == b.expect
+            with self._lock:
+                self._cache.clear()
+
+    @contextmanager
+    def unversioned(self) -> Iterator[None]:
+        """Writes inside are not part of the model (bookkeeping): the version stays."""
+        prev = getattr(self._local, "unversioned", False)
+        self._local.unversioned = True
+        try:
+            yield
+        finally:
+            self._local.unversioned = prev
+
+    def prime(self, key: Any, version: str, value: Any) -> None:
+        """Cache ``value`` as what ``key`` is at ``version`` (the writer knows it)."""
+        with self._lock:
+            self._cache[key] = (version, value)
+
+    def peek_at(self, key: Any, version: str) -> Any:
+        """The value cached for ``key`` at ``version``, or None."""
+        hit = self._cache.get(key)
+        return hit[1] if hit is not None and hit[0] == version else None
+
+    def peek(self, key: Any) -> Any:
+        """The cached value for ``key`` if it is current, else None (nothing is computed)."""
+        hit = self._cache.get(key)
+        return hit[1] if hit is not None and hit[0] == self.version() else None
 
     # Reads pass through.
     def query(self, sparql: str) -> dict[str, Any]:
@@ -45,10 +122,19 @@ class VersionedStore:
     # Writes bump the version.
     def update(self, sparql: str) -> None:
         self.inner.update(sparql)
-        self._bump()
+        self._wrote()
 
     def load_turtle(self, data: str, graph: str, *, replace: bool = True) -> None:
         self.inner.load_turtle(data, graph, replace=replace)
+        self._wrote()
+
+    def _wrote(self) -> None:
+        if getattr(self._local, "unversioned", False):
+            return
+        b = self._batch()
+        if b is not None:
+            b.wrote = True
+            return
         self._bump()
 
     def _bump(self) -> None:
@@ -71,8 +157,8 @@ class VersionedStore:
 
 def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     """``compute()``, reused until the model changes. Stores without versions are not cached."""
-    if not isinstance(store, VersionedStore):
-        return compute()
+    if not isinstance(store, VersionedStore) or store._batch() is not None:
+        return compute()  # inside a batch the store is changing: read it as it is
     version = store.version()
     hit = store._cache.get(key)
     if hit is not None and hit[0] == version:
@@ -81,3 +167,13 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     with store._lock:
         store._cache[key] = (version, value)
     return value
+
+
+@contextmanager
+def unversioned(store: Any) -> Iterator[None]:
+    """``store.unversioned()`` for a VersionedStore; nothing for any other store."""
+    if isinstance(store, VersionedStore):
+        with store.unversioned():
+            yield
+    else:
+        yield

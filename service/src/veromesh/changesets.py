@@ -30,6 +30,7 @@ source's claims (with history) and stores the new effective model.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import threading
@@ -43,9 +44,9 @@ from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
 from . import entities as E
+from . import incremental, validation
 from . import provenance as P
-from . import validation
-from .modelcache import cached
+from .modelcache import VersionedStore, cached, unversioned
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -68,6 +69,17 @@ class Conflict(Exception):
     def __init__(self, message: str, report: dict | None = None) -> None:
         super().__init__(message)
         self.report = report
+
+
+def _bookkeeping(fn):
+    """Writes changeset records only, never the model: the model version stays."""
+
+    @functools.wraps(fn)
+    def wrapper(store, *args, **kwargs):
+        with unversioned(store):
+            return fn(store, *args, **kwargs)
+
+    return wrapper
 
 
 def _not_found(msg: str) -> Exception:
@@ -136,10 +148,15 @@ def list_entities(store: RDFStore, type_: str, base: str, source: str | None = N
 
     def compute():
         g = model_graph(store, source, base=base)
-        return [E.to_entity(g, s, type_, base) for s in E.subjects_of_type(g, type_)]
+        return entity_rows(g, type_, base)
 
     # Copies, so a caller changing one cannot change what the next caller gets.
-    return [_copy(e) for e in cached(store, ("entities", type_, base, source), compute)]
+    return [_copy(e) for _, e in cached(store, ("entities", type_, base, source), compute)]
+
+
+def entity_rows(g: Graph, type_: str, base: str) -> list[tuple[str, dict]]:
+    """(subject IRI, entity) for every entity of ``type_`` in ``g``, in subject order."""
+    return [(str(s), E.to_entity(g, s, type_, base)) for s in E.subjects_of_type(g, type_)]
 
 
 def _copy(entity: dict) -> dict:
@@ -241,6 +258,7 @@ def _item_iri(cs: str, type_: str, rid: str) -> URIRef:
     return URIRef(f"{CHANGESET_BASE}{cs}/item/{type_}/{quote(rid, safe='._-')}")
 
 
+@_bookkeeping
 def create(
     store: RDFStore,
     *,
@@ -340,6 +358,7 @@ def list_changesets(
     ]
 
 
+@_bookkeeping
 def _set_status(store: RDFStore, cs: str, status: str, report: dict | None = None, extra: str = "") -> None:
     iri = _cs_iri(cs)
     ins = f'<{iri}> <{VM.status}> "{status}"'
@@ -393,6 +412,7 @@ def _check_times(n: int, raw: dict) -> dict:
     return out
 
 
+@_bookkeeping
 def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
     """Add or replace items: ``{"type": "kpis", "op": "upsert"|"delete", "entity": {...}}``.
     Delete items need only ``{"id": ...}`` as the entity."""
@@ -461,6 +481,7 @@ def _load_items(store: RDFStore, cs: str) -> list[Item]:
     ]
 
 
+@_bookkeeping
 def discard(store: RDFStore, cs: str) -> dict:
     meta = _require_open(store, cs)
     store.update(f"DROP SILENT GRAPH <{_items_graph(cs)}>")
@@ -689,9 +710,32 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
     return _Plan(target, errors, report, effective=after, item_meta=item_meta)
 
 
+def _fast_plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_dir: str):
+    """(state, version, (report, errors, edit)) from the incremental planner, or None.
+    Call with incremental._LOCK held; the plan must be committed or undone."""
+    if not incremental.enabled():
+        return None
+    version = store.version() if isinstance(store, VersionedStore) else ""
+    st = incremental.state(store, base)
+    if st is None:
+        incremental.STATS["full"] += 1
+        return None
+    got = incremental.plan(st, meta, items, base, ontology_dir)
+    incremental.STATS["full" if got is None else "fast"] += 1
+    return None if got is None else (st, version, got)
+
+
 def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
     meta = _require_open(store, cs)
-    plan = _plan(store, meta, _load_items(store, cs), base, ontology_dir)
+    items = _load_items(store, cs)
+    with incremental._LOCK:
+        fast = _fast_plan(store, meta, items, base, ontology_dir)
+        if fast is not None:
+            st, _, (report, _, edit) = fast
+            incremental.undo(st, edit)
+            _set_status(store, cs, "valid" if report["valid"] else "invalid", report)
+            return report
+    plan = _plan(store, meta, items, base, ontology_dir)
     _set_status(store, cs, "valid" if plan.report["valid"] else "invalid", plan.report)
     return plan.report
 
@@ -725,7 +769,24 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
             f"(now at version {current}, changeset started from {meta['baseVersion']}). "
             "Nothing was written; re-run the load against the current state."
         )
-    plan = _plan(store, meta, _load_items(store, cs), base, ontology_dir)
+    items = _load_items(store, cs)
+    with incremental._LOCK:
+        fast = _fast_plan(store, meta, items, base, ontology_dir)
+        if fast is not None:
+            st, version, (report, _, edit) = fast
+            if not report["valid"]:
+                incremental.undo(st, edit)
+                _set_status(store, cs, "invalid", report)
+                raise Conflict("Changeset is not valid; nothing was written.", report)
+            try:
+                return incremental.commit(store, st, meta, cs, report, edit, ontology_dir, version)
+            except BaseException:
+                incremental.undo(st, edit)
+                if isinstance(store, VersionedStore):
+                    with store._lock:
+                        store._cache.clear()
+                raise
+    plan = _plan(store, meta, items, base, ontology_dir)
     if not plan.report["valid"]:
         _set_status(store, cs, "invalid", plan.report)
         raise Conflict("Changeset is not valid; nothing was written.", plan.report)

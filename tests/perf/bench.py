@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import orggen  # noqa: E402
-from veromesh import changesets, coverage, decide, decisions  # noqa: E402
+from veromesh import changesets, coverage, decide, decisions, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
@@ -114,6 +114,7 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
     }
     outcome = check()["outcome"]
     return {
+        "plans": dict(incremental.STATS),
         "domains": domains,
         "peoplePerDomain": people,
         "people": counts.get("people", 0),
@@ -128,7 +129,8 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
 def report(r: dict) -> str:
     lines = [
         f"{r['people']:,} people, {r['entities']:,} entities, {r['triples']:,} triples "
-        f"({r['domains']} domains, store: {r['store']})",
+        f"({r['domains']} domains, store: {r['store']}; changesets planned fast/full: "
+        f"{r['plans'].get('fast', 0)}/{r['plans'].get('full', 0)})",
     ]
     for k, v in r["timings"].items():
         lines.append(f"  {k:<26} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<26} {v:>10.2f} s")

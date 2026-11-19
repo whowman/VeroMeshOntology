@@ -331,13 +331,16 @@ def extract(graph: Graph, base: str) -> dict[tuple[str, str], dict]:
     return out
 
 
-def _claim_rows(store: RDFStore, where: str) -> list[Claim]:
+def _claim_rows(store: RDFStore, where: str, iri: str | None = None) -> list[Claim]:
+    """Claims matching ``where``; or the one claim ``iri`` (looked up directly)."""
+    c = f"<{iri}>" if iri else "?c"
+    select = f"(<{iri}> AS ?c)" if iri else "?c"
     res = store.query(
-        f"""SELECT ?c ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
-              ?c a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
+        f"""SELECT {select} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+              {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
-              OPTIONAL {{ ?c <{VMP.validFrom}> ?vf }} OPTIONAL {{ ?c <{VMP.validUntil}> ?vu }}
-              OPTIONAL {{ ?c <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ ?c <{PROV.wasGeneratedBy}> ?cs }}
+              OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
+              OPTIONAL {{ {c} <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ {c} <{PROV.wasGeneratedBy}> ?cs }}
               {where} }} }}"""
     )
 
@@ -397,10 +400,19 @@ def record_source(
     *,
     changeset: str | None,
     at: str,
+    current: dict[tuple[str, str], Claim] | None = None,
+    changes: dict | None = None,
 ) -> dict:
     """Bring the source's claims in line with what it now states: supersede changed or
-    removed entities, add claims for new values, refresh the observed time of unchanged ones."""
-    current = {c.key: c for c in read_claims(store, source=source)}
+    removed entities, add claims for new values, refresh the observed time of unchanged ones.
+
+    ``current``: the source's current claims for just the entities being changed
+    (the caller knows them); only those entities are compared. ``changes``, when
+    given, receives what was written: ``created`` (Claims, as they read back),
+    ``superseded`` (claim IRIs) and ``refreshed`` ((claim IRI, observed time))."""
+    if current is None:
+        current = {c.key: c for c in read_claims(store, source=source)}
+    created: list[Claim] = []
     g = Graph()
     supersede, refresh = [], []
     added = unchanged = 0
@@ -437,6 +449,7 @@ def record_source(
             g.add((c, VMP.validFrom, Literal(m["validFrom"][:10], datatype=XSD.date)))
         if m.get("validUntil"):
             g.add((c, VMP.validUntil, Literal(m["validUntil"][:10], datatype=XSD.date)))
+        created.append(c)
     supersede += [c.iri for key, c in current.items() if key not in entities]
     for i in range(0, len(supersede), 200):
         values = " ".join(f"<{iri}>" for iri in supersede[i : i + 200])
@@ -452,6 +465,20 @@ def record_source(
         )
     if len(g):
         store.load_turtle(g.serialize(format="nt"), CLAIMS_GRAPH, replace=False)
+    if changes is not None:
+        # The written claims as the store gives them back (it may normalise times).
+        written = [str(c) for c in created] + [iri for iri, _ in refresh]
+        back: list[Claim] = []
+        if len(written) > 50:  # a large load: one pass over the claims is cheaper
+            wanted = set(written)
+            back = [c for c in _claim_rows(store, "") if c.iri in wanted]
+        else:
+            for iri in written:
+                back += _claim_rows(store, "", iri=iri)
+        cats = categories(store)
+        for c in back:
+            c.category = cats.get(c.source, DEFAULT_CATEGORY)
+        changes.update(claims=back, superseded=supersede)
     return {"added": added, "superseded": len(supersede), "unchanged": unchanged}
 
 

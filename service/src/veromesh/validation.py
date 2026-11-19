@@ -54,6 +54,35 @@ def _cached_query(self, strOrQuery, initBindings=None, initNs=None, base=None, D
 _sparql.SPARQLProcessor.query = _cached_query
 
 
+# pyshacl tests each predicate of a shape against a list of ~40 constraint
+# parameters, on every (nested) shape evaluation; a list that answers ``in``
+# from a set does the same with a hash lookup.
+class _Params(list):
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self._set = frozenset(self)
+
+    def __contains__(self, item) -> bool:
+        return item in self._set
+
+    def copy(self) -> _Params:
+        return _Params(self)
+
+    def append(self, item) -> None:
+        super().append(item)
+        self._set = frozenset(self)
+
+
+def _fast_parameters() -> None:
+    from pyshacl import shape as _shape
+    from pyshacl.constraints import ALL_CONSTRAINT_PARAMETERS, CONSTRAINT_PARAMETERS_MAP
+
+    _shape.module.CONSTRAINT_PARAMS = (_Params(ALL_CONSTRAINT_PARAMETERS), CONSTRAINT_PARAMETERS_MAP)
+
+
+_fast_parameters()
+
+
 # --------------------------------------------------------------------------- the model's schema
 
 
