@@ -50,7 +50,7 @@ from . import provenance as P
 from .compactgraph import compact_graph
 from .modelcache import VersionedStore, cached, unversioned
 from .ontology import literal
-from .rdf_store import RDFStore
+from .rdf_store import RDFStore, select
 
 SH = Namespace("http://www.w3.org/ns/shacl#")
 VM = Namespace("https://veromesh.ai/ontology/core#")
@@ -127,12 +127,13 @@ def read_sources(store: RDFStore) -> dict[str, Graph]:
 
 
 def _read_sources(store: RDFStore) -> dict[str, Graph]:
-    res = store.query(
+    rows = select(  # a row at a time: other threads run while a large model is read
+        store,
         f"""SELECT ?g ?s ?p ?o WHERE {{ GRAPH ?g {{ ?s ?p ?o }}
-            FILTER(STRSTARTS(STR(?g), "{SOURCE_GRAPH_BASE}")) }}"""
+            FILTER(STRSTARTS(STR(?g), "{SOURCE_GRAPH_BASE}")) }}""",
     )
     out: dict[str, Graph] = {}
-    for b in res["results"]["bindings"]:
+    for b in rows:
         g = out.get(b["g"]["value"])
         if g is None:
             g = out[b["g"]["value"]] = compact_graph()  # kept in the cache and the planner state

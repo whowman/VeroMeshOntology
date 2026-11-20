@@ -38,6 +38,119 @@ UNAVAILABLE = frozenset({502, 503, 504})
 
 LIST_GRAPHS_QUERY = "SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s ?p ?o } } ORDER BY ?g"
 
+XSD = "http://www.w3.org/2001/XMLSchema#"
+
+
+def select(store: Any, sparql: str) -> list[dict[str, dict[str, str]]]:
+    """A SELECT query's rows, as ``query(...)["results"]["bindings"]`` gives them.
+
+    For a query that can return the whole model: a store that can, decodes the answer
+    a row at a time (``select`` on the store) instead of decoding one large JSON
+    document, which holds the interpreter lock for seconds on a large model while
+    every other thread waits."""
+    rows = getattr(store, "select", None)
+    if rows is not None:
+        return rows(sparql)
+    return store.query(sparql)["results"]["bindings"]
+
+
+# --------------------------------------------------------------------------- SPARQL TSV results
+
+_ESCAPES = {"t": "\t", "n": "\n", "r": "\r", "b": "\b", "f": "\f", '"': '"', "'": "'", "\\": "\\"}
+
+
+def _unescape(text: str) -> str:
+    if "\\" not in text:
+        return text
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c != "\\" or i + 1 == n:
+            out.append(c)
+            i += 1
+            continue
+        e = text[i + 1]
+        if e == "u":
+            out.append(chr(int(text[i + 2 : i + 6], 16)))
+            i += 6
+        elif e == "U":
+            out.append(chr(int(text[i + 2 : i + 10], 16)))
+            i += 10
+        else:
+            out.append(_ESCAPES.get(e, e))
+            i += 2
+    return "".join(out)
+
+
+def _tsv_term(field: str) -> dict[str, str] | None:
+    """One SPARQL TSV field (a term in Turtle syntax) as a SPARQL JSON binding."""
+    if not field:
+        return None
+    k = field[0]
+    if k == "<":
+        return {"type": "uri", "value": _unescape(field[1:-1])}
+    if field.startswith("_:"):
+        return {"type": "bnode", "value": field[2:]}
+    if k == '"':
+        i = 1
+        while True:  # the closing quote: one not escaped
+            j = field.index('"', i)
+            backslashes = 0
+            while field[j - 1 - backslashes] == "\\":
+                backslashes += 1
+            if backslashes % 2 == 0:
+                break
+            i = j + 1
+        value = _unescape(field[1:j])
+        rest = field[j + 1 :]
+        if rest.startswith("@"):
+            return {"type": "literal", "value": value, "xml:lang": rest[1:]}
+        if rest.startswith("^^<"):
+            dt = rest[3:-1]
+            if dt == XSD + "string":
+                return {"type": "literal", "value": value}
+            return {"type": "literal", "value": value, "datatype": dt}
+        return {"type": "literal", "value": value}
+    # Turtle's short forms: numbers and booleans.
+    if field in ("true", "false"):
+        return {"type": "literal", "value": field, "datatype": XSD + "boolean"}
+    if "e" in field or "E" in field:
+        return {"type": "literal", "value": field, "datatype": XSD + "double"}
+    if "." in field:
+        return {"type": "literal", "value": field, "datatype": XSD + "decimal"}
+    return {"type": "literal", "value": field, "datatype": XSD + "integer"}
+
+
+def _lines(chunks):
+    """Lines split at "\\n" only (httpx's iter_lines also splits at U+2028 and other
+    line breaks, which a literal may hold)."""
+    rest = ""
+    for chunk in chunks:
+        rest += chunk
+        *done, rest = rest.split("\n")
+        yield from done
+    if rest:
+        yield rest
+
+
+def tsv_rows(lines) -> list[dict[str, dict[str, str]]]:
+    """SPARQL TSV results (an iterable of lines) as SPARQL JSON bindings."""
+    it = iter(lines)
+    head = next(it, "")
+    names = [v.strip()[1:] for v in head.rstrip("\r\n").split("\t")] if head.strip() else []
+    out = []
+    for line in it:
+        line = line.rstrip("\r\n")
+        if not line and len(names) != 1:
+            continue
+        row = {}
+        for name, field in zip(names, line.split("\t"), strict=False):
+            term = _tsv_term(field)
+            if term is not None:
+                row[name] = term
+        out.append(row)
+    return out
+
 
 class StoreRequestError(Exception):
     """The RDF store refused a request (e.g. invalid Turtle or SPARQL)."""
@@ -84,6 +197,30 @@ class MemoryStore:
 
     def update(self, sparql: str) -> None:
         self._store.update(sparql)
+
+    def select(self, sparql: str) -> list[dict[str, dict[str, str]]]:
+        """Rows one at a time from the solutions, without a JSON document in between."""
+        result = self._store.query(sparql)
+        names = [v.value for v in result.variables]
+        out = []
+        for solution in result:
+            row = {}
+            for name in names:
+                t = solution[name]
+                if t is None:
+                    continue
+                if isinstance(t, ox.NamedNode):
+                    row[name] = {"type": "uri", "value": t.value}
+                elif isinstance(t, ox.BlankNode):
+                    row[name] = {"type": "bnode", "value": t.value}
+                elif t.language:
+                    row[name] = {"type": "literal", "value": t.value, "xml:lang": t.language}
+                elif t.datatype.value != XSD + "string":
+                    row[name] = {"type": "literal", "value": t.value, "datatype": t.datatype.value}
+                else:
+                    row[name] = {"type": "literal", "value": t.value}
+            out.append(row)
+        return out
 
     def list_graphs(self) -> list[str]:
         return _graph_names(self.query(LIST_GRAPHS_QUERY))
@@ -155,6 +292,35 @@ class SparqlHttpStore:
         resp = self._post_query(url, sparql)
         self._check(resp)
         return resp.json()
+
+    def select(self, sparql: str) -> list[dict[str, dict[str, str]]]:
+        """Rows of a SELECT, read as SPARQL TSV a line at a time as they arrive: other
+        threads run between lines, where decoding one large JSON document would hold
+        the interpreter lock until it is done."""
+        url = self.query_url
+        for attempt in (1, 2):
+            try:
+                with self._http.stream(
+                    "POST",
+                    url,
+                    content=sparql.encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/sparql-query",
+                        "Accept": "text/tab-separated-values",
+                    },
+                ) as resp:
+                    if resp.status_code in UNAVAILABLE and self.fallback_query_url and attempt == 1:
+                        url = self.fallback_query_url
+                        continue
+                    if not resp.is_success:
+                        resp.read()
+                        self._check(resp)
+                    return tsv_rows(_lines(resp.iter_text()))
+            except httpx.TransportError:
+                if attempt == 2 or not self.fallback_query_url:
+                    raise
+                url = self.fallback_query_url
+        raise RuntimeError("unreachable")
 
     def update(self, sparql: str) -> None:
         resp = self._http.post(

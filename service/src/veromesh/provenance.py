@@ -33,7 +33,7 @@ from . import entities as E
 from .compactgraph import compact_graph
 from .modelcache import cached
 from .ontology import literal
-from .rdf_store import RDFStore
+from .rdf_store import RDFStore, select
 
 VMP = Namespace("https://veromesh.ai/ontology/provenance#")
 PROV = Namespace("http://www.w3.org/ns/prov#")
@@ -339,16 +339,17 @@ def _claim_rows(
     """Claims matching ``where``; or the one claim ``iri``, or the claims ``changeset``
     created (each looked up directly, not by reading every claim)."""
     c = f"<{iri}>" if iri else "?c"
-    select = f"(<{iri}> AS ?c)" if iri else "?c"
+    head = f"(<{iri}> AS ?c)" if iri else "?c"
     by_cs = f"?c <{PROV.wasGeneratedBy}> <{CHANGESET_BASE}{changeset}> ." if changeset and not iri else ""
-    res = store.query(
-        f"""SELECT {select} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+    rows = select(
+        store,
+        f"""SELECT {head} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
               {by_cs}
               {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
               OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
               OPTIONAL {{ {c} <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ {c} <{PROV.wasGeneratedBy}> ?cs }}
-              {where} }} }}"""
+              {where} }} }}""",
     )
 
     def v(b, k):
@@ -368,7 +369,7 @@ def _claim_rows(
             changeset=v(b, "cs")[len(CHANGESET_BASE) :] if v(b, "cs") else None,
             iri=v(b, "c"),
         )
-        for b in res["results"]["bindings"]
+        for b in rows
     ]
 
 
@@ -535,13 +536,14 @@ def read_attestations(store: RDFStore, entity: tuple[str, str] | None = None) ->
 
 def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[Attestation]:
     where = f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})" if entity else ""
-    res = store.query(
+    rows = select(
+        store,
         f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
               ?a a <{VMP.Attestation}> ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ; <{VMP.source}> ?src ;
                  <{VMP.fieldHashes}> ?h ; <{VMP.verdict}> ?verdict ; <{PROV.endedAtTime}> ?at ;
                  <{VMP.attestedBy}> ?person ; <{VMP.inRole}> ?role .
               OPTIONAL {{ ?a <{VMP.expiresAt}> ?exp }} OPTIONAL {{ ?a <{VMP.note}> ?note }} {where} }} }}
-            ORDER BY ?at"""
+            ORDER BY ?at""",
     )
     return [
         Attestation(
@@ -557,7 +559,7 @@ def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[
             expires_at=b.get("exp", {}).get("value"),
             note=b.get("note", {}).get("value"),
         )
-        for b in res["results"]["bindings"]
+        for b in rows
     ]
 
 
@@ -718,9 +720,9 @@ def effective_graph(store: RDFStore) -> Graph:
 def _effective_graph(store: RDFStore) -> Graph:
     from .changesets import _term
 
-    res = store.query(f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
+    rows = select(store, f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
     g = compact_graph()  # cached until the model changes
-    for b in res["results"]["bindings"]:
+    for b in rows:
         g.add((_term(b["s"]), _term(b["p"]), _term(b["o"])))
     return g
 
