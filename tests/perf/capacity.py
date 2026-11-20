@@ -21,6 +21,7 @@ answers somewhat fewer.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import statistics
 import sys
@@ -52,7 +53,9 @@ def memory() -> dict:
         for line in Path("/proc/self/status").read_text().splitlines():
             if line.startswith(("VmRSS:", "VmHWM:")):
                 key, value = line.split(":", 1)
-                out["rss_mb" if key == "VmRSS" else "peak_rss_mb"] = round(int(value.split()[0]) / 1024, 1)
+                out["rss_mb" if key == "VmRSS" else "peak_rss_mb"] = round(
+                    int(value.split()[0]) / 1024, 1
+                )
     except OSError:
         pass
     return out
@@ -63,7 +66,10 @@ def agents(batches: list[list[dict]]) -> list[dict]:
     out = []
     for d, batch in enumerate(batches):
         for it in batch:
-            if it["type"] == "agents" and it["entity"]["id"] == f"InvoiceAssistant-d{d}":
+            if (
+                it["type"] == "agents"
+                and it["entity"]["id"] == f"InvoiceAssistant-d{d}"
+            ):
                 out.append(
                     {
                         "agent": it["entity"]["id"],
@@ -95,8 +101,44 @@ def percentile(xs: list[float], p: float) -> float:
     return xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))]
 
 
+class GcPauses:
+    """Python's garbage-collector pauses while it is installed (each one stops every
+    thread): how many full collections, and the longest and total pause."""
+
+    def __init__(self) -> None:
+        self.pauses: list[tuple[int, float]] = []
+        self._start = 0.0
+
+    def __call__(self, phase: str, info: dict) -> None:
+        if phase == "start":
+            self._start = time.perf_counter()
+        else:
+            self.pauses.append((info["generation"], time.perf_counter() - self._start))
+
+    def __enter__(self) -> GcPauses:
+        gc.callbacks.append(self)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        gc.callbacks.remove(self)
+
+    def summary(self) -> dict:
+        full = [d for g, d in self.pauses if g == 2]
+        every = [d for _, d in self.pauses]
+        return {
+            "gc_full": len(full),
+            "gc_max_ms": round(max(every, default=0.0) * 1000, 1),
+            "gc_total_ms": round(sum(every) * 1000, 1),
+        }
+
+
 def throughput(
-    store, log, pool: list[dict], concurrency: int, seconds: float, edit_every: float | None = None
+    store,
+    log,
+    pool: list[dict],
+    concurrency: int,
+    seconds: float,
+    edit_every: float | None = None,
 ) -> dict:
     """``concurrency`` threads ask decision checks as fast as they are answered for
     ``seconds``; with ``edit_every``, an edit lands that often meanwhile (each one
@@ -132,20 +174,26 @@ def throughput(
                 "op": "upsert",
                 "entity": {"id": "Person3-d0", "name": f"Load {edits[0]}"},
             }
-            changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
+            changesets.apply(
+                store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY
+            )
 
     check_once(store, log, pool[0])  # warm
-    threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in range(concurrency)]
+    threads = [
+        threading.Thread(target=worker, args=(k,), daemon=True)
+        for k in range(concurrency)
+    ]
     if edit_every:
         threads.append(threading.Thread(target=editor, daemon=True))
-    start = time.perf_counter()
-    for t in threads:
-        t.start()
-    time.sleep(seconds)
-    stop.set()
-    for t in threads:
-        t.join()
-    elapsed = time.perf_counter() - start
+    with GcPauses() as pauses:
+        start = time.perf_counter()
+        for t in threads:
+            t.start()
+        time.sleep(seconds)
+        stop.set()
+        for t in threads:
+            t.join()
+        elapsed = time.perf_counter() - start
     return {
         "concurrency": concurrency,
         "edits_per_s": round(edits[0] / elapsed, 2) if edit_every else 0,
@@ -154,7 +202,9 @@ def throughput(
         "p50_ms": round(percentile(latencies, 50) * 1000, 1),
         "p95_ms": round(percentile(latencies, 95) * 1000, 1),
         "p99_ms": round(percentile(latencies, 99) * 1000, 1),
+        "max_ms": round(max(latencies, default=0.0) * 1000, 1),
         "errors": errors[0],
+        **pauses.summary(),
     }
 
 
@@ -175,16 +225,22 @@ def log_growth(store, pool: list[dict], sizes=(0, 1000, 5000)) -> list[dict]:
             check_once(store, log, a)
             times.append(time.perf_counter() - t)
             logged += 1
-        out.append({"entries": size, "check_ms": round(statistics.median(times) * 1000, 2)})
+        out.append(
+            {"entries": size, "check_ms": round(statistics.median(times) * 1000, 2)}
+        )
     return out
 
 
 def throughput_table(runs: list[dict]) -> str:
-    lines = ["  concurrency  checks/s   p50 ms   p95 ms   p99 ms  edits/s  errors"]
+    lines = [
+        "  concurrency  checks/s   p50 ms   p95 ms   p99 ms   max ms  edits/s  errors"
+        "  gc full  gc max ms  gc total ms"
+    ]
     for r in runs:
         lines.append(
             f"  {r['concurrency']:>11}  {r['checks_per_s']:>8}  {r['p50_ms']:>7}  {r['p95_ms']:>7}"
-            f"  {r['p99_ms']:>7}  {r['edits_per_s']:>7}  {r['errors']:>6}"
+            f"  {r['p99_ms']:>7}  {r.get('max_ms', 0):>7}  {r['edits_per_s']:>7}  {r['errors']:>6}"
+            f"  {r.get('gc_full', 0):>7}  {r.get('gc_max_ms', 0):>9}  {r.get('gc_total_ms', 0):>11}"
         )
     return "\n".join(lines)
 
@@ -213,16 +269,24 @@ def grow(
 
     def edit() -> float:
         n[0] += 1
-        item = {"type": "people", "op": "upsert", "entity": {"id": "Person1-d0", "name": f"Grow {n[0]}"}}
+        item = {
+            "type": "people",
+            "op": "upsert",
+            "entity": {"id": "Person1-d0", "name": f"Grow {n[0]}"},
+        }
         t = time.perf_counter()
-        changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
+        changesets.apply(
+            store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY
+        )
         return time.perf_counter() - t
 
     print(
         f"{'people':>9} {'triples':>10} {'load s':>8} {'edit ms':>8} {'check p95':>9} {'checks/s':>9} {'RSS MB':>8}"
     )
     while loaded < max_domains:
-        if len(rows) >= 2:  # stop before a step that would not fit: loading peaks above the steady state
+        if (
+            len(rows) >= 2
+        ):  # stop before a step that would not fit: loading peaks above the steady state
             grew = rows[-1]["peak_rss_mb"] - rows[-2]["peak_rss_mb"]
             if rows[-1]["peak_rss_mb"] + 1.5 * grew > stop_rss_gb * 1024:
                 reason = f"the next step would pass {stop_rss_gb} GB (peak {rows[-1]['peak_rss_mb']:.0f} MB, +{grew:.0f} MB a step)"
@@ -230,7 +294,9 @@ def grow(
         t = time.perf_counter()
         try:
             for batch in batches[loaded : loaded + step]:
-                changesets.apply(store, source="hr", items=batch, base=BASE, ontology_dir=ONTOLOGY)
+                changesets.apply(
+                    store, source="hr", items=batch, base=BASE, ontology_dir=ONTOLOGY
+                )
         except MemoryError:
             reason = "out of memory while loading"
             break
@@ -238,7 +304,9 @@ def grow(
         loaded = min(max_domains, loaded + step)
         edit_s = statistics.median(edit() for _ in range(3))
         pool = agents(batches[:loaded])
-        step_log = decisions.make_log("memory") if log_spec == "memory" else log  # the day starts empty
+        step_log = (
+            decisions.make_log("memory") if log_spec == "memory" else log
+        )  # the day starts empty
         run = throughput(store, step_log, pool, concurrency, seconds)
         mem = memory()
         row = {
@@ -268,7 +336,8 @@ def grow(
     good = [
         r
         for r in rows
-        if r["edit_s"] <= EDIT_LIMIT_S and r["throughput"]["p95_ms"] / 1000 <= CHECK_P95_LIMIT_S
+        if r["edit_s"] <= EDIT_LIMIT_S
+        and r["throughput"]["p95_ms"] / 1000 <= CHECK_P95_LIMIT_S
     ]
     summary = {
         "stopped": reason,
@@ -277,7 +346,9 @@ def grow(
         "log": log_spec.split(":")[0],
         "steps": rows,
     }
-    print(f"Stopped: {reason}. Within the guarantee up to {summary['carried_people']:,} people.")
+    print(
+        f"Stopped: {reason}. Within the guarantee up to {summary['carried_people']:,} people."
+    )
     if out:
         Path(out).write_text(json.dumps(summary, indent=2) + "\n")
     return 0
@@ -287,18 +358,39 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="VeroMesh capacity: grow the organization until the machine runs out"
     )
-    ap.add_argument("--step", type=int, default=10, help="domains loaded between measurements")
+    ap.add_argument(
+        "--step", type=int, default=10, help="domains loaded between measurements"
+    )
     ap.add_argument("--people", type=int, default=1000, help="extra people per domain")
     ap.add_argument("--max-domains", type=int, default=1000)
     ap.add_argument("--store", default="memory")
-    ap.add_argument("--log", default="memory", help="memory, or a PostgreSQL URL for the decision log")
-    ap.add_argument("--stop-rss-gb", type=float, default=6.0, help="stop when this process holds more")
-    ap.add_argument("--seconds", type=float, default=3.0, help="length of each throughput run")
+    ap.add_argument(
+        "--log",
+        default="memory",
+        help="memory, or a PostgreSQL URL for the decision log",
+    )
+    ap.add_argument(
+        "--stop-rss-gb",
+        type=float,
+        default=6.0,
+        help="stop when this process holds more",
+    )
+    ap.add_argument(
+        "--seconds", type=float, default=3.0, help="length of each throughput run"
+    )
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--out")
     a = ap.parse_args(argv)
     return grow(
-        a.step, a.people, a.max_domains, a.store, a.log, a.stop_rss_gb, a.seconds, a.concurrency, a.out
+        a.step,
+        a.people,
+        a.max_domains,
+        a.store,
+        a.log,
+        a.stop_rss_gb,
+        a.seconds,
+        a.concurrency,
+        a.out,
     )
 
 

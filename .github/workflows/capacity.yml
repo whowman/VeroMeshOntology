@@ -42,6 +42,9 @@ on:
       stop_rss_gb:
         description: "grow: stop when the service process holds more memory"
         default: "5"
+      fuseki_heap:
+        description: "Fuseki's Java heap (the image's default is 1g; production values use 4g)"
+        default: "4g"
       runner:
         description: "the machine (a runner label)"
         default: ubuntu-latest
@@ -64,11 +67,15 @@ jobs:
           lscpu | grep -E "Model name|^CPU\(s\)"
       - name: Start Fuseki
         if: inputs.store == 'fuseki'
+        env:
+          FUSEKI_HEAP: ${{ inputs.fuseki_heap }}
         run: |
           source deploy/versions.env
           docker build -q --build-arg JENA_VERSION="$JENA_VERSION" \
             --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" -t veromesh/fuseki:capacity deploy/fuseki
-          docker run -d --name fuseki -p 127.0.0.1:3030:3030 veromesh/fuseki:capacity
+          # The heap the run asks for, and a log of Java's garbage-collector pauses.
+          docker run -d --name fuseki -p 127.0.0.1:3030:3030 \
+            -e JAVA_OPTS="-Xmx$FUSEKI_HEAP -Xlog:gc:stdout:uptime" veromesh/fuseki:capacity
           for i in $(seq 90); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ] && exit 0
             sleep 2
@@ -106,6 +113,23 @@ jobs:
             python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear \
               --throughput "$THROUGHPUT" --edits-every 1 --out "capacity-results/bench-$SIZE.json"
           fi
+      - name: Fuseki's garbage-collector pauses
+        if: always() && inputs.store == 'fuseki'
+        run: |
+          docker stats --no-stream fuseki
+          # Lines like "[12.345s] GC(7) Pause Full (Allocation Failure) 980M->960M(1024M) 2345.678ms"
+          docker logs fuseki 2>&1 | grep -E "GC\([0-9]+\) Pause" > fuseki-gc.log || true
+          python - <<'PY'
+          import re
+          rows = [l for l in open("fuseki-gc.log")]
+          ms = lambda l: float(re.search(r"([0-9.]+)ms\s*$", l).group(1)) if re.search(r"([0-9.]+)ms\s*$", l) else 0.0
+          full = [ms(l) for l in rows if "Pause Full" in l]
+          every = [ms(l) for l in rows]
+          print(f"Fuseki GC pauses: {len(every)}, full {len(full)}, longest {max(every, default=0):.0f} ms, "
+                f"total {sum(every) / 1000:.1f} s, full total {sum(full) / 1000:.1f} s")
+          for l in sorted(rows, key=ms)[-5:]:
+              print("  " + l.strip())
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
