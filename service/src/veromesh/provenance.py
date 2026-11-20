@@ -331,12 +331,17 @@ def extract(graph: Graph, base: str) -> dict[tuple[str, str], dict]:
     return out
 
 
-def _claim_rows(store: RDFStore, where: str, iri: str | None = None) -> list[Claim]:
-    """Claims matching ``where``; or the one claim ``iri`` (looked up directly)."""
+def _claim_rows(
+    store: RDFStore, where: str, iri: str | None = None, changeset: str | None = None
+) -> list[Claim]:
+    """Claims matching ``where``; or the one claim ``iri``, or the claims ``changeset``
+    created (each looked up directly, not by reading every claim)."""
     c = f"<{iri}>" if iri else "?c"
     select = f"(<{iri}> AS ?c)" if iri else "?c"
+    by_cs = f"?c <{PROV.wasGeneratedBy}> <{CHANGESET_BASE}{changeset}> ." if changeset and not iri else ""
     res = store.query(
         f"""SELECT {select} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+              {by_cs}
               {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
               OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
@@ -467,14 +472,15 @@ def record_source(
         store.load_turtle(g.serialize(format="nt"), CLAIMS_GRAPH, replace=False)
     if changes is not None:
         # The written claims as the store gives them back (it may normalise times).
-        written = [str(c) for c in created] + [iri for iri, _ in refresh]
+        made = {str(c) for c in created}
         back: list[Claim] = []
-        if len(written) > 50:  # a large load: one pass over the claims is cheaper
-            wanted = set(written)
-            back = [c for c in _claim_rows(store, "") if c.iri in wanted]
+        if len(made) > 20 and changeset:  # a load: the claims this changeset made, in one query
+            back = [c for c in _claim_rows(store, "", changeset=changeset) if c.iri in made]
         else:
-            for iri in written:
+            for iri in made:
                 back += _claim_rows(store, "", iri=iri)
+        for iri, _ in refresh:
+            back += _claim_rows(store, "", iri=iri)
         cats = categories(store)
         for c in back:
             c.category = cats.get(c.source, DEFAULT_CATEGORY)

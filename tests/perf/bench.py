@@ -2,7 +2,8 @@
 
 Builds a synthetic organization (tests/perf/orggen.py) in a store, then times
 what users and agents do: load it, edit one fact, read, look up a person, ask
-the decision check, read coverage. Prints a table and writes JSON; with
+the decision check, read coverage, and re-sync the whole source as one replace
+load with one change (what a nightly connector run does). Prints a table and writes JSON; with
 --check, fails when a timing is over the budget for that size in targets.json.
 
     python tests/perf/bench.py --size small
@@ -91,6 +92,21 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
             require_attested=False,
         )
 
+    whole = [it for batch in batches for it in batch]
+
+    def resync():
+        """A nightly sync: the whole source again as one replace load, one person changed."""
+        n[0] += 1
+        items = [
+            {**it, "entity": {**it["entity"], "name": f"Synced {n[0]}"}}
+            if it["type"] == "people" and it["entity"].get("id") == "Person2-d0"
+            else it
+            for it in whole
+        ]
+        cs = changesets.create(store, source="hr", mode="replace", kind="connector")["id"]
+        changesets.add_items(store, cs, items)
+        return changesets.commit(store, cs, base=BASE, ontology_dir=ONTOLOGY)
+
     def cold(fn):
         """Median time of fn right after an edit, when nothing read from the model is cached."""
         times = []
@@ -111,6 +127,7 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
         "check_after_edit_s": cold(check),
         "read_people_after_edit_s": cold(lambda: changesets.list_entities(store, "people", BASE)),
         "coverage_s": timed(lambda: coverage.inventory(store, BASE), repeat)[0],
+        "resync_s": timed(resync, 1)[0],
     }
     outcome = check()["outcome"]
     return {
@@ -151,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--domains", type=int)
     ap.add_argument("--people", type=int, help="extra people per domain")
     ap.add_argument("--store", default="memory", help="memory, or fuseki:<dataset URL> (an empty dataset)")
-    ap.add_argument("--repeat", type=int, default=3, help="runs per timing (median)")
+    ap.add_argument(
+        "--repeat",
+        type=int,
+        default=5,
+        help="runs per timing (median; an odd number, so one garbage collection does not decide it)",
+    )
     ap.add_argument("--out", help="write the result as JSON here")
     ap.add_argument("--check", action="store_true", help="fail when over the budget in targets.json")
     a = ap.parse_args(argv)

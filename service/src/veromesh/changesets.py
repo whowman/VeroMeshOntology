@@ -695,12 +695,14 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
         return _Plan(target, errors, report)
 
     before, _, _ = _effective({**graphs, target_iri: current}, base, stored=stored, atts=atts, cats=cats)
-    touched = {E.iri_for(base, it.id) for it in upserts}
+    touched = _touched(upserts, current, target, base)
     # Validate only what this change can affect (validation.affected), unless told to
     # validate everything. Same verdict either way; the tests check that they agree.
     focus = None
     if not validation.full_validation():
-        focus = validation.affected([before, after], validation.changed_nodes(before, after) | touched)
+        focus = validation.affected(
+            [before, after], validation.changed_nodes(before, after, ontology_dir) | touched
+        )
     before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir, focus)}
 
     def describe(sev: str, focus, message: str) -> dict:
@@ -742,6 +744,14 @@ def _fast_plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontolo
     got = incremental.plan(st, meta, items, base, ontology_dir)
     incremental.STATS["full" if got is None else "fast"] += 1
     return None if got is None else (st, version, got)
+
+
+def _touched(upserts: list[Item], current: Graph, target: Graph, base: str) -> set:
+    """The upserted entities this changeset changes in its source (or dates anew): the
+    ones its warnings are reported for. Re-sending an unchanged entity reports nothing."""
+    delta = (current - target) + (target - current)
+    nodes = set(delta.subjects()) | {o for o in delta.objects() if isinstance(o, URIRef)}
+    return {E.iri_for(base, it.id) for it in upserts if it.meta or E.iri_for(base, it.id) in nodes}
 
 
 def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:

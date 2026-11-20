@@ -31,7 +31,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 
-from rdflib import RDF, BNode, Graph, URIRef
+from rdflib import BNode, Graph, URIRef
 from rdflib.namespace import XSD
 
 from . import clock, validation
@@ -110,6 +110,41 @@ class View:
                 if not ks:
                     del self.referrers[rid]
 
+    def preview(self, changes: dict[Key, P.Resolved | None]) -> Preview | None:
+        """What ``update(changes)`` would convert, without changing the view: the triples of
+        every entity it reconverts (none for one that goes) and their reference errors, in
+        key order. None when an ID would gain a second type."""
+        gone: set[str] = set()
+        came: dict[str, str] = {}
+        for k, r in changes.items():
+            had = k in self.resolved
+            cur = self.ids.get(k[1])
+            if r is not None and not had and cur is not None and cur != k[0]:
+                return None
+            if had and r is None and cur == k[0]:
+                gone.add(k[1])
+            elif r is not None and cur != k[0]:
+                came[k[1]] = k[0]
+
+        def look(rid: str):
+            if rid in came:
+                return came[rid]
+            return None if rid in gone else self.ids.get(rid)
+
+        def present(k: Key) -> bool:
+            return changes[k] is not None if k in changes else k in self.resolved
+
+        todo = {k for k, r in changes.items() if r is not None}
+        for rid in gone | set(came):
+            todo |= {k for k in self.referrers.get(rid, ()) if present(k)}
+        out = Preview(triples={k: [] for k, r in changes.items() if r is None}, errors=[])
+        for k in sorted(todo):
+            r = changes[k] if k in changes else self.resolved[k]
+            ts, errs = _convert(r, self.base, look)
+            out.triples[k] = ts
+            out.errors.extend(e.as_dict() for e in errs)
+        return out
+
     def update(self, changes: dict[Key, P.Resolved | None]) -> tuple[list, list]:
         """Set (or, with None, remove) entities; the triples the graph lost and gained.
         Entities referring to an ID that appeared or went are reconverted too."""
@@ -157,6 +192,12 @@ class View:
                 self.graph.add(t)
                 gained.append(t)
         return lost, gained
+
+
+@dataclass
+class Preview:
+    triples: dict[Key, list]
+    errors: list[dict]
 
 
 def _convert(r: P.Resolved, base: str, index) -> tuple[list, list]:
@@ -276,8 +317,9 @@ class Edit:
     values: dict[Key, dict]  # their values as the source now states them
     model_removed: list
     model_added: list
-    model_new: dict[Key, tuple[P.Resolved, list]]
+    model_new: dict[Key, list]  # the triples of every entity the change reconverts
     item_meta: dict[Key, dict] = field(default_factory=dict)
+    model_changes: dict = field(default_factory=dict)
     applied: bool = True
 
 
@@ -327,40 +369,48 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
     full path". The state is left changed by the plan: commit it, or ``undo`` it."""
     from .changesets import _tidy, source_graph
 
-    if meta["mode"] != "merge" or any(it.op != "upsert" for it in items) or not items:
-        return None
+    mode = meta["mode"]
+    upserts = [it for it in items if it.op == "upsert"]
+    deletes = [it for it in items if it.op == "delete"]
+    if deletes and mode == "replace":
+        return None  # the full path reports that deletes need merge mode
     if st.base != base or st.day != clock.today():
         return None
     source = meta["source"]
     target_iri = source_graph(source)
     g = st.graphs.get(target_iri, Graph())
 
-    # The source graph after the change, exactly as the full path builds it.
+    # The source graph after the change, exactly as the full path builds it: in
+    # replace mode the changeset is the whole source; in merge mode each item's
+    # entity is removed first, then the upserts are added.
     inverse_props = {c.prop for sh in E.TYPES.values() for c in sh.cols if c.inverse}
-    remove: set = set()
-    for it in items:
-        subj = E.iri_for(base, it.id)
-        for t in g.triples((subj, None, None)):
-            if t[1] not in inverse_props:
-                remove.add(t)
-        for col in E.TYPES[it.type].cols:
-            if col.inverse:
-                remove.update(g.triples((None, col.prop, subj)))
-
     item_ids = {it.id for it in items}
+    if mode == "replace":
+        remove: set = set(g)
+    else:
+        remove = set()
+        for it in items:
+            subj = E.iri_for(base, it.id)
+            for t in g.triples((subj, None, None)):
+                if t[1] not in inverse_props:
+                    remove.add(t)
+            for col in E.TYPES[it.type].cols:
+                if col.inverse:
+                    remove.update(g.triples((None, col.prop, subj)))
+    in_source = {it.id: it.type in E.types_of(g, E.iri_for(base, it.id)) for it in deletes}
 
     def known(rid: str) -> str | None:
         per = st.typed.get(rid, {})
         others = set().union(*(ts for iri, ts in per.items() if iri != target_iri))
         if others:
             return _first(others)
-        if rid in item_ids:
-            return None  # its triples in this source are removed before the index is built
+        if mode == "replace" or rid in item_ids:
+            return None  # its triples in this source are gone before the index is built
         return _first(per.get(target_iri, set()))
 
     errors: list[dict] = []
     index: dict[str, str] = {}
-    for it in items:
+    for it in upserts:
         prior = index[it.id] if it.id in index else known(it.id)
         if prior is not None and prior != it.type:
             errors.append(
@@ -375,7 +425,7 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
 
     partial = source == P.STEWARD_SOURCE
     new: set = set()
-    for it in items:
+    for it in upserts:
         conv = E.to_triples(it.type, it.entity, base, lookup, partial=partial)
         errors.extend(e.as_dict() for e in conv.errors)
         new.update(conv.triples)
@@ -384,17 +434,19 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
     if any(isinstance(x, BNode) for t in removed + added for x in t):
         return None  # DELETE DATA cannot name a blank node: the full path rewrites the graph
     nodes = _nodes(removed + added)
+    source_nodes = nodes
     before_types = {n: set(E.types_of(g, n)) for n in nodes}
     _apply_graph(st.graphs.setdefault(target_iri, g), removed, added)
     edit = Edit(target_iri, removed, added, [], {}, [], [], {})
     _retype(st, edit)
 
-    # The entities whose statement by this source changed.
+    # The entities whose statement by this source changed (None: it no longer states them).
+    item_meta = {(it.type, it.id): it.meta or {} for it in upserts}
     keys: list[Key] = []
-    values: dict[Key, dict] = {}
+    values: dict[Key, dict | None] = {}
     for n in sorted(nodes, key=str):
         after = set(E.types_of(g, n))
-        if before_types[n] and before_types[n] != after:
+        if before_types[n] and after and before_types[n] != after:
             undo(st, edit)
             return None  # an entity changing type in this source: full path
         for t in sorted(after):
@@ -403,60 +455,82 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
             key = (t, rid)
             vals = {k: v for k, v in ent.items() if not P.empty(v)}
             old = st.claims.get(key, {}).get(source)
-            if old is not None and P.value_hash(old.values) == P.value_hash(vals) and key[1] not in item_ids:
-                continue
+            if old is not None and P.value_hash(old.values) == P.value_hash(vals) and not item_meta.get(key):
+                continue  # same claim as before
             keys.append(key)
             values[key] = vals
-    edit.keys, edit.values = keys, values
-    edit.item_meta = {(it.type, it.id): it.meta or {} for it in items}
+        for t in sorted(before_types[n] - after):
+            key = (t, E.local_id(base, n))
+            keys.append(key)
+            values[key] = None
+    edit.keys, edit.values, edit.item_meta = keys, values, item_meta
 
-    # Those entities in the model, re-resolved; the claims of other sources stay.
+    # Those entities in the model, re-resolved (the claims of other sources stay), and
+    # every entity that refers to an ID that appears or goes, reconverted.
     at = _now()
-    item_meta = edit.item_meta
     model = st.model
-    new_keys = [k for k in keys if k not in model.resolved]
-    index_get = dict(model.ids)
-    for k in new_keys:
-        if k[1] in index_get:
-            undo(st, edit)
-            return None  # an ID gaining a second type changes how references resolve
-    index_get.update({k[1]: k[0] for k in new_keys})
-    ref_errors: list[dict] = []
+    changes: dict[Key, P.Resolved | None] = {}
     for k in sorted(keys):
         cs = [c for s, c in st.claims.get(k, {}).items() if s != source]
-        old = st.claims.get(k, {}).get(source)
-        m = item_meta.get(k, {})
-        same = old is not None and P.value_hash(old.values) == P.value_hash(values[k])
-        cs.append(
-            P.Claim(
-                source=source,
-                type=k[0],
-                id=k[1],
-                values=values[k],
-                category=st.cats.get(source, P.DEFAULT_CATEGORY),
-                observed_at=m.get("observedAt") or (old.observed_at if same else at),
-                valid_from=m.get("validFrom", old.valid_from if same else None),
-                valid_until=m.get("validUntil", old.valid_until if same else None),
+        if values[k] is not None:
+            old = st.claims.get(k, {}).get(source)
+            m = item_meta.get(k, {})
+            same = old is not None and P.value_hash(old.values) == P.value_hash(values[k])
+            cs.append(
+                P.Claim(
+                    source=source,
+                    type=k[0],
+                    id=k[1],
+                    values=values[k],
+                    category=st.cats.get(source, P.DEFAULT_CATEGORY),
+                    observed_at=m.get("observedAt") or (old.observed_at if same else at),
+                    valid_from=m.get("validFrom", old.valid_from if same else None),
+                    valid_until=m.get("validUntil", old.valid_until if same else None),
+                )
             )
-        )
-        r = P.resolve(cs, st.atts.get(k, []), ignore_validity=True)[k]
-        ts, errs = _convert(r, base, index_get.get)
-        ref_errors.extend(e.as_dict() for e in errs)
-        edit.model_new[k] = (r, ts)
-    for e in ref_errors:
+        changes[k] = P.resolve(cs, st.atts.get(k, []), ignore_validity=True).get(k)
+    preview = model.preview(changes)
+    if preview is None:
+        undo(st, edit)
+        return None  # an ID gaining a second type changes how references resolve
+    edit.model_new = preview.triples
+    edit.model_changes = changes
+
+    deleted_ids = {it.id for it in deletes}
+    still_referenced: dict[str, list[dict]] = {}
+    for e in preview.errors:
         mm = re.search(r"No entity with ID '([^']*)'", e["message"])
+        if mm and mm.group(1) in deleted_ids:
+            still_referenced.setdefault(mm.group(1), []).append(e)
+            continue
         if mm:
             e = {**e, "message": f"References '{mm.group(1)}', which no longer exists after this change."}
         errors.append(e)
+    for it in deletes:
+        if not in_source[it.id]:
+            errors.append(
+                E.FieldError(
+                    it.type, it.id, "id", f"No {it.type} '{it.id}' in source '{source}' to delete."
+                ).as_dict()
+            )
+            continue
+        key = (it.type, it.id)
+        if (changes[key] is not None) if key in changes else key in model.resolved:
+            continue  # still defined by another source
+        for e in still_referenced.get(it.id, []):
+            errors.append(
+                E.FieldError(
+                    it.type, it.id, "id", f"Still referenced by {e['type']} '{e['id']}' ({e['field']})."
+                ).as_dict()
+            )
 
-    upserts = list(items)
     report = {
         "changeset": meta["id"],
         "source": source,
-        "mode": meta["mode"],
+        "mode": mode,
         "summary": {
             "upserts": len(upserts),
-            "deletes": 0,
+            "deletes": len(deletes),
             "errors": len(errors),
             "violations": 0,
             "warnings": 0,
@@ -471,7 +545,7 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
 
     # The model's change, triple by triple (a triple two entities state stays until both drop it).
     count = Counter()
-    for k, (_, ts) in edit.model_new.items():
+    for k, ts in edit.model_new.items():
         count.subtract(model.triples.get(k, []))
         count.update(ts)
     for t, d in count.items():
@@ -479,13 +553,15 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
             edit.model_removed.append(t)
         elif d > 0 and model.count[t] == 0:
             edit.model_added.append(t)
-    changed: set[URIRef] = set()
-    for s, p, o in edit.model_removed + edit.model_added:
-        if isinstance(s, URIRef):
-            changed.add(s)
-        if isinstance(o, URIRef) and p != RDF.type:
-            changed.add(o)
-    touched = {E.iri_for(base, it.id) for it in upserts}
+    delta = edit.model_removed + edit.model_added
+    objects = validation.object_candidates(delta, ontology_dir)
+    sch = validation.schema(ontology_dir)
+    types_before = {o: sch.types(model.graph, o) for o in objects}
+    _apply_graph(model.graph, edit.model_removed, edit.model_added)
+    retyped = {o for o in objects if sch.types(model.graph, o) != types_before[o]}
+    _apply_graph(model.graph, edit.model_added, edit.model_removed)
+    changed = validation.changed(delta, retyped, ontology_dir)
+    touched = {E.iri_for(base, it.id) for it in upserts if it.meta or E.iri_for(base, it.id) in source_nodes}
     added_graph = Graph()
     for t in edit.model_added:
         added_graph.add(t)
@@ -522,8 +598,9 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
         report["summary"][k] = len(report[k])
     report["valid"] = not report["violations"]
     conflicts = model.conflicts + sum(
-        len(r.conflicts) - len(model.resolved[k].conflicts if k in model.resolved else {})
-        for k, (r, _) in edit.model_new.items()
+        (len(r.conflicts) if r is not None else 0)
+        - (len(model.resolved[k].conflicts) if k in model.resolved else 0)
+        for k, r in changes.items()
     )
     report["summary"]["conflicts"] = conflicts
     return report, errors, edit
@@ -596,8 +673,9 @@ def commit(
         item_meta = edit.item_meta
         changes: dict = {}
         current = {k: st.claims[k][source] for k in edit.keys if source in st.claims.get(k, {})}
+        stated = {k: v for k, v in edit.values.items() if v is not None}
         claims = P.record_source(
-            store, source, edit.values, item_meta, changeset=cs, at=at, current=current, changes=changes
+            store, source, stated, item_meta, changeset=cs, at=at, current=current, changes=changes
         )
         # The state's claims, as they now are in the store.
         superseded = set(changes["superseded"])
@@ -615,7 +693,9 @@ def commit(
         # The model validation checks, from the stored claims (as a fresh state would have it).
         st.model.update(
             {
-                k: P.resolve(list(st.claims[k].values()), st.atts.get(k, []), ignore_validity=True)[k]
+                k: P.resolve(
+                    list(st.claims.get(k, {}).values()), st.atts.get(k, []), ignore_validity=True
+                ).get(k)
                 for k in sorted(edit.keys)
             }
         )
@@ -623,7 +703,7 @@ def commit(
         # The stored effective model: what is believed today.
         lost, gained = st.today.update(
             {
-                k: P.resolve(list(st.claims[k].values()), st.atts.get(k, []), st.day).get(k)
+                k: P.resolve(list(st.claims.get(k, {}).values()), st.atts.get(k, []), st.day).get(k)
                 for k in sorted(edit.keys)
             }
         )

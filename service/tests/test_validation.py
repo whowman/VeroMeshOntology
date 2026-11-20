@@ -67,6 +67,10 @@ CASES = {
     "an authority whose holder is a KPI": lambda g: g.add(
         (EX.OnTimePaymentRate, VMO.holds, EX.ControllerAuthority)
     ),
+    # Followed backwards: the role's own check (someone fills it) changes.
+    "a role loses its only person": lambda g: g.remove((None, VMO.fills, EX.ErpPlatformLead)),
+    # Typed by a range: filling something makes it a role, which must then have a name.
+    "something unnamed is filled as a role": lambda g: g.add((EX.DanaExample, VMO.fills, EX.Mystery)),
 }
 
 
@@ -82,7 +86,7 @@ def test_validating_the_affected_nodes_finds_every_new_problem(case):
     after = broken(before, CASES[case])
     new_full = reference(after) - reference(before)
     assert new_full, "each case breaks something"
-    focus = validation.affected([before, after], validation.changed_nodes(before, after))
+    focus = validation.affected([before, after], validation.changed_nodes(before, after, ONT))
     new_focused = fast(after, focus) - fast(before, focus)
     assert new_full == new_focused
 
@@ -90,8 +94,20 @@ def test_validating_the_affected_nodes_finds_every_new_problem(case):
 def test_a_change_far_away_is_not_revalidated():
     before = example()
     after = broken(before, lambda g: g.set((EX.DanaExample, RDFS.label, Literal("Dana Renamed"))))
-    changed = validation.changed_nodes(before, after)
+    changed = validation.changed_nodes(before, after, ONT)
     assert changed == {EX.DanaExample}
     focus = validation.affected([before, after], changed)
     assert EX.DanaExample in focus and EX.InvoiceAssistant in focus  # acts for Dana
     assert EX.Sox404 not in focus and EX.PaySuppliersCorrectly not in focus
+
+
+def test_a_shared_value_does_not_pull_in_everything_that_uses_it():
+    before = example()
+    after = broken(
+        before,
+        lambda g: g.add((EX.SupplierInvoices, VMO.sensitivity, VMO.Restricted)),
+    )
+    changed = validation.changed_nodes(before, after, ONT)
+    assert changed == {EX.SupplierInvoices}  # Restricted's own checks did not change
+    focus = validation.affected([before, after], changed)
+    assert EX.SupplierPayments not in focus and EX.SupplierBankAccount not in focus  # also Restricted

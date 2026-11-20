@@ -46,6 +46,14 @@ def item(type_: str, rid: str, **changes) -> dict:
     raise KeyError(rid)
 
 
+def with_changed(type_: str, rid: str, **changes) -> list[dict]:
+    """The worked example with one entity's fields changed."""
+    return [
+        item(type_, rid, **changes) if it["type"] == type_ and it["entity"].get("id") == rid else it
+        for it in example_items()
+    ]
+
+
 def person(rid: str, **fields) -> dict:
     ent = {"id": rid, "name": rid, "employeeId": f"E-{rid}", "email": f"{rid.lower()}@example.com"}
     return {"type": "people", "op": "upsert", "entity": {**ent, **fields}}
@@ -100,8 +108,34 @@ STEPS = [
     ),
     ("hr", "merge", [{"type": "people", "op": "delete", "entity": {"id": "Later"}}]),  # deletes: full path
     ("hr", "merge", [item("kpis", "OnTimePaymentRate", name="On-time payments")]),
+    ("hr", "merge", [person(f"Batch{i}", rolesFilled=["ApManager"]) for i in range(25)]),  # a load
     ("crm", "merge", [person("CrmOnly"), item("people", "DanaExample", name="Dana Again")]),
     ("hr", "merge", [{"type": "people", "op": "upsert", "entity": {"id": "", "name": "No ID"}}]),
+    # Deletes and removals.
+    (
+        "hr",
+        "merge",
+        [{"type": "people", "op": "delete", "entity": {"id": "NewPerson"}}],
+    ),  # an agent acts for them
+    ("hr", "merge", [{"type": "people", "op": "delete", "entity": {"id": "CrmOnly"}}]),  # not in this source
+    (
+        "crm",
+        "merge",
+        [{"type": "people", "op": "delete", "entity": {"id": "DanaExample"}}],
+    ),  # hr still has her
+    ("hr", "merge", [{"type": "people", "op": "delete", "entity": {"id": "Expired"}}]),
+    # Replace loads: the whole source again with one change, then unchanged.
+    ("hr", "replace", with_changed("people", "LeeExample", name="Lee Renamed")),
+    ("hr", "replace", with_changed("people", "LeeExample", name="Lee Renamed")),
+    (
+        "hr",
+        "replace",
+        example_items()
+        + [{"type": "roles", "op": "upsert", "entity": {"id": "NewRole", "name": "New role"}}],
+    ),
+    ("crm", "merge", [person("CrmFills", rolesFilled=["NewRole"])]),  # another source uses hr's role
+    ("hr", "replace", example_items()),  # drops NewRole, which crm still uses: refused
+    ("crm", "replace", []),  # empty the source
 ]
 
 

@@ -125,6 +125,19 @@ class Schema:
                 out.setdefault(p, set()).update(out.get(sp, ()))
         return out
 
+    def types(self, data: Graph, node) -> frozenset:
+        """``node``'s classes in ``data`` once entailed (declared, from domains and ranges,
+        and their superclasses)."""
+        classes = set(data.objects(node, RDF.type))
+        for p in set(data.predicates(node, None)):
+            classes |= self.domains.get(p, set())
+        for p in set(data.predicates(None, node)):
+            classes |= self.ranges.get(p, set())
+        out = set(classes)
+        for c in classes:
+            out |= self.super_classes.get(c, set())
+        return frozenset(out)
+
     def entail(self, data: Graph) -> Graph:
         """data + the ontology + the RDFS entailments the shapes rely on."""
         g = Graph()
@@ -255,17 +268,45 @@ def neighbourhood(data: Graph, focus: set[URIRef]) -> Graph:
     return sub
 
 
-def changed_nodes(before: Graph, after: Graph) -> set[URIRef]:
-    """Subjects and objects of every triple added or removed."""
-    out: set[URIRef] = set()
-    for g1, g2 in ((before, after), (after, before)):
-        for s, p, o in g1:
-            if (s, p, o) not in g2:
-                if isinstance(s, URIRef):
-                    out.add(s)
-                if isinstance(o, URIRef) and p != RDF.type:
-                    out.add(o)
+def changed_nodes(before: Graph, after: Graph, ontology_dir: str) -> set[URIRef]:
+    """The nodes whose own validation can change between ``before`` and ``after``
+    (see ``changed``), from every triple added or removed."""
+    delta = [t for t in before if t not in after] + [t for t in after if t not in before]
+    objects = object_candidates(delta, ontology_dir)
+    sch = schema(ontology_dir)
+    retyped = {o for o in objects if sch.types(before, o) != sch.types(after, o)}
+    return changed(delta, retyped, ontology_dir)
+
+
+def object_candidates(delta: Iterable[tuple], ontology_dir: str) -> set[URIRef]:
+    """Objects of changed triples that matter only if their (entailed) types change."""
+    backwards = _backwards(ontology_dir)
+    return {o for _, p, o in delta if isinstance(o, URIRef) and p != RDF.type and p not in backwards}
+
+
+def changed(delta: Iterable[tuple], retyped: set[URIRef], ontology_dir: str) -> set[URIRef]:
+    """The nodes a changed triple (s, p, o) changes for validation. Every constraint walks
+    forward from the node it validates, except the inverse paths (``_INVERSE``) and the
+    unique-value joins (``affected`` handles those). So s always changes; o changes when
+    a shape follows p backwards to it, or when the triple changes o's entailed types
+    (a property's range types its objects): ``retyped``. A value many entities share
+    (a sensitivity level, a classification) does not pull them all in."""
+    backwards = _backwards(ontology_dir)
+    out: set[URIRef] = set(retyped)
+    for s, p, o in delta:
+        if isinstance(s, URIRef):
+            out.add(s)
+        if isinstance(o, URIRef) and p != RDF.type and p in backwards:
+            out.add(o)
     return out
+
+
+@lru_cache(maxsize=4)
+def _backwards(ontology_dir: str) -> frozenset:
+    """Properties a shape follows backwards, and their sub-properties."""
+    sch = schema(ontology_dir)
+    subs = {p for p, supers in sch.super_properties.items() if supers & set(_INVERSE)}
+    return frozenset(set(_INVERSE) | subs)
 
 
 def affected(graphs: Iterable[Graph], changed: set[URIRef]) -> set[URIRef]:
