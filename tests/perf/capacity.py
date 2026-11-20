@@ -35,6 +35,7 @@ sys.path.insert(0, str(HERE))
 import orggen  # noqa: E402
 from veromesh import changesets, decide, decisions  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
+from veromesh import gcsetup  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
 ROOT = HERE.parents[1]
@@ -259,6 +260,7 @@ def grow(
     concurrency: int,
     out: str | None,
 ) -> int:
+    gcsetup.after_startup()  # as the service does once it has started
     store = make_store(store_spec)
     log = decisions.make_log(log_spec)
     batches = orggen.organization(max_domains, people)

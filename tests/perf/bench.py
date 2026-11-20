@@ -39,12 +39,19 @@ import capacity  # noqa: E402
 import orggen  # noqa: E402
 from veromesh import changesets, coverage, decide, decisions, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
+from veromesh import gcsetup  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
 ROOT = HERE.parents[1]
 ONTOLOGY = str(ROOT / "ontology")
 BASE = "https://example.com/org#"
-SIZES = {"smoke": (2, 100), "small": (10, 200), "medium": (40, 500), "large": (100, 1000), "xl": (500, 1000)}
+SIZES = {
+    "smoke": (2, 100),
+    "small": (10, 200),
+    "medium": (40, 500),
+    "large": (100, 1000),
+    "xl": (500, 1000),
+}
 
 
 def timed(fn, repeat: int = 1) -> tuple[float, object]:
@@ -67,6 +74,7 @@ def run(
     seconds: float = 5.0,
     edits_every: float | None = None,
 ) -> dict:
+    gcsetup.after_startup()  # as the service does once it has started
     store = make_store(store_spec)
     batches = orggen.organization(domains, people)
     counts = orggen.counts(batches)
@@ -76,7 +84,9 @@ def run(
     load_times = []
     for batch in batches:
         t, _ = timed(
-            lambda b=batch: changesets.apply(store, source="hr", items=b, base=BASE, ontology_dir=ONTOLOGY)
+            lambda b=batch: changesets.apply(
+                store, source="hr", items=b, base=BASE, ontology_dir=ONTOLOGY
+            )
         )
         load_times.append(t)
     triples = len(P.effective_graph(store))
@@ -91,8 +101,14 @@ def run(
 
     def edit():
         n[0] += 1
-        item = {"type": "people", "op": "upsert", "entity": {"id": "Person1-d0", "name": f"Renamed {n[0]}"}}
-        return changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
+        item = {
+            "type": "people",
+            "op": "upsert",
+            "entity": {"id": "Person1-d0", "name": f"Renamed {n[0]}"},
+        }
+        return changesets.apply(
+            store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY
+        )
 
     def check():
         return decide.check(
@@ -118,7 +134,9 @@ def run(
             else it
             for it in whole
         ]
-        cs = changesets.create(store, source="hr", mode="replace", kind="connector")["id"]
+        cs = changesets.create(store, source="hr", mode="replace", kind="connector")[
+            "id"
+        ]
         changesets.add_items(store, cs, items)
         return changesets.commit(store, cs, base=BASE, ontology_dir=ONTOLOGY)
 
@@ -134,13 +152,17 @@ def run(
         "load_total_s": sum(load_times),
         "load_last_domain_s": load_times[-1],
         "edit_s": timed(edit, repeat)[0],
-        "read_people_s": timed(lambda: changesets.list_entities(store, "people", BASE), repeat)[0],
-        "find_person_s": timed(lambda: P.person_matching(store, "email", "person7.d0@example.com"), repeat)[
-            0
-        ],
+        "read_people_s": timed(
+            lambda: changesets.list_entities(store, "people", BASE), repeat
+        )[0],
+        "find_person_s": timed(
+            lambda: P.person_matching(store, "email", "person7.d0@example.com"), repeat
+        )[0],
         "check_s": timed(check, repeat)[0],
         "check_after_edit_s": cold(check),
-        "read_people_after_edit_s": cold(lambda: changesets.list_entities(store, "people", BASE)),
+        "read_people_after_edit_s": cold(
+            lambda: changesets.list_entities(store, "people", BASE)
+        ),
         "coverage_s": timed(lambda: coverage.inventory(store, BASE), repeat)[0],
         "resync_s": timed(resync, 1)[0],
     }
@@ -152,10 +174,19 @@ def run(
         def fresh():  # each run starts the day with an empty in-memory log
             return decisions.make_log("memory") if log_spec == "memory" else log
 
-        runs = [capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency]
+        runs = [
+            capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency
+        ]
         if edits_every:
             runs.append(
-                capacity.throughput(store, fresh(), pool, max(concurrency), seconds, edit_every=edits_every)
+                capacity.throughput(
+                    store,
+                    fresh(),
+                    pool,
+                    max(concurrency),
+                    seconds,
+                    edit_every=edits_every,
+                )
             )
         growth = capacity.log_growth(store, pool)
     return {
@@ -182,19 +213,25 @@ def report(r: dict) -> str:
         f"{r['plans'].get('fast', 0)}/{r['plans'].get('full', 0)})",
     ]
     for k, v in r["timings"].items():
-        lines.append(f"  {k:<26} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<26} {v:>10.2f} s")
+        lines.append(
+            f"  {k:<26} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<26} {v:>10.2f} s"
+        )
     mem = r.get("memory") or {}
     if mem:
         lines.append(
             f"  {'memory_mb':<26} {mem.get('rss_mb', 0):>10.0f}    (peak {mem.get('peak_rss_mb', 0):.0f})"
         )
     if r.get("throughput"):
-        lines.append(f"Decision checks under concurrent load (one copy; log: {r['log']}):")
+        lines.append(
+            f"Decision checks under concurrent load (one copy; log: {r['log']}):"
+        )
         lines.append(capacity.throughput_table(r["throughput"]))
     if r.get("log_growth"):
         lines.append(
             "A check as the day's decision log grows: "
-            + ", ".join(f"{g['entries']:,} entries {g['check_ms']} ms" for g in r["log_growth"])
+            + ", ".join(
+                f"{g['entries']:,} entries {g['check_ms']} ms" for g in r["log_growth"]
+            )
         )
     return "\n".join(lines)
 
@@ -209,10 +246,16 @@ def over_budget(r: dict, budget: dict) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="VeroMesh performance harness")
-    ap.add_argument("--size", choices=sorted(SIZES), help="a named size (see the module docstring)")
+    ap.add_argument(
+        "--size", choices=sorted(SIZES), help="a named size (see the module docstring)"
+    )
     ap.add_argument("--domains", type=int)
     ap.add_argument("--people", type=int, help="extra people per domain")
-    ap.add_argument("--store", default="memory", help="memory, or fuseki:<dataset URL> (an empty dataset)")
+    ap.add_argument(
+        "--store",
+        default="memory",
+        help="memory, or fuseki:<dataset URL> (an empty dataset)",
+    )
     ap.add_argument(
         "--repeat",
         type=int,
@@ -220,11 +263,26 @@ def main(argv: list[str] | None = None) -> int:
         help="runs per timing (median; an odd number, so one garbage collection does not decide it)",
     )
     ap.add_argument("--out", help="write the result as JSON here")
-    ap.add_argument("--check", action="store_true", help="fail when over the budget in targets.json")
-    ap.add_argument("--log", default="memory", help="the decision log: memory, or a postgresql:// URL")
-    ap.add_argument("--throughput", help="concurrencies to measure checks per second at, e.g. 1,4,16")
-    ap.add_argument("--seconds", type=float, default=5.0, help="length of each throughput run")
-    ap.add_argument("--edits-every", type=float, help="also measure with an edit every this many seconds")
+    ap.add_argument(
+        "--check", action="store_true", help="fail when over the budget in targets.json"
+    )
+    ap.add_argument(
+        "--log",
+        default="memory",
+        help="the decision log: memory, or a postgresql:// URL",
+    )
+    ap.add_argument(
+        "--throughput",
+        help="concurrencies to measure checks per second at, e.g. 1,4,16",
+    )
+    ap.add_argument(
+        "--seconds", type=float, default=5.0, help="length of each throughput run"
+    )
+    ap.add_argument(
+        "--edits-every",
+        type=float,
+        help="also measure with an edit every this many seconds",
+    )
     ap.add_argument(
         "--clear",
         action="store_true",

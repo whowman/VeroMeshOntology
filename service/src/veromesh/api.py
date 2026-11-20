@@ -33,6 +33,7 @@ from . import (
     mcp_server,
     suggest,
 )
+from . import gcsetup
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort
@@ -155,6 +156,7 @@ def create_app(
             log.warning(
                 "The decision log is in memory: decisions are lost on restart. Set VEROMESH_DECISION_LOG."
             )
+        gcsetup.after_startup()  # libraries loaded: full collections need not visit them again
         async with app.state.mcp.session_manager.run():
             yield
 
