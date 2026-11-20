@@ -176,12 +176,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", help="write the result as JSON here")
     ap.add_argument("--check", action="store_true", help="fail when over the budget in targets.json")
+    ap.add_argument(
+        "--clear",
+        action="store_true",
+        help="empty the store first (a throwaway Fuseki shared with other tests)",
+    )
     a = ap.parse_args(argv)
     size = a.size or ("custom" if a.domains else "smoke")
     domains, people = SIZES.get(size, (a.domains, a.people or 100))
     if a.domains:
         domains, people = a.domains, a.people or people
 
+    if a.clear:
+        make_store(a.store).update("DROP ALL")
     r = run(domains, people, a.store, a.repeat)
     r["size"] = size
     print(report(r))

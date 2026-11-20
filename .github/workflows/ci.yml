@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test.sh fuseki-replication fuseki decision-log backup images datahub-frontend --strict
+      - run: scripts/test.sh fuseki-replication fuseki perf-fuseki decision-log backup images datahub-frontend --strict
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -159,6 +159,18 @@ SUITES: list[Suite] = [
         ),
     ),
     Suite(
+        name="perf-fuseki",
+        component="service",
+        tier="integration",
+        needs=frozenset({"fuseki"}),
+        description="Performance on a real Fuseki: the small synthetic organization (about 2,000 people), timings only",
+        covers=("tests/perf",),
+        steps=(
+            "PYTHONPATH=service/src python tests/perf/bench.py --size small --store fuseki:{fuseki} --clear"
+            " --out {results}/perf-fuseki-small.json",
+        ),
+    ),
+    Suite(
         name="decision-log",
         component="service",
         tier="integration",
