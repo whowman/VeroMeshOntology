@@ -61,8 +61,11 @@ An edit, a decision check or a read takes time that depends on what it touches, 
 - **Loads:** replace loads (what batch connectors send), deletes and removed entities take the fast path too. A load costs about 2 to 4 ms per new entity, mostly SHACL, whatever the size of the model. A nightly sync that changes little costs reading the batch.
 - **Round trips:** a small commit (an edit) goes to the store as one update request, one transaction on Fuseki; the ontology files are uploaded only when they change. Larger loads use bulk uploads. An edit through the API makes two writes in all.
 - **Warnings:** they are reported for the entities a changeset changes, not every entity it sends, so an unchanged re-sync is quiet.
-- **Memory and pauses:** the model in memory is held as plain strings (`compactgraph.py`, an rdflib store), which Python's garbage collector does not walk; library objects are frozen once the service has started. A full collection at 100,000 people stops the service for about 2 s, where it was 16 to 22 s.
+- **Memory and pauses:** the model in memory is held as plain strings (`compactgraph.py`, an rdflib store), which Python's garbage collector does not walk; library objects are frozen once the service has started. A full collection at 100,000 people stops the service for at most about 1.5 s, where it was 16 to 22 s.
 - **Decision log:** each write is two round trips to PostgreSQL, and concurrent writes are committed together. The connections send without Nagle's delay, which had held every round trip about 40 ms under load.
+- **Validation in a worker process:** an edit's SHACL validation runs in `python -m veromesh.validation_worker`, started with the service, so decision checks do not take turns with it for Python's interpreter (`VEROMESH_VALIDATION_WORKER`).
+- **Large reads a row at a time:** reading the source graphs, the effective model, claims, attestations or a changeset's items asks Fuseki for SPARQL TSV and decodes it line by line, so other threads run while a large model is read.
+- **Re-sync:** a connector's whole load is written as N-Triples text and compared with the source graph as encoded strings; only what changed is decoded.
 
 ## Next steps
 

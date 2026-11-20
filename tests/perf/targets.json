@@ -57,6 +57,24 @@
       "find_person_s": 0.1,
       "check_s": 1.82,
       "coverage_s": 0.54
+    },
+    "fuseki_large": {
+      "_note": "2026-11-20, before PR #44: capacity job, PostgreSQL decision log",
+      "people": 100200,
+      "edit_s": 0.078,
+      "resync_s": 31.13,
+      "memory_mb": 6260,
+      "checks_per_s": {
+        "1": 25.7,
+        "4": 28.3,
+        "16": 28.0,
+        "16_with_edits": 3.0
+      },
+      "p99_ms": {
+        "16": 847.9,
+        "16_with_edits": 15800.4
+      },
+      "longest_gc_pause_ms": 15898
     }
   },
   "measured": {
@@ -102,6 +120,52 @@
       "read_people_after_edit_s": 0.006,
       "coverage_s": 0.008,
       "resync_s": 1.24
+    },
+    "fuseki_medium": {
+      "_note": "Capacity job (Actions -> Capacity), GitHub runner 4 CPU 16 GB, Fuseki 4g heap, PostgreSQL decision log, run 44820343969 (main 3956841); CI timings vary by up to about 50%",
+      "people": 20080,
+      "triples": 126880,
+      "load_total_s": 91.17,
+      "edit_s": 0.111,
+      "check_s": 0.004,
+      "check_after_edit_s": 0.005,
+      "read_people_after_edit_s": 0.031,
+      "resync_s": 6.38,
+      "memory_mb": 691,
+      "checks_per_s": {
+        "1": 235.2,
+        "4": 354.6,
+        "16": 357.1,
+        "16_with_edits": 286.8
+      },
+      "p99_ms": {
+        "16": 61.8,
+        "16_with_edits": 187.3
+      }
+    },
+    "fuseki_large": {
+      "_note": "As fuseki_medium, run 44820327493",
+      "people": 100200,
+      "triples": 617200,
+      "load_total_s": 462.35,
+      "edit_s": 0.13,
+      "check_s": 0.005,
+      "check_after_edit_s": 0.006,
+      "read_people_after_edit_s": 0.121,
+      "resync_s": 26.32,
+      "memory_mb": 2585,
+      "checks_per_s": {
+        "1": 178.4,
+        "4": 274.6,
+        "16": 213.1,
+        "16_with_edits": 229.8
+      },
+      "p99_ms": {
+        "16": 1515.4,
+        "16_with_edits": 258.2
+      },
+      "max_check_ms_with_edits": 311.0,
+      "longest_gc_pause_ms": 1481.1
     }
   }
 }

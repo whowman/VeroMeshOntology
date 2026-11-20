@@ -67,6 +67,20 @@ CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are
 
 Loading the large organization (100 domains, one changeset each) takes 4.5 minutes, 2.4 s for the last domain of 1,000 people; it took 22.5 minutes before loads were made proportional to the batch. A nightly sync of the whole source as one replace load with one change takes 0.7 s for 2,290 entities and 30 s for 102,900.
 
+### Capacity on Fuseki
+
+The capacity job (Actions → Capacity, `.github/workflows/capacity.yml`) runs the benchmark against a real Fuseki and a PostgreSQL decision log, and measures decision checks per second with 1, 4 and 16 agents asking at once, with and without an edit every second. On a GitHub runner (4 CPU, 16 GB, Fuseki with a 4 GB heap), after PR #44:
+
+| Size | People | Checks a second (1 / 4 / 16 agents) | 16 agents with edits | One check | One edit | Nightly re-sync | Memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Medium | 20,080 | 235 / 355 / 357 | 287 a second, p99 187 ms | 4 ms | 111 ms | 6.4 s | 0.7 GB |
+| Large | 100,200 | 178 / 275 / 213 | 230 a second, p99 258 ms | 5 ms | 130 ms | 26 s | 2.6 GB |
+| Large, before PR #44 | 100,200 | 26 / 28 / 28 | 3 a second, p99 15.8 s | 50 ms | 78 ms | 31 s | 6.3 GB |
+
+Runner timings vary by up to about 50% between runs; the reference machines (`docs/architecture.md`, sizing) will give steadier figures. The longest pause the service's garbage collector made in these runs was 1.5 s (once), where it was 16 to 22 s.
+
+With `diagnose` set (seconds), the job also profiles 300 checks, prints the stack of any check slower than that, and takes a py-spy dump every half second from outside the process; `tests/perf/gil_holds.py` reports any thread that held Python's interpreter lock for that long while others ran. Mode `grow` loads step after step until the machine is exhausted.
+
 Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 
 ## Contract snapshots
