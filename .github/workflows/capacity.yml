@@ -1,0 +1,113 @@
+name: Capacity
+
+# Started by hand (Actions -> Capacity -> Run workflow), never on a push: a large
+# run takes hours. It measures what the sizing proposal promises: edits, decision
+# checks per second under concurrent load, memory, loads and nightly syncs, on a
+# real Fuseki and a real PostgreSQL decision log.
+#
+#   mode bench  times one size (tests/perf/bench.py)
+#   mode grow   loads step after step until the machine is exhausted
+#               (tests/perf/capacity.py), to find how far it carries a tier
+#
+# `runner` picks the machine: a GitHub-hosted runner now; the Azure reference
+# sizes by the label of a self-hosted runner on that VM size.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [bench, grow]
+        default: bench
+      size:
+        description: "bench: the size to time"
+        type: choice
+        options: [smoke, small, medium, large, xl]
+        default: medium
+      store:
+        type: choice
+        options: [fuseki, memory]
+        default: fuseki
+      log:
+        description: "the decision log"
+        type: choice
+        options: [postgresql, memory]
+        default: postgresql
+      throughput:
+        description: "bench: concurrencies for checks per second"
+        default: "1,4,16"
+      grow_step:
+        description: "grow: domains of 1,000 people loaded between measurements"
+        default: "10"
+      stop_rss_gb:
+        description: "grow: stop when the service process holds more memory"
+        default: "5"
+      runner:
+        description: "the machine (a runner label)"
+        default: ubuntu-latest
+
+jobs:
+  capacity:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the service
+        run: pip install ./service
+      - name: The machine
+        run: |
+          nproc
+          free -g
+          lscpu | grep -E "Model name|^CPU\(s\)"
+      - name: Start Fuseki
+        if: inputs.store == 'fuseki'
+        run: |
+          source deploy/versions.env
+          docker build -q --build-arg JENA_VERSION="$JENA_VERSION" \
+            --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" -t veromesh/fuseki:capacity deploy/fuseki
+          docker run -d --name fuseki -p 127.0.0.1:3030:3030 veromesh/fuseki:capacity
+          for i in $(seq 90); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs --tail 60 fuseki
+          exit 1
+      - name: Start PostgreSQL
+        if: inputs.log == 'postgresql'
+        run: |
+          source deploy/versions.env
+          docker run -d --name postgres -p 127.0.0.1:5432:5432 -e POSTGRES_USER=veromesh \
+            -e POSTGRES_PASSWORD=test-only -e POSTGRES_DB=decisions "$POSTGRES_TEST_IMAGE"
+          for i in $(seq 60); do
+            docker exec postgres pg_isready -U veromesh -d decisions && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Measure
+        env:
+          MODE: ${{ inputs.mode }}
+          SIZE: ${{ inputs.size }}
+          STORE: ${{ inputs.store }}
+          LOG: ${{ inputs.log }}
+          THROUGHPUT: ${{ inputs.throughput }}
+          GROW_STEP: ${{ inputs.grow_step }}
+          STOP_RSS_GB: ${{ inputs.stop_rss_gb }}
+        run: |
+          mkdir -p capacity-results
+          store=memory; [ "$STORE" = fuseki ] && store=fuseki:http://localhost:3030/veromesh
+          log=memory; [ "$LOG" = postgresql ] && log=postgresql://veromesh:test-only@localhost:5432/decisions
+          if [ "$MODE" = grow ]; then
+            python tests/perf/capacity.py --step "$GROW_STEP" --people 1000 --store "$store" --log "$log" \
+              --stop-rss-gb "$STOP_RSS_GB" --out capacity-results/grow.json
+          else
+            python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear \
+              --throughput "$THROUGHPUT" --edits-every 1 --out "capacity-results/bench-$SIZE.json"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capacity-${{ inputs.mode }}-${{ inputs.size }}-${{ inputs.store }}
+          path: capacity-results/
