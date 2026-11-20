@@ -21,8 +21,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from rdflib import Graph, Literal, Namespace, URIRef
