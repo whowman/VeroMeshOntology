@@ -89,19 +89,19 @@
       "resync_s": 30.392
     },
     "fuseki_small": {
-      "_note": "GitHub Actions runner, the integration job's Fuseki (330b40d)",
+      "_note": "GitHub Actions runner, the integration job's Fuseki (09a3fb1); CI timings vary by up to about 50% between runs",
       "people": 2020,
       "triples": 13720,
-      "load_total_s": 9.19,
-      "load_last_domain_s": 0.885,
-      "edit_s": 0.24,
-      "read_people_s": 0.006,
-      "find_person_s": 0.003,
-      "check_s": 0.027,
-      "check_after_edit_s": 0.044,
-      "read_people_after_edit_s": 0.004,
-      "coverage_s": 0.004,
-      "resync_s": 1.37
+      "load_total_s": 10.01,
+      "load_last_domain_s": 0.989,
+      "edit_s": 0.078,
+      "read_people_s": 0.004,
+      "find_person_s": 0.002,
+      "check_s": 0.032,
+      "check_after_edit_s": 0.058,
+      "read_people_after_edit_s": 0.006,
+      "coverage_s": 0.008,
+      "resync_s": 1.24
     }
   }
 }

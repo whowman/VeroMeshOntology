@@ -63,7 +63,7 @@ CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are
 | Small | 2,020 | 53 ms | 3 ms | 3 ms | 1 ms |
 | Medium | 20,080 | 25 ms | 4 ms | 18 ms | 11 ms |
 | Large | 100,200 | 35 ms | 23 ms | 137 ms | under 1 ms |
-| Small, on Fuseki (CI) | 2,020 | 240 ms | 27 ms | 6 ms | 3 ms |
+| Small, on Fuseki (CI) | 2,020 | 78 ms | 32 ms | 4 ms | 2 ms |
 
 Loading the large organization (100 domains, one changeset each) takes 4.5 minutes, 2.4 s for the last domain of 1,000 people; it took 22.5 minutes before loads were made proportional to the batch. A nightly sync of the whole source as one replace load with one change takes 0.7 s for 2,290 entities and 30 s for 102,900.
 

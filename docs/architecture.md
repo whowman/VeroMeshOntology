@@ -59,6 +59,7 @@ An edit, a decision check or a read takes time that depends on what it touches, 
 
 - **Validation focus:** a changed triple (s, p, o) changes s, and changes o only when a shape follows p backwards or the triple changes o's entailed types. A value many entities share, such as a sensitivity level, does not pull them all in.
 - **Loads:** replace loads (what batch connectors send), deletes and removed entities take the fast path too. A load costs about 2 to 4 ms per new entity, mostly SHACL, whatever the size of the model. A nightly sync that changes little costs reading the batch.
+- **Round trips:** a small commit (an edit) goes to the store as one update request, one transaction on Fuseki; the ontology files are uploaded only when they change. Larger loads use bulk uploads. An edit through the API makes two writes in all.
 - **Warnings:** they are reported for the entities a changeset changes, not every entity it sends, so an unchanged re-sync is quiet.
 
 ## Next steps
