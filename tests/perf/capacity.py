@@ -222,6 +222,11 @@ def grow(
         f"{'people':>9} {'triples':>10} {'load s':>8} {'edit ms':>8} {'check p95':>9} {'checks/s':>9} {'RSS MB':>8}"
     )
     while loaded < max_domains:
+        if len(rows) >= 2:  # stop before a step that would not fit: loading peaks above the steady state
+            grew = rows[-1]["peak_rss_mb"] - rows[-2]["peak_rss_mb"]
+            if rows[-1]["peak_rss_mb"] + 1.5 * grew > stop_rss_gb * 1024:
+                reason = f"the next step would pass {stop_rss_gb} GB (peak {rows[-1]['peak_rss_mb']:.0f} MB, +{grew:.0f} MB a step)"
+                break
         t = time.perf_counter()
         try:
             for batch in batches[loaded : loaded + step]:
@@ -251,7 +256,7 @@ def grow(
             f" {run['p95_ms']:>8.1f}  {run['checks_per_s']:>8.1f} {mem.get('rss_mb', 0):>8.0f}",
             flush=True,
         )
-        if mem.get("rss_mb", 0) > stop_rss_gb * 1024:
+        if max(mem.get("rss_mb", 0), mem.get("peak_rss_mb", 0)) > stop_rss_gb * 1024:
             reason = f"memory past {stop_rss_gb} GB"
             break
         if edit_s > EDIT_LIMIT_S:
