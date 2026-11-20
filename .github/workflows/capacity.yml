@@ -107,10 +107,20 @@ jobs:
           STOP_RSS_GB: ${{ inputs.stop_rss_gb }}
           DIAGNOSE: ${{ inputs.diagnose }}
         run: |
+          mkdir -p capacity-results
           if [ "$DIAGNOSE" != 0 ]; then
             export VEROMESH_BENCH_PROFILE=1 VEROMESH_BENCH_STALLS="$DIAGNOSE"
+            # From outside the process (it works even while one thread holds Python's
+            # interpreter lock): every half second, which thread holds it and where.
+            pip install -q py-spy
+            (
+              while sleep 0.5; do
+                pid=$(pgrep -f "tests/perf/bench.py" | head -1) || continue
+                echo "=== dump $(date +%s.%N)"
+                sudo "$(command -v py-spy)" dump --pid "$pid" --nonblocking 2>&1 || true
+              done
+            ) > capacity-results/py-spy-dumps.txt &
           fi
-          mkdir -p capacity-results
           store=memory; [ "$STORE" = fuseki ] && store=fuseki:http://localhost:3030/veromesh
           log=memory; [ "$LOG" = postgresql ] && log=postgresql://veromesh:test-only@localhost:5432/decisions
           if [ "$MODE" = grow ]; then
@@ -120,6 +130,9 @@ jobs:
             python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear \
               --throughput "$THROUGHPUT" --edits-every 1 --out "capacity-results/bench-$SIZE.json"
           fi
+      - name: Where the interpreter lock was held
+        if: always() && inputs.diagnose != '0'
+        run: python tests/perf/gil_holds.py capacity-results/py-spy-dumps.txt 4
       - name: Fuseki's garbage-collector pauses
         if: always() && inputs.store == 'fuseki'
         run: |

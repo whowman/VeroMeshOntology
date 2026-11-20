@@ -175,7 +175,10 @@ def throughput(
         reported: set[tuple[int, float]] = set()
         while limit and not stop.wait(0.2):
             now = time.perf_counter()
-            frames = sys._current_frames()
+            try:
+                frames = sys._current_frames()
+            except RuntimeError:  # pyoxigraph refuses to free its objects on this thread: try again
+                continue
             for tid, t0 in list(started.items()):
                 if now - t0 > limit and (tid, t0) not in reported and tid in frames:
                     reported.add((tid, t0))
