@@ -23,10 +23,12 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import os
 import statistics
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -144,13 +146,17 @@ def throughput(
     stop = threading.Event()
     edits = [0]
 
+    started: dict[int, float] = {}  # thread id -> when its current check began (for the stall report)
+
     def worker(k: int) -> None:
         i = k
         mine = []
+        me = threading.get_ident()
         while not stop.is_set():
             a = pool[i % len(pool)]
             i += concurrency
             t = time.perf_counter()
+            started[me] = t
             try:
                 check_once(store, log, a)
             except Exception:  # noqa: BLE001 — counted, the run goes on
@@ -158,8 +164,32 @@ def throughput(
                     errors[0] += 1
                 continue
             mine.append(time.perf_counter() - t)
+            started.pop(me, None)
         with lock:
             latencies.extend(mine)
+
+    def watchdog() -> None:
+        """With VEROMESH_BENCH_STALLS=<seconds>: print where a check is waiting once it
+        has taken that long (once per check), to find what a long check waits for."""
+        limit = float(os.environ.get("VEROMESH_BENCH_STALLS", "0"))
+        reported: set[tuple[int, float]] = set()
+        while limit and not stop.wait(0.2):
+            now = time.perf_counter()
+            frames = sys._current_frames()
+            for tid, t0 in list(started.items()):
+                if now - t0 > limit and (tid, t0) not in reported and tid in frames:
+                    reported.add((tid, t0))
+                    stack = "".join(traceback.format_stack(frames[tid])[-14:])
+                    others = {
+                        th.name: "".join(traceback.format_stack(frames[th.ident])[-3:])
+                        .strip()
+                        .splitlines()[-1]
+                        for th in threading.enumerate()
+                        if th.ident in frames and th.ident != tid
+                    }
+                    print(f"--- a check waiting {now - t0:.1f} s:\n{stack}", file=sys.stderr)
+                    for name, line in others.items():
+                        print(f"    {name}: {line.strip()}", file=sys.stderr)
 
     def editor() -> None:
         while not stop.wait(edit_every):
@@ -174,7 +204,8 @@ def throughput(
     check_once(store, log, pool[0])  # warm
     threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in range(concurrency)]
     if edit_every:
-        threads.append(threading.Thread(target=editor, daemon=True))
+        threads.append(threading.Thread(target=editor, name="editor", daemon=True))
+    threads.append(threading.Thread(target=watchdog, name="watchdog", daemon=True))
     with GcPauses() as pauses:
         start = time.perf_counter()
         for t in threads:

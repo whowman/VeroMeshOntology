@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -61,6 +62,23 @@ def timed(fn, repeat: int = 1) -> tuple[float, object]:
         out = fn()
         times.append(time.perf_counter() - t)
     return statistics.median(times), out
+
+
+def profile_checks(store, log, pool, n: int = 300) -> None:
+    """With VEROMESH_BENCH_PROFILE set: where ``n`` checks in a row spend their time."""
+    import cProfile
+    import io
+    import pstats
+
+    pr = cProfile.Profile()
+    pr.enable()
+    for i in range(n):
+        capacity.check_once(store, log, pool[i % len(pool)])
+    pr.disable()
+    for key in ("cumulative", "tottime"):
+        out = io.StringIO()
+        pstats.Stats(pr, stream=out).sort_stats(key).print_stats(30)
+        print(f"--- {n} checks, by {key}:\n" + out.getvalue(), file=sys.stderr)
 
 
 def run(
@@ -163,6 +181,8 @@ def run(
         def fresh():  # each run starts the day with an empty in-memory log
             return decisions.make_log("memory") if log_spec == "memory" else log
 
+        if os.environ.get("VEROMESH_BENCH_PROFILE"):
+            profile_checks(store, fresh(), pool)
         runs = [capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency]
         if edits_every:
             runs.append(

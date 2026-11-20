@@ -45,6 +45,9 @@ on:
       fuseki_heap:
         description: "Fuseki's Java heap (the image's default is 1g; production values use 4g)"
         default: "4g"
+      diagnose:
+        description: "bench: profile checks, and print where a check waits once it takes this many seconds (0: off)"
+        default: "0"
       runner:
         description: "the machine (a runner label)"
         default: ubuntu-latest
@@ -102,7 +105,11 @@ jobs:
           THROUGHPUT: ${{ inputs.throughput }}
           GROW_STEP: ${{ inputs.grow_step }}
           STOP_RSS_GB: ${{ inputs.stop_rss_gb }}
+          DIAGNOSE: ${{ inputs.diagnose }}
         run: |
+          if [ "$DIAGNOSE" != 0 ]; then
+            export VEROMESH_BENCH_PROFILE=1 VEROMESH_BENCH_STALLS="$DIAGNOSE"
+          fi
           mkdir -p capacity-results
           store=memory; [ "$STORE" = fuseki ] && store=fuseki:http://localhost:3030/veromesh
           log=memory; [ "$LOG" = postgresql ] && log=postgresql://veromesh:test-only@localhost:5432/decisions
