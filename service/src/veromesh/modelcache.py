@@ -77,6 +77,9 @@ class VersionedStore:
         self._seen: tuple[str, float] | None = None  # (version, when read): reused by readers
         self.max_age = version_max_age()
         self._writes = 0  # this process's version changes, so a read begun before one is not kept
+        # Entity lists (by type) that readers have built: a commit makes them for the new
+        # version even when none is cached at the old one, so no reader has to.
+        self.wanted_lists: set[str] = set()
         self._lock = threading.Lock()
         self._local = threading.local()
         self._flights: dict[Any, _Flight] = {}

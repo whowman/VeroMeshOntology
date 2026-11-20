@@ -797,11 +797,18 @@ def commit(
         # What readers will find at the new version, carried forward rather than rebuilt:
         # installed just before the version changes, so no check finds the cache empty.
         if b is not None and effective_changed is not None:
+            from .changesets import entity_rows
+
             for t, rows in lists.items():
                 if rows is not None:
                     new_rows, gone, came = _patch(rows, st.today.graph, t, base, effective_changed)
                     b.primes[("entities", t, base, None)] = new_rows
                     b.primes.update(_shared_primes(readers, t, base, new_rows, gone, came))
+                elif t in store.wanted_lists:
+                    # Readers use this list but none is cached at this version (a reader was
+                    # still building it, or an edit landed meanwhile): build it here, from the
+                    # state as committed, so no reader rebuilds it while every other waits.
+                    b.primes[("entities", t, base, None)] = entity_rows(st.today.graph, t, base)
             if believed is not None:  # a changeset writes no attestations: they carry over
                 now = dict(st.today.resolved)
                 b.primes[("current", st.day)] = (now, believed[1])

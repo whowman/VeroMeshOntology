@@ -361,3 +361,16 @@ def test_entity_lists_from_the_planner_match_the_store():
         kept = P.from_planner_effective(store, BASE, lambda g, t=t: C.entity_rows(g, t, BASE))
         assert kept is not None
         assert kept == C.entity_rows(P._effective_graph(store), t, BASE), t
+
+
+def test_an_edit_builds_the_lists_readers_use_even_when_none_is_cached():
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    C.shared_entities(store, "people", BASE)  # a reader uses the people list
+    with store._lock:
+        store._cache.clear()  # ...but none is cached when the next edit comes
+    C.apply(store, source="hr", items=[person("Zed")], base=BASE, ontology_dir=ONT)
+    held = store.entries_at(store.version()).get(("entities", "people", BASE, None))
+    assert held is not None, "the edit carried no people list forward"
+    assert held == C.entity_rows(P._effective_graph(store), "people", BASE)
+    assert any(e.get("id") == "Zed" for _, e in held)
