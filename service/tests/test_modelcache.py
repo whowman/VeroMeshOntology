@@ -148,3 +148,28 @@ def test_a_pinned_unit_of_work_reads_the_version_once():
         for k in range(5):
             cached(store, ("n", k), lambda: count(store))
     assert len(asked) == 1
+
+
+def test_a_late_computation_does_not_replace_what_an_edit_carried_forward():
+    """A read that began before an edit and ends after it must not overwrite the value
+    the edit primed for the new version (the next reader would compute it again)."""
+    import threading
+
+    store = make_store("memory")
+    store.load_turtle("<a:s> <a:p> <a:o> .", G)
+    started, release = threading.Event(), threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(5)
+        return "stale"
+
+    t = threading.Thread(target=lambda: cached(store, "k", slow))
+    t.start()
+    started.wait(5)
+    with store.batch() as b:  # an edit, which knows the new value and carries it forward
+        store.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:o2> }} }}")
+        b.primes["k"] = "fresh"
+    release.set()
+    t.join()
+    assert cached(store, "k", lambda: "computed again") == "fresh"

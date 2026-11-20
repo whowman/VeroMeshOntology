@@ -64,6 +64,7 @@ class VersionedStore:
     def __init__(self, inner: Any) -> None:
         self.inner = inner
         self._cache: dict[Any, tuple[str, Any]] = {}
+        self._newest: str | None = None  # the version this process last read or wrote
         self._lock = threading.Lock()
         self._local = threading.local()
         self._flights: dict[Any, _Flight] = {}
@@ -119,6 +120,7 @@ class VersionedStore:
                 b.clean = self.version() == b.expect
             with self._lock:  # keep only what is known to hold at the new version
                 pending, self._pending = self._pending, {}
+                self._newest = b.version
                 self._cache.clear()
                 if b.clean:
                     self._cache.update({k: v for k, v in pending.items() if v[0] == b.version})
@@ -239,7 +241,9 @@ class VersionedStore:
         rows = self.inner.query(
             f"SELECT ?v WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?v }} }}"
         )["results"]["bindings"]
-        return rows[0]["v"]["value"] if rows else "0"
+        v = rows[0]["v"]["value"] if rows else "0"
+        self._newest = v
+        return v
 
     def __getattr__(self, name: str) -> Any:  # other attributes of the store (URLs, etc.)
         return getattr(self.inner, name)
@@ -300,7 +304,11 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
         value = compute()
         flight.value = value
         with store._lock:
-            store._cache[key] = (version, value)
+            # A computation that began before an edit can end after it: it must not
+            # replace what the edit carried forward to the new version.
+            held = store._cache.get(key)
+            if held is None or held[0] == version or held[0] != store._newest:
+                store._cache[key] = (version, value)
         return value
     except BaseException:
         flight.failed = True
