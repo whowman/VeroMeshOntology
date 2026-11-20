@@ -858,11 +858,23 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
     return report
 
 
+# A one-shot changeset of at most this many items is written in one request with its items.
+ONE_REQUEST_ITEMS = 20
+
+
 def apply(
     store: RDFStore, *, source: str, items: list[dict], base: str, ontology_dir: str, kind: str = "api"
 ) -> dict:
     """One-shot merge changeset for single-entity REST writes: commit or raise Conflict.
-    The changeset and its items are written in one request."""
+    A few items are written with the changeset in one request; many are uploaded."""
+    if len(items) > ONE_REQUEST_ITEMS:
+        meta = create(store, source=source, mode="merge", kind=kind)
+        add_items(store, meta["id"], items)
+        try:
+            return commit(store, meta["id"], base=base, ontology_dir=ontology_dir)
+        except Conflict:
+            discard(store, meta["id"])
+            raise
     check_source(source)
     if kind not in KINDS:
         raise ValueError(f"Kind must be one of: {', '.join(KINDS)}.")
