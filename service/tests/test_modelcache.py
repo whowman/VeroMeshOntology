@@ -194,3 +194,24 @@ def test_a_late_computation_does_not_replace_what_an_edit_carried_forward():
     release.set()
     t.join()
     assert cached(store, "k", lambda: "computed again") == "fresh"
+
+
+def test_a_reader_pinned_before_a_write_keeps_its_values():
+    """A check pins its version; one that began before this process's write still finds
+    the values cached at that version instead of computing them again."""
+    store = make_store("memory")
+    store.load_turtle("<a:s> <a:p> <a:o> .", G)
+    with store.pinned():
+        assert cached(store, "n", lambda: count(store)) == 1
+        store.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:o2> }} }}")  # the batch-less path
+    with store.pinned() as before:
+        assert cached(store, "n", lambda: count(store)) == 2
+    with store.batch() as b:
+        store.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:o3> }} }}")
+    assert b.clean and b.version != before
+    store._local.pinned = before  # a reader still at the version before the write
+    try:
+        assert cached(store, "n", lambda: "computed again") == 2
+    finally:
+        store._local.pinned = None
+    assert cached(store, "n", lambda: count(store)) == 3

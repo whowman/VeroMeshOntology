@@ -80,6 +80,9 @@ class VersionedStore:
         # Entity lists (by type) that readers have built: a commit makes them for the new
         # version even when none is cached at the old one, so no reader has to.
         self.wanted_lists: set[str] = set()
+        # The values cached at the version before this process's last write, for readers
+        # that began before it (a check pins its version): they are still right for it.
+        self._previous: tuple[str, dict[Any, Any]] | None = None
         self._lock = threading.Lock()
         self._local = threading.local()
         self._flights: dict[Any, _Flight] = {}
@@ -135,6 +138,16 @@ class VersionedStore:
                 b.clean = self._read_version() == b.expect
             with self._lock:  # keep only what is known to hold at the new version
                 pending, self._pending = self._pending, {}
+                if b.clean and b.version != b.expect:
+                    self._previous = (
+                        b.expect,
+                        {
+                            k: v
+                            for k, (ver, v) in self._cache.items()
+                            # not the planner's state: the commit has changed it in place
+                            if ver == b.expect and not (isinstance(k, tuple) and k[:1] == ("incremental",))
+                        },
+                    )
                 self._newest = b.version
                 self._writes += 1
                 self._seen = (b.version, time.monotonic())  # this process's write: seen at once
@@ -325,6 +338,9 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     hit = store._pending.get(key)
     if hit is not None and hit[0] == version:
         return hit[1]
+    prev = store._previous
+    if prev is not None and prev[0] == version and key in prev[1]:
+        return prev[1][key]  # a reader that began before this process's last write
     with store._lock:
         flight = store._flights.get((key, version))
         leader = flight is None
