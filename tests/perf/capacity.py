@@ -53,9 +53,7 @@ def memory() -> dict:
         for line in Path("/proc/self/status").read_text().splitlines():
             if line.startswith(("VmRSS:", "VmHWM:")):
                 key, value = line.split(":", 1)
-                out["rss_mb" if key == "VmRSS" else "peak_rss_mb"] = round(
-                    int(value.split()[0]) / 1024, 1
-                )
+                out["rss_mb" if key == "VmRSS" else "peak_rss_mb"] = round(int(value.split()[0]) / 1024, 1)
     except OSError:
         pass
     return out
@@ -66,10 +64,7 @@ def agents(batches: list[list[dict]]) -> list[dict]:
     out = []
     for d, batch in enumerate(batches):
         for it in batch:
-            if (
-                it["type"] == "agents"
-                and it["entity"]["id"] == f"InvoiceAssistant-d{d}"
-            ):
+            if it["type"] == "agents" and it["entity"]["id"] == f"InvoiceAssistant-d{d}":
                 out.append(
                     {
                         "agent": it["entity"]["id"],
@@ -174,15 +169,10 @@ def throughput(
                 "op": "upsert",
                 "entity": {"id": "Person3-d0", "name": f"Load {edits[0]}"},
             }
-            changesets.apply(
-                store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY
-            )
+            changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
 
     check_once(store, log, pool[0])  # warm
-    threads = [
-        threading.Thread(target=worker, args=(k,), daemon=True)
-        for k in range(concurrency)
-    ]
+    threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in range(concurrency)]
     if edit_every:
         threads.append(threading.Thread(target=editor, daemon=True))
     with GcPauses() as pauses:
@@ -225,9 +215,7 @@ def log_growth(store, pool: list[dict], sizes=(0, 1000, 5000)) -> list[dict]:
             check_once(store, log, a)
             times.append(time.perf_counter() - t)
             logged += 1
-        out.append(
-            {"entries": size, "check_ms": round(statistics.median(times) * 1000, 2)}
-        )
+        out.append({"entries": size, "check_ms": round(statistics.median(times) * 1000, 2)})
     return out
 
 
@@ -276,18 +264,14 @@ def grow(
             "entity": {"id": "Person1-d0", "name": f"Grow {n[0]}"},
         }
         t = time.perf_counter()
-        changesets.apply(
-            store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY
-        )
+        changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
         return time.perf_counter() - t
 
     print(
         f"{'people':>9} {'triples':>10} {'load s':>8} {'edit ms':>8} {'check p95':>9} {'checks/s':>9} {'RSS MB':>8}"
     )
     while loaded < max_domains:
-        if (
-            len(rows) >= 2
-        ):  # stop before a step that would not fit: loading peaks above the steady state
+        if len(rows) >= 2:  # stop before a step that would not fit: loading peaks above the steady state
             grew = rows[-1]["peak_rss_mb"] - rows[-2]["peak_rss_mb"]
             if rows[-1]["peak_rss_mb"] + 1.5 * grew > stop_rss_gb * 1024:
                 reason = f"the next step would pass {stop_rss_gb} GB (peak {rows[-1]['peak_rss_mb']:.0f} MB, +{grew:.0f} MB a step)"
@@ -295,9 +279,7 @@ def grow(
         t = time.perf_counter()
         try:
             for batch in batches[loaded : loaded + step]:
-                changesets.apply(
-                    store, source="hr", items=batch, base=BASE, ontology_dir=ONTOLOGY
-                )
+                changesets.apply(store, source="hr", items=batch, base=BASE, ontology_dir=ONTOLOGY)
         except MemoryError:
             reason = "out of memory while loading"
             break
@@ -305,9 +287,7 @@ def grow(
         loaded = min(max_domains, loaded + step)
         edit_s = statistics.median(edit() for _ in range(3))
         pool = agents(batches[:loaded])
-        step_log = (
-            decisions.make_log("memory") if log_spec == "memory" else log
-        )  # the day starts empty
+        step_log = decisions.make_log("memory") if log_spec == "memory" else log  # the day starts empty
         run = throughput(store, step_log, pool, concurrency, seconds)
         mem = memory()
         row = {
@@ -337,8 +317,7 @@ def grow(
     good = [
         r
         for r in rows
-        if r["edit_s"] <= EDIT_LIMIT_S
-        and r["throughput"]["p95_ms"] / 1000 <= CHECK_P95_LIMIT_S
+        if r["edit_s"] <= EDIT_LIMIT_S and r["throughput"]["p95_ms"] / 1000 <= CHECK_P95_LIMIT_S
     ]
     summary = {
         "stopped": reason,
@@ -347,9 +326,7 @@ def grow(
         "log": log_spec.split(":")[0],
         "steps": rows,
     }
-    print(
-        f"Stopped: {reason}. Within the guarantee up to {summary['carried_people']:,} people."
-    )
+    print(f"Stopped: {reason}. Within the guarantee up to {summary['carried_people']:,} people.")
     if out:
         Path(out).write_text(json.dumps(summary, indent=2) + "\n")
     return 0
@@ -359,9 +336,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="VeroMesh capacity: grow the organization until the machine runs out"
     )
-    ap.add_argument(
-        "--step", type=int, default=10, help="domains loaded between measurements"
-    )
+    ap.add_argument("--step", type=int, default=10, help="domains loaded between measurements")
     ap.add_argument("--people", type=int, default=1000, help="extra people per domain")
     ap.add_argument("--max-domains", type=int, default=1000)
     ap.add_argument("--store", default="memory")
@@ -376,9 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         default=6.0,
         help="stop when this process holds more",
     )
-    ap.add_argument(
-        "--seconds", type=float, default=3.0, help="length of each throughput run"
-    )
+    ap.add_argument("--seconds", type=float, default=3.0, help="length of each throughput run")
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--out")
     a = ap.parse_args(argv)
