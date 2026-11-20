@@ -87,6 +87,21 @@
       "read_people_after_edit_s": 0.122,
       "coverage_s": 0.001,
       "resync_s": 30.392
+    },
+    "fuseki_small": {
+      "_note": "GitHub Actions runner, the integration job's Fuseki (330b40d)",
+      "people": 2020,
+      "triples": 13720,
+      "load_total_s": 9.19,
+      "load_last_domain_s": 0.885,
+      "edit_s": 0.24,
+      "read_people_s": 0.006,
+      "find_person_s": 0.003,
+      "check_s": 0.027,
+      "check_after_edit_s": 0.044,
+      "read_people_after_edit_s": 0.004,
+      "coverage_s": 0.004,
+      "resync_s": 1.37
     }
   }
 }
