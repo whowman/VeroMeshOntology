@@ -907,6 +907,10 @@ def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Att
     return cached(store, ("current", day), compute)
 
 
+# How long a read waits for a change in progress before reading the store itself.
+PLANNER_WAIT = 5.0
+
+
 def _from_planner(store: RDFStore, day: date):
     """Today's model as the change planner already holds it at this version (the same
     entities, shared rather than resolved a second time), or None. See ``_planner``."""
@@ -928,22 +932,29 @@ def from_planner_effective(store: RDFStore, base: str, read):
 
 @contextmanager
 def _planner(store: RDFStore):
-    """The change planner's state for the store's current version, or None.
+    """The change planner's state, or None.
 
     A commit changes the planner's state before the version moves on, under the
-    planner's lock: while a change is in progress this gives None rather than wait,
-    and the caller reads the store itself."""
+    planner's lock. While a change is in progress this waits for it (up to
+    PLANNER_WAIT seconds: far less than reading the whole model from the store, which
+    on a large organization holds every other thread up for seconds). The state is
+    the one for the version the caller reads at, or else the one the change just
+    made: the caller then gets the model as of that change, as reading the store
+    would have given it."""
     from . import incremental
     from .modelcache import VersionedStore
 
-    if not isinstance(store, VersionedStore) or not incremental._LOCK.acquire(blocking=False):
+    if not isinstance(store, VersionedStore) or not incremental._LOCK.acquire(timeout=PLANNER_WAIT):
         yield None
         return
     try:
         found = None
-        for key, st in store.entries_at(store.version()).items():
-            if isinstance(key, tuple) and key[0] == "incremental" and st is not None:
-                found = st
+        for version in dict.fromkeys((store.version(), store._newest)):
+            for key, st in store.entries_at(version).items():
+                if isinstance(key, tuple) and key[0] == "incremental" and st is not None:
+                    found = st
+                    break
+            if found is not None:
                 break
         yield found
     finally:

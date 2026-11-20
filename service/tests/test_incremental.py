@@ -326,9 +326,10 @@ def test_run_history_is_newest_first_within_one_second(monkeypatch):
     assert [c["id"] for c in C.list_changesets(store, source="hr")] == ids[::-1]
 
 
-def test_checks_share_the_planners_model_and_it_is_the_same():
+def test_checks_share_the_planners_model_and_it_is_the_same(monkeypatch):
     """What a check believes today, taken from the planner's state, is what resolving the
-    stored claims gives; and while a change holds the planner's lock it is not taken."""
+    stored claims gives; and while a change holds the planner's lock past the wait, it
+    is not taken."""
     from veromesh import clock
 
     store = make_store("memory")
@@ -341,6 +342,7 @@ def test_checks_share_the_planners_model_and_it_is_the_same():
         P._read_claims(store, f" FILTER NOT EXISTS {{ ?c <{P.PROV.invalidatedAtTime}> ?x }}"), []
     )
     assert {k: r.values for k, r in shared[0].items()} == {k: r.values for k, r in fresh.items()}
+    monkeypatch.setattr(P, "PLANNER_WAIT", 0.1)  # a change that does not end in time: the store is read
     with incremental._LOCK:
         import threading
 
