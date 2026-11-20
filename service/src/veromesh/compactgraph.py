@@ -203,6 +203,19 @@ class CompactMemory(Store):
     def __len__(self, context=None) -> int:
         return self._n
 
+    def missing_from(self, triples) -> list[tuple]:
+        """The triples of this graph that are not in ``triples``, compared as encoded
+        strings: only those are made into rdflib terms (a whole-source replace load,
+        where nearly everything is unchanged, would otherwise decode every triple)."""
+        keep = {encode(s) + _SEP + encode(p) + _SEP + encode(o) for s, p, o in triples}
+        out = []
+        for es, entries in self._s.items():
+            for e in (entries,) if type(entries) is str else entries:
+                if es + _SEP + e not in keep:
+                    ep, eo = e.split(_SEP, 1)
+                    out.append((decode(es), decode(ep), decode(eo)))
+        return out
+
     def contexts(self, triple=None):
         return _none()
 
@@ -236,9 +249,25 @@ class CompactMemory(Store):
         yield from list(self._namespace.items())
 
 
+class CompactGraph(Graph):
+    """An rdflib Graph on a CompactMemory store. ``triple in graph`` is answered by the
+    store's index directly (rdflib's own goes through the general triple matcher, a
+    generator per call; planning a whole load asks it some hundred thousand times)."""
+
+    def __contains__(self, triple) -> bool:
+        s, p, o = triple
+        if s is None or p is None or o is None or not isinstance(o, Node) or not isinstance(s, Node):
+            return super().__contains__(triple)
+        st: CompactMemory = self.store  # type: ignore[assignment]
+        try:
+            return _has(st._s, encode(s), encode(p) + _SEP + encode(o))
+        except TypeError:  # a term the store cannot hold is not in it
+            return False
+
+
 def compact_graph(triples: Iterable[tuple] = ()) -> Graph:
     """An rdflib Graph on a CompactMemory store, holding ``triples``."""
-    g = Graph(store=CompactMemory())
+    g = CompactGraph(store=CompactMemory())
     for t in triples:
         g.add(t)
     return g

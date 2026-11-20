@@ -472,22 +472,34 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
     """Add or replace items: ``{"type": "kpis", "op": "upsert"|"delete", "entity": {...}}``.
     Delete items need only ``{"id": ...}`` as the entity."""
     _require_open(store, cs)
-    g, nodes = _item_triples(cs, items)
+    nt, nodes = _item_triples(cs, items)
     if nodes:
-        for i in range(0, len(nodes), 200):
-            values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
-            store.update(
-                f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
-                    WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
-            )
-        store.load_turtle(g.serialize(format="nt"), _items_graph(cs), replace=False)
+        # Items added again replace what was there; a changeset with no items yet (a
+        # connector's whole load) has nothing to replace.
+        if store.query(f"ASK {{ GRAPH <{_items_graph(cs)}> {{ ?s ?p ?o }} }}").get("boolean"):
+            for i in range(0, len(nodes), 200):
+                values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
+                store.update(
+                    f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
+                        WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
+                )
+        store.load_turtle(nt, _items_graph(cs), replace=False)
     _set_status(store, cs, "open")
     return get(store, cs, with_report=False)
 
 
-def _item_triples(cs: str, items: list[dict]) -> tuple[Graph, list]:
-    """The items as triples in the changeset's items graph, checked (ValueError)."""
-    g = Graph()
+def _nt(text: str) -> str:
+    """``text`` as an N-Triples string literal."""
+    return (
+        '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r") + '"'
+    )
+
+
+def _item_triples(cs: str, items: list[dict]) -> tuple[str, list]:
+    """The items as N-Triples for the changeset's items graph, checked (ValueError).
+    Written as text directly: building an rdflib graph of a whole load and serializing
+    it took most of the time of adding a connector's items."""
+    lines: list[str] = []
     nodes = []
     seen: dict[tuple[str, str], int] = {}
     for n, raw in enumerate(items):
@@ -514,21 +526,23 @@ def _item_triples(cs: str, items: list[dict]) -> tuple[Graph, list]:
         seen[(type_, rid)] = n
         node = _item_iri(cs, type_, rid)
         nodes.append(node)
-        g.add((node, VM.itemType, Literal(type_)))
-        g.add((node, VM.itemId, Literal(rid)))
-        g.add((node, VM.op, Literal(op)))
-        g.add((node, VM.payload, Literal(json.dumps({**entity, "id": rid}, default=str))))
+        lines.append(
+            f"<{node}> <{VM.itemType}> {_nt(type_)} .\n<{node}> <{VM.itemId}> {_nt(rid)} .\n"
+            f"<{node}> <{VM.op}> {_nt(op)} .\n"
+            f"<{node}> <{VM.payload}> {_nt(json.dumps({**entity, 'id': rid}, default=str))} .\n"
+        )
         times = _check_times(n, raw)
         if times:
-            g.add((node, VM.itemMeta, Literal(json.dumps(times))))
-    return g, nodes
+            lines.append(f"<{node}> <{VM.itemMeta}> {_nt(json.dumps(times))} .\n")
+    return "".join(lines), nodes
 
 
 def _load_items(store: RDFStore, cs: str) -> list[Item]:
-    res = store.query(
+    rows = select(  # a connector's whole load: a row at a time
+        store,
         f"""SELECT ?t ?i ?op ?p ?m WHERE {{ GRAPH <{_items_graph(cs)}> {{
               ?n <{VM.itemType}> ?t ; <{VM.itemId}> ?i ; <{VM.op}> ?op ; <{VM.payload}> ?p
-              OPTIONAL {{ ?n <{VM.itemMeta}> ?m }} }} }}"""
+              OPTIONAL {{ ?n <{VM.itemMeta}> ?m }} }} }}""",
     )
     return [
         Item(
@@ -538,7 +552,7 @@ def _load_items(store: RDFStore, cs: str) -> list[Item]:
             json.loads(b["p"]["value"]),
             json.loads(b["m"]["value"]) if "m" in b else None,
         )
-        for b in res["results"]["bindings"]
+        for b in rows
     ]
 
 
@@ -915,7 +929,7 @@ def apply(
     if kind not in KINDS:
         raise ValueError(f"Kind must be one of: {', '.join(KINDS)}.")
     cs = uuid.uuid4().hex[:16]
-    g, _ = _item_triples(cs, items)
+    nt, _ = _item_triples(cs, items)
     with unversioned(store):
         store.update(
             f"""INSERT DATA {{ GRAPH <{CHANGESET_GRAPH}> {{
@@ -926,7 +940,7 @@ def apply(
                     <{VM.createdSeq}> {time.time_ns()} ;
                     <{VM.baseVersion}> {literal(source_version(store, source))} .
                 }}
-                GRAPH <{_items_graph(cs)}> {{ {g.serialize(format="nt")} }} }}"""
+                GRAPH <{_items_graph(cs)}> {{ {nt} }} }}"""
         )
     meta = {"id": cs}
     try:

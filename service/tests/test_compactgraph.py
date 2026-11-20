@@ -91,3 +91,12 @@ def test_the_collector_tracks_far_fewer_objects():
     compact_objects = len(gc.get_objects()) - before
     assert len(cg) == 8000
     assert compact_objects * 5 < rdflib_objects, (compact_objects, rdflib_objects)
+
+
+def test_missing_from_is_the_difference():
+    rng = random.Random(5)
+    g = compact_graph()
+    for _ in range(300):
+        g.add((rng.choice(TERMS_S), rng.choice(TERMS_P), rng.choice(TERMS_O)))
+    new = {(rng.choice(TERMS_S), rng.choice(TERMS_P), rng.choice(TERMS_O)) for _ in range(150)}
+    assert sorted(g.store.missing_from(new)) == sorted(t for t in g if t not in new)

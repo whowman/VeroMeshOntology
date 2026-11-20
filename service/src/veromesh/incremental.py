@@ -39,7 +39,7 @@ from rdflib.namespace import XSD
 from . import clock, validation
 from . import entities as E
 from . import provenance as P
-from .compactgraph import compact_graph, decode, encode
+from .compactgraph import CompactMemory, compact_graph, decode, encode
 from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached
 
 _LOCK = threading.RLock()
@@ -437,8 +437,9 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
     # entity is removed first, then the upserts are added.
     inverse_props = {c.prop for sh in E.TYPES.values() for c in sh.cols if c.inverse}
     item_ids = {it.id for it in items}
+    compact = isinstance(g.store, CompactMemory)
     if mode == "replace":
-        remove: set = set(g)
+        remove: set = set() if compact else set(g)  # compact: compared encoded, below
     else:
         remove = set()
         for it in items:
@@ -481,7 +482,10 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
         conv = E.to_triples(it.type, it.entity, base, lookup, partial=partial)
         errors.extend(e.as_dict() for e in conv.errors)
         new.update(conv.triples)
-    removed = [t for t in remove if t not in new]
+    if mode == "replace" and compact:
+        removed = g.store.missing_from(new)
+    else:
+        removed = [t for t in remove if t not in new]
     added = [t for t in new if t not in g]
     if any(isinstance(x, BNode) for t in removed + added for x in t):
         return None  # DELETE DATA cannot name a blank node: the full path rewrites the graph
