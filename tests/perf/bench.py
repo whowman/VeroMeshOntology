@@ -16,6 +16,11 @@ example's own people, roles, agents and the rest):
     small    10 x 200      about 2,000         the Small tier
     medium   40 x 500      about 20,000        the Medium tier
     large    100 x 1,000   about 100,000       the Large tier
+    xl       500 x 1,000   about 500,000       the Extra large tier
+
+--throughput 1,4,16 adds decision checks per second at each concurrency (one
+process = one copy of the service), and --edits-every 1 adds a run with an edit
+landing each second meanwhile. Memory is reported with every run.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import capacity  # noqa: E402
 import orggen  # noqa: E402
 from veromesh import changesets, coverage, decide, decisions, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
@@ -38,7 +44,7 @@ from veromesh.rdf_store import make_store  # noqa: E402
 ROOT = HERE.parents[1]
 ONTOLOGY = str(ROOT / "ontology")
 BASE = "https://example.com/org#"
-SIZES = {"smoke": (2, 100), "small": (10, 200), "medium": (40, 500), "large": (100, 1000)}
+SIZES = {"smoke": (2, 100), "small": (10, 200), "medium": (40, 500), "large": (100, 1000), "xl": (500, 1000)}
 
 
 def timed(fn, repeat: int = 1) -> tuple[float, object]:
@@ -51,11 +57,20 @@ def timed(fn, repeat: int = 1) -> tuple[float, object]:
     return statistics.median(times), out
 
 
-def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
+def run(
+    domains: int,
+    people: int,
+    store_spec: str,
+    repeat: int,
+    log_spec: str = "memory",
+    concurrency: list[int] | None = None,
+    seconds: float = 5.0,
+    edits_every: float | None = None,
+) -> dict:
     store = make_store(store_spec)
     batches = orggen.organization(domains, people)
     counts = orggen.counts(batches)
-    log = decisions.make_log("memory")
+    log = decisions.make_log(log_spec)
 
     # Load: one changeset per domain, as a connector would send them.
     load_times = []
@@ -130,7 +145,24 @@ def run(domains: int, people: int, store_spec: str, repeat: int) -> dict:
         "resync_s": timed(resync, 1)[0],
     }
     outcome = check()["outcome"]
+    runs, growth = [], []
+    if concurrency:
+        pool = capacity.agents(batches)
+
+        def fresh():  # each run starts the day with an empty in-memory log
+            return decisions.make_log("memory") if log_spec == "memory" else log
+
+        runs = [capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency]
+        if edits_every:
+            runs.append(
+                capacity.throughput(store, fresh(), pool, max(concurrency), seconds, edit_every=edits_every)
+            )
+        growth = capacity.log_growth(store, pool)
     return {
+        "memory": capacity.memory(),
+        "throughput": runs,
+        "log_growth": growth,
+        "log": log_spec.split(":")[0],
         "plans": dict(incremental.STATS),
         "domains": domains,
         "peoplePerDomain": people,
@@ -151,6 +183,19 @@ def report(r: dict) -> str:
     ]
     for k, v in r["timings"].items():
         lines.append(f"  {k:<26} {v * 1000:>10.0f} ms" if v < 1 else f"  {k:<26} {v:>10.2f} s")
+    mem = r.get("memory") or {}
+    if mem:
+        lines.append(
+            f"  {'memory_mb':<26} {mem.get('rss_mb', 0):>10.0f}    (peak {mem.get('peak_rss_mb', 0):.0f})"
+        )
+    if r.get("throughput"):
+        lines.append(f"Decision checks under concurrent load (one copy; log: {r['log']}):")
+        lines.append(capacity.throughput_table(r["throughput"]))
+    if r.get("log_growth"):
+        lines.append(
+            "A check as the day's decision log grows: "
+            + ", ".join(f"{g['entries']:,} entries {g['check_ms']} ms" for g in r["log_growth"])
+        )
     return "\n".join(lines)
 
 
@@ -176,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", help="write the result as JSON here")
     ap.add_argument("--check", action="store_true", help="fail when over the budget in targets.json")
+    ap.add_argument("--log", default="memory", help="the decision log: memory, or a postgresql:// URL")
+    ap.add_argument("--throughput", help="concurrencies to measure checks per second at, e.g. 1,4,16")
+    ap.add_argument("--seconds", type=float, default=5.0, help="length of each throughput run")
+    ap.add_argument("--edits-every", type=float, help="also measure with an edit every this many seconds")
     ap.add_argument(
         "--clear",
         action="store_true",
@@ -189,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.clear:
         make_store(a.store).update("DROP ALL")
-    r = run(domains, people, a.store, a.repeat)
+    conc = [int(c) for c in a.throughput.split(",")] if a.throughput else None
+    r = run(domains, people, a.store, a.repeat, a.log, conc, a.seconds, a.edits_every)
     r["size"] = size
     print(report(r))
     if a.out:

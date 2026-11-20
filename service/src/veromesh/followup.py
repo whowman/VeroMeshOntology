@@ -25,6 +25,7 @@ Measures (working definitions, to confirm against the white paper):
 
 from __future__ import annotations
 
+import threading
 from datetime import date
 
 from . import clock
@@ -184,7 +185,98 @@ def all_entries(log: DecisionLog, *, after_seq: int = 0, **filters) -> list[dict
 
 def done_today(log: DecisionLog, action: str, day: date) -> int:
     """Actions taken today: decisions for ``action`` recorded today that were done, or that were
-    allowed and have no outcome yet (the agent is about to act). Consulted ones count once done."""
+    allowed and have no outcome yet (the agent is about to act). Consulted ones count once done.
+
+    Kept as a running tally per log (``DailyTally``): each call reads only the entries
+    appended since the last one, by any copy of the service, not the whole log."""
+    tally = getattr(log, "_daily_tally", None)
+    if tally is None:
+        tally = DailyTally()
+        try:
+            log._daily_tally = tally
+        except AttributeError:  # a log that takes no attributes: count the slow way
+            return done_today_by_reading(log, action, day)
+    return tally.done_today(log, action, day)
+
+
+class DailyTally:
+    """Today's actions per action, kept up to date from the log's new entries.
+
+    It holds, for each of today's decisions, only what ``status_of`` reads (its outcome,
+    the roles consulted, and the verdicts and outcomes recorded against it later), and
+    whether it counts now. A new entry changes one decision's standing at most, so a
+    count costs the entries added since the last count. A new day starts from the
+    log's last entry before midnight (the log's recorded_at index), not from its start.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._day: date | None = None
+        self._last = 0
+        self._decisions: dict[str, dict] = {}
+        self._later: dict[str, list[dict]] = {}
+        self._counts: dict[str, bool] = {}
+        self._total: dict[str, int] = {}
+
+    def done_today(self, log: DecisionLog, action: str, day: date) -> int:
+        with self._lock:
+            if day != self._day:
+                self._start(log, day)
+            self._catch_up(log, day.isoformat())
+            return self._total.get(action, 0)
+
+    def _start(self, log: DecisionLog, day: date) -> None:
+        self._day = day
+        self._decisions.clear()
+        self._later.clear()
+        self._counts.clear()
+        self._total.clear()
+        since = getattr(log, "last_seq_before", None)
+        self._last = since(clock.start_of_day(day)) if since else 0
+
+    def _catch_up(self, log: DecisionLog, day: str) -> None:
+        while True:
+            page = log.find(after_seq=self._last, limit=1000)
+            if not page:
+                return
+            for e in page:
+                self._last = e["seq"]
+                if e["kind"] == "decision":
+                    if clock.local_date(e["recordedAt"]) != day:
+                        continue
+                    d = {
+                        "id": e["id"],
+                        "action": e.get("action"),
+                        "outcome": e["outcome"],
+                        "consult": [{"role": c.get("role")} for c in e.get("consult") or []],
+                    }
+                    self._decisions[e["id"]] = d
+                    self._later[e["id"]] = []
+                    self._counts[e["id"]] = False
+                    self._restand(e["id"])
+                elif e.get("refersTo") in self._decisions:
+                    self._later[e["refersTo"]].append(
+                        {
+                            "kind": e["kind"],
+                            "outcome": e.get("outcome"),
+                            "basis": {k: (e.get("basis") or {}).get(k) for k in ("role", "by")},
+                            "note": None,
+                            "recordedAt": e["recordedAt"],
+                        }
+                    )
+                    self._restand(e["refersTo"])
+
+    def _restand(self, did: str) -> None:
+        d = self._decisions[did]
+        st = status_of(d, self._later[did])
+        now = st["done"] == "done" or (st["done"] is None and st["status"] == "allowed")
+        if now != self._counts[did]:
+            self._counts[did] = now
+            self._total[d["action"]] = self._total.get(d["action"], 0) + (1 if now else -1)
+
+
+def done_today_by_reading(log: DecisionLog, action: str, day: date) -> int:
+    """``done_today`` by reading every decision for the action (the reference the tally matches)."""
     decisions = [
         e
         for e in all_entries(log, action=action, kind="decision")

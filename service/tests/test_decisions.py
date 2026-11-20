@@ -221,3 +221,27 @@ def test_api_has_no_way_to_change_the_log(api):
         r = getattr(client, method)(f"/api/v1/decisions/{d['id']}", params={"source": "x"})
         assert 400 <= r.status_code < 500, r.text
     assert log.verify().ok and json.loads(json.dumps(log.get(d["id"]))) == d
+
+
+def test_where_a_day_starts(dlog):
+    from datetime import UTC, datetime, timedelta
+
+    assert dlog.last_seq_before(datetime.now(UTC)) == 0
+    first = dlog.append(decision())
+    second = dlog.append(decision())
+    assert dlog.last_seq_before(datetime(2000, 1, 1, tzinfo=UTC)) == 0
+    assert dlog.last_seq_before(datetime.now(UTC) + timedelta(seconds=5)) == second["seq"]
+    assert first["seq"] < second["seq"]
+
+
+def test_the_daily_tally_on_each_log(dlog):
+    from veromesh import clock, followup
+
+    for outcome in ("allow", "allow", "refuse"):
+        dlog.append(decision(outcome))
+    today = clock.today()
+    assert followup.done_today(dlog, "ApproveSupplierInvoice", today) == 2
+    d = dlog.append(decision())
+    dlog.append({"kind": "outcome", "refersTo": d["id"], "subject": "client-1", "outcome": "not_done"})
+    assert followup.done_today(dlog, "ApproveSupplierInvoice", today) == 2
+    assert followup.done_today_by_reading(dlog, "ApproveSupplierInvoice", today) == 2

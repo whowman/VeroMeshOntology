@@ -898,6 +898,33 @@ def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Att
     return cached(store, ("current", clock.today()), compute)
 
 
+def _current_index(
+    store: RDFStore,
+) -> tuple[
+    dict[tuple[str, str], Resolved], dict[tuple[str, str], list[Attestation]], dict[str, list[Resolved]]
+]:
+    """What VeroMesh believes today, with its attestations by entity and the people filling
+    each role (in ID order), built once per model version instead of on every check."""
+
+    def compute():
+        resolved, atts = _current(store)
+        by_entity: dict[tuple[str, str], list[Attestation]] = {}
+        for a in atts:
+            by_entity.setdefault((a.type, a.id), []).append(a)
+        fillers: dict[str, list[tuple[str, Resolved]]] = {}
+        for (t, rid), r in resolved.items():
+            if t == "people":
+                for role in r.values.get("rolesFilled", []) or []:
+                    fillers.setdefault(role, []).append((rid, r))
+        return (
+            resolved,
+            by_entity,
+            {k: [r for _, r in sorted(v, key=lambda x: x[0])] for k, v in fillers.items()},
+        )
+
+    return cached(store, ("current-index", clock.today()), compute)
+
+
 def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case: bool = False) -> list[str]:
     """IDs of the entities of ``type_`` whose ``field`` is ``value``, as VeroMesh believes it now."""
 
@@ -1105,15 +1132,12 @@ def authority_basis(store: RDFStore, rid: str) -> dict:
     """Decision 3: an agent's authority check may rely only on attested, current facts.
     Checks the delegated authority, the role holding it, the people filling that role,
     and the ownership of every KPI its actions affect."""
-    resolved, atts = _current(store)
+    resolved, by_entity, fillers_of = _current_index(store)
     auth = resolved.get(("authorities", rid))
     if auth is None:
         from .changesets import _not_found
 
         raise _not_found(f"No authorities with ID '{rid}'.")
-    by_entity: dict[tuple[str, str], list[Attestation]] = {}
-    for a in atts:
-        by_entity.setdefault((a.type, a.id), []).append(a)
     checks = []
 
     def check(r: Resolved, fields: list[str], why: str):
@@ -1137,11 +1161,7 @@ def authority_basis(store: RDFStore, rid: str) -> dict:
     if holder and ("roles", holder) in resolved:
         role = resolved[("roles", holder)]
         check(role, sorted(role.winners), "the role holding the authority")
-        fillers = [
-            r
-            for (t, _), r in sorted(resolved.items())
-            if t == "people" and holder in r.values.get("rolesFilled", [])
-        ]
+        fillers = fillers_of.get(holder, [])
         if not fillers:
             checks.append(
                 {

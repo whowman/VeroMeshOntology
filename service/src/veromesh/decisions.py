@@ -21,6 +21,7 @@ never floats, so the bytes hashed are the bytes stored.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import logging
@@ -140,6 +141,7 @@ class DecisionLog(Protocol):
         limit: int = 100,
     ) -> list[dict]: ...
     def verify(self) -> Verification: ...
+    def last_seq_before(self, instant: datetime) -> int: ...
 
 
 def _new_entry(fields: dict, seq: int, prev: str) -> dict:
@@ -187,11 +189,24 @@ class MemoryLog:
     def find(
         self, *, agent=None, principal=None, action=None, kind=None, refers_to=None, after_seq=0, limit=100
     ):
-        hits = [e for e in self._entries if _matches(e, agent, principal, action, kind, refers_to, after_seq)]
+        # seq n is at index n - 1, so the search starts after ``after_seq``, not at the first entry.
+        start = max(0, min(after_seq, len(self._entries)))
+        hits = [
+            e
+            for e in self._entries[start:]
+            if _matches(e, agent, principal, action, kind, refers_to, after_seq)
+        ]
         return [dict(e) for e in hits[:limit]]
 
     def verify(self) -> Verification:
         return verify_chain(self._entries)
+
+    def last_seq_before(self, instant: datetime) -> int:
+        """The last entry recorded before ``instant`` (0 if none); entries are in time order."""
+        stamp = instant.astimezone(UTC).isoformat(timespec="microseconds")
+        with self._lock:
+            i = bisect.bisect_left([e["recordedAt"] for e in self._entries], stamp)
+            return self._entries[i - 1]["seq"] if i else 0
 
 
 SCHEMA = """
@@ -210,6 +225,7 @@ CREATE TABLE IF NOT EXISTS veromesh_decision_log (
 CREATE INDEX IF NOT EXISTS veromesh_decision_log_agent ON veromesh_decision_log (agent, seq);
 CREATE INDEX IF NOT EXISTS veromesh_decision_log_principal ON veromesh_decision_log (principal, seq);
 CREATE INDEX IF NOT EXISTS veromesh_decision_log_refers_to ON veromesh_decision_log (refers_to);
+CREATE INDEX IF NOT EXISTS veromesh_decision_log_recorded_at ON veromesh_decision_log (recorded_at);
 CREATE OR REPLACE FUNCTION veromesh_decision_log_append_only() RETURNS trigger
     LANGUAGE plpgsql AS $$
 BEGIN
@@ -350,6 +366,16 @@ class PostgresLog:
     def verify(self) -> Verification:
         rows = self._run(lambda c: c.run("SELECT entry FROM veromesh_decision_log ORDER BY seq"))
         return verify_chain([_entry(r[0]) for r in rows])
+
+    def last_seq_before(self, instant: datetime) -> int:
+        """The last entry recorded before ``instant`` (0 if none), from the recorded_at index."""
+        rows = self._run(
+            lambda c: c.run(
+                "SELECT COALESCE(MAX(seq), 0) FROM veromesh_decision_log WHERE recorded_at < :t",
+                t=instant.astimezone(UTC),
+            )
+        )
+        return int(rows[0][0])
 
 
 def _entry(value) -> dict:

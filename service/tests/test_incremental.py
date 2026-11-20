@@ -232,8 +232,19 @@ def test_same_results_as_the_full_path(monkeypatch, validate_first, one_request)
         for t in E.TYPES:  # what readers have cached, for the next commit to carry forward
             C.list_entities(fast, t, BASE)
         P._current(fast)
+        P._current_index(fast)
+        for t, field in INDEXED:
+            C.shared_index(fast, t, BASE, field)
     assert incremental.STATS["fast"] >= 10, incremental.STATS
     assert primed >= 10
+
+
+INDEXED = (
+    ("authorities", "holder"),
+    ("co-approvals", "authority"),
+    ("impacts", "action"),
+    ("people", "rolesFilled"),
+)
 
 
 def same_reads(store) -> int:
@@ -245,8 +256,38 @@ def same_reads(store) -> int:
     for t in E.TYPES:
         rows = store.peek(("entities", t, BASE, None))
         if rows is not None:
-            assert rows == C.entity_rows(effective, t, BASE), t
+            fresh_rows = C.entity_rows(effective, t, BASE)
+            assert rows == fresh_rows, t
             n += 1
+            shared = store.peek(("shared-entities", t, BASE))
+            if shared is not None:
+                assert shared[0] == [e for _, e in fresh_rows], t
+                assert shared[1] == {e["id"]: e for _, e in fresh_rows if "id" in e}, t
+                for e in shared[0]:  # the lookup holds the very objects in the list
+                    assert shared[1][e["id"]] is e
+    for t, field in INDEXED:
+        index = store.peek(("shared-index", t, BASE, field))
+        if index is not None:
+            ents = [e for _, e in C.entity_rows(effective, t, BASE)]
+            fresh: dict = {}
+            for e in ents:
+                v = e.get(field)
+                for value in v if isinstance(v, list) else [v]:
+                    if value:
+                        fresh.setdefault(value, []).append(e)
+            assert index == fresh, (t, field)
+            n += 1
+    ci = store.peek(("current-index", clock.today()))
+    if ci is not None:
+        resolved = P.resolve(P.read_claims(store), P.read_attestations(store))
+        fillers: dict = {}
+        for (t, rid), r in sorted(resolved.items()):
+            if t == "people":
+                for role in r.values.get("rolesFilled", []) or []:
+                    fillers.setdefault(role, []).append(rid)
+        assert {role: [r.id for r in rs] for role, rs in ci[2].items()} == fillers
+        assert set(ci[0]) == set(resolved)
+        n += 1
     current = store.peek(("current", clock.today()))
     if current is not None:
         fresh = P.resolve(P.read_claims(store), P.read_attestations(store))

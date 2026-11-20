@@ -24,6 +24,7 @@ turns it off. The tests run both paths on the same changes and compare.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import os
 import re
@@ -655,6 +656,7 @@ def commit(
     # What readers have cached at this version, to carry forward with this change.
     lists = {t: store.peek_at(("entities", t, base, None), version) for t in E.TYPES} if versioned else {}
     believed = store.peek_at(("current", st.day), version) if versioned else None
+    readers = store.entries_at(version) if versioned else {}  # shared lists, indexes, current-index
     # A small change goes to the store as one update request when the batch ends (one
     # transaction); a large one is sent as it goes, where bulk uploads are faster than
     # one big SPARQL text. Either way the version changes once.
@@ -749,6 +751,26 @@ def commit(
             P.store_effective(store, st.today.graph)
             st.stored_effective_ok = True
 
+        # What readers will find at the new version, carried forward rather than rebuilt:
+        # installed just before the version changes, so no check finds the cache empty.
+        if b is not None and effective_changed is not None:
+            for t, rows in lists.items():
+                if rows is not None:
+                    new_rows, gone, came = _patch(rows, st.today.graph, t, base, effective_changed)
+                    b.primes[("entities", t, base, None)] = new_rows
+                    b.primes.update(_shared_primes(readers, t, base, new_rows, gone, came))
+            if believed is not None:  # a changeset writes no attestations: they carry over
+                now = dict(st.today.resolved)
+                b.primes[("current", st.day)] = (now, believed[1])
+                before = readers.get(("current-index", st.day))
+                if before is not None:
+                    people = [k for k in edit.keys if k[0] == "people"]
+                    b.primes[("current-index", st.day)] = (
+                        now,
+                        before[1],
+                        _refill(before[2], believed[0], now, people),
+                    )
+
         result = {**report, "committed": True, "facts": size, "version": cs, "claims": claims}
         _set_status(store, cs, "committed", result, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
     if versioned and small:
@@ -757,27 +779,82 @@ def commit(
             st.claims.setdefault(c.key, {})[source] = c
     if b is not None and b.clean:
         store.prime(("incremental", base), b.version, st)
-        if effective_changed is not None:
-            for t, rows in lists.items():
-                if rows is not None:
-                    store.prime(
-                        ("entities", t, base, None),
-                        b.version,
-                        _patch(rows, st.today.graph, t, base, effective_changed),
-                    )
-            if believed is not None:  # a changeset writes no attestations: they carry over
-                store.prime(("current", st.day), b.version, (dict(st.today.resolved), believed[1]))
     return result
 
 
-def _patch(rows: list, graph: Graph, type_: str, base: str, nodes: set) -> list:
-    """An entity list (changesets.entity_rows) after the triples about ``nodes`` changed."""
+def _shared_primes(readers: dict, type_: str, base: str, rows, gone, came) -> dict:
+    """A type's shared list, its by-ID lookup and its field indexes carried forward,
+    patched for the entities that went (``gone``) and came (``came``)."""
+    out: dict = {}
+    shared = readers.get(("shared-entities", type_, base))
+    if shared is not None:
+        by_id = dict(shared[1])
+        for e in gone:
+            by_id.pop(e.get("id"), None)
+        for e in came:
+            if "id" in e:
+                by_id[e["id"]] = e
+        out[("shared-entities", type_, base)] = ([e for _, e in rows], by_id)
+    for key, index in readers.items():
+        if not (isinstance(key, tuple) and key[:3] == ("shared-index", type_, base)):
+            continue
+        field = key[3]
+        new = dict(index)
+        for e in gone:
+            for v in _values(e, field):
+                bucket = [x for x in new.get(v, []) if x.get("id") != e.get("id")]
+                if bucket:
+                    new[v] = bucket
+                else:
+                    new.pop(v, None)
+        for e in came:
+            for v in _values(e, field):
+                bucket = list(new.get(v, []))
+                keys = [str(E.iri_for(base, x["id"])) for x in bucket]
+                bucket.insert(bisect.bisect(keys, str(E.iri_for(base, e["id"]))), e)
+                new[v] = bucket
+        out[key] = new
+    return out
+
+
+def _values(e: dict, field: str) -> list:
+    v = e.get(field)
+    return [x for x in (v if isinstance(v, list) else [v]) if x is not None and x != ""]
+
+
+def _refill(fillers: dict, before: dict, now: dict, people: list) -> dict:
+    """The people filling each role, after ``people`` changed (each bucket in ID order)."""
+    out = dict(fillers)
+    for k in people:
+        old, new = before.get(k), now.get(k)
+        if old is not None:
+            for role in old.values.get("rolesFilled", []) or []:
+                bucket = [r for r in out.get(role, []) if r.id != old.id]
+                if bucket:
+                    out[role] = bucket
+                else:
+                    out.pop(role, None)
+        if new is not None:
+            for role in new.values.get("rolesFilled", []) or []:
+                bucket = list(out.get(role, []))
+                ids = [r.id for r in bucket]
+                bucket.insert(bisect.bisect(ids, new.id), new)
+                out[role] = bucket
+    return out
+
+
+def _patch(rows: list, graph: Graph, type_: str, base: str, nodes: set) -> tuple[list, list, list]:
+    """An entity list (changesets.entity_rows) after the triples about ``nodes`` changed,
+    with the entities that left it and the ones that came in."""
     names = {str(n) for n in nodes}
-    keep = [r for r in rows if r[0] not in names]
+    keep, gone = [], []
+    for r in rows:
+        (gone if r[0] in names else keep).append(r if r[0] not in names else r[1])
     fresh = [(str(n), E.to_entity(graph, n, type_, base)) for n in nodes if type_ in E.types_of(graph, n)]
+    came = [e for _, e in fresh]
     if not fresh:
-        return keep
-    return sorted(keep + fresh, key=lambda r: r[0])
+        return keep, gone, came
+    return sorted(keep + fresh, key=lambda r: r[0]), gone, came
 
 
 class _Null:
