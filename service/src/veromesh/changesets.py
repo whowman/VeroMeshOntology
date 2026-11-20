@@ -34,6 +34,7 @@ import functools
 import json
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -316,7 +317,8 @@ def create(
               <{_cs_iri(cs)}> a <{VM.Changeset}> ;
                 <{VM.source}> {literal(source)} ; <{VM.mode}> "{mode}" ; <{VM.kind}> "{kind}" ;
                 <{VM.status}> "open" ;
-                <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> {extra} .
+                <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> ;
+                <{VM.createdSeq}> {time.time_ns()} {extra} .
             }} }}"""
     )
     return {**get(store, cs), "reused": False}
@@ -364,8 +366,10 @@ def list_changesets(
     if status:
         filters += f" ?c <{VM.status}> {literal(status)} ."
     res = store.query(
-        f"""SELECT ?c ?at WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{ ?c a <{VM.Changeset}> ; <{VM.createdAt}> ?at .{filters} }} }}
-            ORDER BY DESC(?at) LIMIT {max(1, min(int(limit), 500))}"""
+        f"""SELECT ?c ?at ?seq WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{
+              ?c a <{VM.Changeset}> ; <{VM.createdAt}> ?at .{filters}
+              OPTIONAL {{ ?c <{VM.createdSeq}> ?seq }} }} }}
+            ORDER BY DESC(?at) DESC(?seq) LIMIT {max(1, min(int(limit), 500))}"""
     )
     return [
         get(store, b["c"]["value"][len(CHANGESET_BASE) :], with_report=False)

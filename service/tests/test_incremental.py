@@ -238,3 +238,11 @@ def test_a_write_by_another_replica_is_never_missed(monkeypatch):
         kept = s.peek(("incremental", BASE))
         if kept is not None:
             same_state(kept, incremental._build(s, BASE))
+
+
+def test_run_history_is_newest_first_within_one_second(monkeypatch):
+    """Fast commits put several changesets in one second; the history still lists the newest first."""
+    store = make_store("memory")
+    monkeypatch.setattr(C, "now", lambda: "2026-11-19T12:00:00+00:00")
+    ids = [C.create(store, source="hr", mode="merge")["id"] for _ in range(5)]
+    assert [c["id"] for c in C.list_changesets(store, source="hr")] == ids[::-1]
