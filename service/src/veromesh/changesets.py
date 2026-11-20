@@ -45,6 +45,7 @@ from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
 from . import entities as E
+from .compactgraph import compact_graph
 from . import incremental, validation
 from . import provenance as P
 from .modelcache import VersionedStore, cached, unversioned
@@ -132,7 +133,10 @@ def _read_sources(store: RDFStore) -> dict[str, Graph]:
     )
     out: dict[str, Graph] = {}
     for b in res["results"]["bindings"]:
-        out.setdefault(b["g"]["value"], Graph()).add((_term(b["s"]), _term(b["p"]), _term(b["o"])))
+        g = out.get(b["g"]["value"])
+        if g is None:
+            g = out[b["g"]["value"]] = compact_graph()  # kept in the cache and the planner state
+        g.add((_term(b["s"]), _term(b["p"]), _term(b["o"])))
     return out
 
 
