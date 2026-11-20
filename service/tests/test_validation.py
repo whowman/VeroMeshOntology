@@ -111,3 +111,18 @@ def test_a_shared_value_does_not_pull_in_everything_that_uses_it():
     assert changed == {EX.SupplierInvoices}  # Restricted's own checks did not change
     focus = validation.affected([before, after], changed)
     assert EX.SupplierPayments not in focus and EX.SupplierBankAccount not in focus  # also Restricted
+
+
+@pytest.mark.parametrize("case", [c for c in CASES if c != "the example"])
+def test_the_worker_process_finds_what_this_process_finds(case, monkeypatch, caplog):
+    """A focused validation runs in the worker process: it finds exactly what validating
+    here finds, and it did run there (a worker that fails falls back here silently)."""
+    before = example()
+    after = broken(before, CASES[case])
+    focus = validation.affected([before, after], validation.changed_nodes(before, after, ONT))
+    in_worker = fast(after, focus)
+    assert validation._worker._proc is not None and validation._worker._proc.poll() is None
+    assert "Validation worker failed" not in caplog.text
+    monkeypatch.setenv("VEROMESH_VALIDATION_WORKER", "off")
+    assert in_worker == fast(after, focus)
+    assert in_worker, "each case breaks something"

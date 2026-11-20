@@ -35,6 +35,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_VALIDATION` | `incremental` | `incremental` validates only what a change can affect; `full` validates the whole model on every change (slow; same answers, for checking) |
 | `VEROMESH_INCREMENTAL` | `on` | `on` plans and commits small changesets from the entities they touch (docs/architecture.md, "Performance"); `off` always takes the full path (same answers) |
 | `VEROMESH_VERSION_MAX_AGE` | `0.25` | Seconds a replica reuses the model version it last read before asking the store again. A decision check then usually needs no round trip to Fuseki for it. The replica's own edits are seen at once, another replica's within this time; writes always compare against the store's current version. `0` asks every time |
+| `VEROMESH_VALIDATION_WORKER` | `on` | An edit's validation (pyshacl) runs in a worker process (`python -m veromesh.validation_worker`, started with the service), so decision checks keep the service's interpreter while an edit validates. The worker adds about 150 MB. If it fails, validation runs in the service and a new worker starts. `off` validates in the service |
 | `VEROMESH_AUTH_DISABLED` | `false` | `true`: no sign-in, every request acts as an administrator. Local development and tests only |
 
 ## Sign-in

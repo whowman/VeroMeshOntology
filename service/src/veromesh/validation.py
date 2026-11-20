@@ -11,6 +11,9 @@ Three things make it cheap, without changing what it finds:
   SPARQL-based constraints, so parsed queries are kept and reused.
 * **Only the nodes a change can affect are validated** (``focus``), when the
   caller knows which they are; see ``affected``.
+
+A focused validation runs pyshacl in a worker process, so decision checks keep
+the service's interpreter to themselves while an edit validates.
 """
 
 from __future__ import annotations
@@ -175,7 +178,11 @@ def validate(
     data: Graph, ontology_dir: str, focus: Iterable[URIRef] | None = None
 ) -> list[tuple[str, object, str]]:
     """Findings as (severity, focus node, message). ``focus``: validate only these
-    nodes (against the whole graph); None validates everything."""
+    nodes (against the whole graph); None validates everything.
+
+    A focused validation (an edit's) runs pyshacl in a worker process (see
+    ``_Worker``): pyshacl is pure Python, and in this process it would take turns with
+    every decision check for the interpreter lock while it runs."""
     sch = schema(ontology_dir)
     nodes = None
     if focus is not None:
@@ -184,9 +191,17 @@ def validate(
             return []
         nodes = sorted(str(n) for n in focus)
         data = neighbourhood(data, focus)
+    if nodes is not None and _worker.usable(len(data)):
+        found = _worker.run(data, ontology_dir, nodes)  # it entails, then validates
+        if found is not None:
+            return [(sev, _node(f), msg) for sev, f, msg in found]
+    return _shacl(sch.entail(data), ontology_dir, nodes)
+
+
+def _shacl(entailed: Graph, ontology_dir: str, nodes: list[str] | None) -> list[tuple[str, object, str]]:
     _, results, _ = shacl_validate(
-        sch.entail(data),
-        shacl_graph=sch.shapes,
+        entailed,
+        shacl_graph=schema(ontology_dir).shapes,
         inference="none",
         inplace=True,
         advanced=True,
@@ -203,6 +218,123 @@ def validate(
             )
         )
     return out
+
+
+# --------------------------------------------------------------------------- the worker process
+
+
+def _in_worker(triples: list[list[str]], ontology_dir: str, nodes: list[str]) -> list[tuple[str, str, str]]:
+    """In the worker: entail and validate the triples given (terms encoded as
+    compactgraph.encode does: much faster to read than N-Triples); focus nodes as N3."""
+    from .compactgraph import compact_graph, decode
+
+    g = compact_graph((decode(s), decode(p), decode(o)) for s, p, o in triples)
+    found = _shacl(schema(ontology_dir).entail(g), ontology_dir, nodes)
+    return [(sev, f.n3() if f is not None else "", msg) for sev, f, msg in found]
+
+
+def _warm(ontology_dir: str) -> None:
+    schema(ontology_dir)  # the shapes and the class hierarchy, loaded once per worker
+
+
+def _node(n3: str):
+    from rdflib import BNode, Literal
+
+    if n3.startswith("<") and n3.endswith(">"):
+        return URIRef(n3[1:-1])
+    if n3.startswith("_:"):
+        return BNode(n3[2:])
+    return Literal(n3) if n3 else None
+
+
+def worker_enabled() -> bool:
+    """VEROMESH_VALIDATION_WORKER=off validates in the service's own process."""
+    return os.environ.get("VEROMESH_VALIDATION_WORKER", "on").lower() not in ("off", "0", "false", "no")
+
+
+# A neighbourhood larger than this (entailed triples) is validated in this process:
+# sending it would cost more than it saves. An edit's is a few thousand at most.
+WORKER_MAX_TRIPLES = 200_000
+
+
+class _Worker:
+    """One process (``python -m veromesh.validation_worker``) that runs pyshacl for
+    this one, started on first use and spoken to over a pipe, one JSON line each
+    way. If it fails, the validation runs here and a new worker starts next time."""
+
+    def __init__(self) -> None:
+        self._proc = None
+        self._lock = threading.Lock()
+
+    def usable(self, size: int) -> bool:
+        return worker_enabled() and size <= WORKER_MAX_TRIPLES
+
+    def _started(self, ontology_dir: str):
+        if self._proc is None or self._proc.poll() is not None:
+            import subprocess
+            import sys
+
+            # The worker imports this package from where this process did, installed or not.
+            here = str(Path(__file__).resolve().parents[1])
+            env = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(filter(None, (here, os.environ.get("PYTHONPATH")))),
+            }
+            self._proc = subprocess.Popen(
+                [sys.executable, "-m", "veromesh.validation_worker", ontology_dir],
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+            )
+        return self._proc
+
+    def start(self, ontology_dir: str) -> None:
+        """Start the worker now (at service start-up), so the first edit does not wait for it."""
+        if worker_enabled():
+            self._ask(ontology_dir, {"warm": True})
+
+    def run(self, data: Graph, ontology_dir: str, nodes: list[str]):
+        from .compactgraph import encode
+
+        triples = [[encode(s), encode(p), encode(o)] for s, p, o in data]
+        got = self._ask(ontology_dir, {"triples": triples, "nodes": nodes})
+        return None if got is None else [tuple(f) for f in got["findings"]]
+
+    def _ask(self, ontology_dir: str, request: dict):
+        import json
+        import logging
+
+        with self._lock:
+            proc = None
+            try:
+                proc = self._started(ontology_dir)
+                proc.stdin.write(json.dumps({**request, "ontology": ontology_dir}) + "\n")
+                proc.stdin.flush()
+                line = proc.stdout.readline()  # waits without the interpreter lock
+                if not line:
+                    raise RuntimeError("the worker exited")
+                got = json.loads(line)
+                if "error" in got:
+                    raise RuntimeError(got["error"])
+                return got
+            except Exception as exc:  # noqa: BLE001 — validate here; a new worker next time
+                logging.getLogger(__name__).warning(
+                    "Validation worker failed (%s); validating in process.", exc
+                )
+                if proc is not None:
+                    proc.kill()
+                self._proc = None
+                return None
+
+
+_worker = _Worker()
+
+
+def start_worker(ontology_dir: str) -> None:
+    _worker.start(ontology_dir)
 
 
 # --------------------------------------------------------------------------- what a change can affect
