@@ -50,3 +50,8 @@ def end_of_day(day: date) -> datetime:
     """The last second of ``day`` in the install's time zone, as a UTC datetime."""
     start = datetime(day.year, day.month, day.day, tzinfo=_zone)
     return (start + timedelta(days=1) - timedelta(seconds=1)).astimezone(UTC)
+
+
+def start_of_day(day: date) -> datetime:
+    """The first instant of ``day`` in the install's time zone, as a UTC datetime."""
+    return datetime(day.year, day.month, day.day, tzinfo=_zone).astimezone(UTC)

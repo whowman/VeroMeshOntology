@@ -170,6 +170,24 @@ def shared_entities(store: RDFStore, type_: str, base: str) -> tuple[list[dict],
     return cached(store, ("shared-entities", type_, base), compute)
 
 
+def shared_index(store: RDFStore, type_: str, base: str, field: str) -> dict[str, list[dict]]:
+    """The entities of ``type_`` by the value (or each value, for a list) of ``field``, in
+    the order of shared_entities: shared and read only, kept until the model changes."""
+
+    def compute():
+        out: dict[str, list[dict]] = {}
+        for e in shared_entities(store, type_, base)[0]:
+            v = e.get(field)
+            for value in v if isinstance(v, list) else [v]:
+                if value is not None and value != "":
+                    bucket = out.setdefault(value, [])
+                    if not bucket or bucket[-1] is not e:
+                        bucket.append(e)
+        return out
+
+    return cached(store, ("shared-index", type_, base, field), compute)
+
+
 def entity_rows(g: Graph, type_: str, base: str) -> list[tuple[str, dict]]:
     """(subject IRI, entity) for every entity of ``type_`` in ``g``, in subject order."""
     return [(str(s), E.to_entity(g, s, type_, base)) for s in E.subjects_of_type(g, type_)]

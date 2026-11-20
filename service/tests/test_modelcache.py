@@ -84,3 +84,67 @@ def test_a_deferred_batch_is_not_clean_when_another_replica_wrote():
         two.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:other> }} }}")  # meanwhile
     assert not b.clean
     assert two.version() == one.version() != start
+
+
+def test_concurrent_misses_compute_once():
+    import threading
+    import time
+
+    store = make_store("memory")
+    store.load_turtle("<a:s> <a:p> <a:o> .", G)
+    calls, results = [], []
+
+    def compute():
+        calls.append(1)
+        time.sleep(0.2)  # long enough for every thread to miss
+        return count(store)
+
+    threads = [
+        threading.Thread(target=lambda: results.append(cached(store, "slow", compute))) for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and results == [1] * 8
+
+
+def test_a_failed_computation_does_not_strand_the_waiters():
+    import threading
+    import time
+
+    store = make_store("memory")
+    attempts, results = [], []
+
+    def compute():
+        attempts.append(1)
+        time.sleep(0.1)
+        if len(attempts) == 1:
+            raise RuntimeError("the first one fails")
+        return "ok"
+
+    def ask():
+        try:
+            results.append(cached(store, "flaky", compute))
+        except RuntimeError:
+            results.append("failed")
+
+    threads = [threading.Thread(target=ask) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count("failed") == 1 and results.count("ok") == 3
+
+
+def test_a_pinned_unit_of_work_reads_the_version_once():
+    inner = MemoryStore()
+    store = VersionedStore(inner)
+    store.load_turtle("<a:s> <a:p> <a:o> .", G)
+    asked = []
+    real = inner.query
+    inner.query = lambda q: (asked.append(q) if "modelVersion" in q else None, real(q))[1]
+    with store.pinned():
+        for k in range(5):
+            cached(store, ("n", k), lambda: count(store))
+    assert len(asked) == 1

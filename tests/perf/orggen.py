@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 
 from rdflib import Graph
-
 from veromesh import entities as E
 
 ROOT = Path(__file__).resolve().parents[2]

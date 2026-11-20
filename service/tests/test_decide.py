@@ -163,3 +163,41 @@ def test_every_check_is_logged_in_one_chain(ctx):
     v = log.verify()
     assert v.ok and v.entries == 4
     assert [e["outcome"] for e in log.find(kind="decision")] == ["refuse", "allow", "consult", "refuse"]
+
+
+def test_lookups_find_what_a_scan_finds(ctx):
+    """The decision check looks entities up by field; each lookup finds exactly what
+    scanning every entity of the type finds, in the same order."""
+    from veromesh.decide import Model
+
+    _, _, service = ctx
+    m = Model(service.store, Settings().instance_base)
+    for type_, field in (
+        ("authorities", "holder"),
+        ("co-approvals", "authority"),
+        ("impacts", "action"),
+        ("people", "rolesFilled"),
+    ):
+        values = {
+            v
+            for e in m.all(type_)
+            for v in (e.get(field) if isinstance(e.get(field), list) else [e.get(field)])
+            if v
+        }
+        assert values, (type_, field)
+        for v in values | {"NoSuchValue"}:
+            scan = [
+                e
+                for e in m.all(type_)
+                if (v in e.get(field, []) if isinstance(e.get(field), list) else e.get(field) == v)
+            ]
+            assert m.by(type_, field, v) == scan, (type_, field, v)
+        both = sorted(values)[:2]
+        scan = [
+            e
+            for e in m.all(type_)
+            if any(
+                (b in e.get(field, []) if isinstance(e.get(field), list) else e.get(field) == b) for b in both
+            )
+        ]
+        assert m.by(type_, field, *both) == scan

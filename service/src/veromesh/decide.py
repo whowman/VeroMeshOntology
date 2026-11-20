@@ -29,6 +29,7 @@ else allow (informing the owners below their thresholds).
 
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -49,6 +50,7 @@ class Model:
 
     def __init__(self, store: RDFStore, base: str) -> None:
         self._by_type: dict[str, tuple[list[dict], dict[str, dict]]] = {}
+        self._index: dict[tuple[str, str], dict[str, list[dict]]] = {}
         self._store, self._base = store, base
 
     def _load(self, type_: str) -> tuple[list[dict], dict[str, dict]]:
@@ -62,16 +64,25 @@ class Model:
     def get(self, type_: str, rid: str | None) -> dict | None:
         return self._load(type_)[1].get(rid) if rid else None
 
+    def by(self, type_: str, field: str, *values) -> list[dict]:
+        """Entities of ``type_`` whose ``field`` is (or, for a list, contains) one of
+        ``values``, in model order: a lookup, not a scan of every entity."""
+        key = (type_, field)
+        if key not in self._index:
+            self._index[key] = changesets.shared_index(self._store, type_, self._base, field)
+        index = self._index[key]
+        if len(values) == 1:
+            return index.get(values[0], [])
+        pos = {id(e): i for i, e in enumerate(self.all(type_))} if len(values) > 1 else {}
+        found = {id(e): e for v in values for e in index.get(v, [])}
+        return sorted(found.values(), key=lambda e: pos[id(e)])
+
     def name(self, type_: str, rid: str) -> str:
         e = self.get(type_, rid)
         return (e or {}).get("name") or rid
 
     def people_in(self, role: str) -> list[dict]:
-        return [
-            {"id": p["id"], "name": p.get("name")}
-            for p in self.all("people")
-            if role in p.get("rolesFilled", [])
-        ]
+        return [{"id": p["id"], "name": p.get("name")} for p in self.by("people", "rolesFilled", role)]
 
     def owner_roles(self, type_: str, rid: str) -> list[str]:
         e = self.get(type_, rid) or {}
@@ -131,6 +142,12 @@ def check(
     require_attested: bool = True,
 ) -> dict:
     """Decide, append the decision to the log, and return the log entry plus who to inform."""
+    pin = store.pinned() if hasattr(store, "pinned") else contextlib.nullcontext()
+    with pin:  # one version read for the whole check, not one per cached read
+        return _check(store, base, log, agent, action, subject, amount, currency, on, note, require_attested)
+
+
+def _check(store, base, log, agent, action, subject, amount, currency, on, note, require_attested) -> dict:
     m = Model(store, base)
     day = on or clock.today()
     amt = _dec(amount)
@@ -165,9 +182,7 @@ def check(
         refuse.append(f"{ag.get('name') or agent} is not registered to {act_name.lower()}.")
 
     # 3. Authority
-    held = [
-        a for a in m.all("authorities") if a.get("holder") == agent and action in a.get("actionsCovered", [])
-    ]
+    held = [a for a in m.by("authorities", "holder", agent) if action in a.get("actionsCovered", [])]
     if not held and not refuse:
         refuse.append(f"No authority the agent holds covers '{act_name}'.")
     problems: dict[str, list[str]] = {}
@@ -227,10 +242,10 @@ def check(
                 )
         # 5. Co-approval
         if amt is not None:
-            chain_ids = {x["id"] for x in _chain(m, auth)}
-            for t in m.all("co-approvals"):
+            chain_ids = [x["id"] for x in _chain(m, auth)]
+            for t in m.by("co-approvals", "authority", *chain_ids):
                 above = _dec(t.get("aboveAmount"))
-                if t.get("authority") in chain_ids and above is not None and amt > above:
+                if above is not None and amt > above:
                     consult.append(
                         _consult_entry(
                             m, t["approverRole"], f"co-approval required above {_money(above)} {cur}"
@@ -239,7 +254,7 @@ def check(
 
     # 6. Impact
     if not refuse:
-        impacts = [i for i in m.all("impacts") if i.get("action") == action]
+        impacts = m.by("impacts", "action", action)
         with_threshold = {i.get("impactOn") for i in impacts}
         done_today: int | None = None
         for i in impacts:
@@ -320,7 +335,7 @@ def impact_of(store: RDFStore, base: str, action: str) -> dict:
     act = m.get("actions", action)
     if act is None:
         raise prov_not_found(f"No action '{action}' in the model.")
-    thresholds = {i.get("impactOn"): i for i in m.all("impacts") if i.get("action") == action}
+    thresholds = {i.get("impactOn"): i for i in m.by("impacts", "action", action)}
     out = []
     for target in sorted(set(act.get("affects", [])) | set(thresholds)):
         ttype = "kpis" if m.get("kpis", target) else "capabilities"

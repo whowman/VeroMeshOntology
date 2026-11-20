@@ -53,6 +53,9 @@ class Batch:
         self.sent = False  # some of it already reached the store
         self.version: str | None = None
         self.clean = False
+        # Values the writer knows the new version will have (set inside the batch);
+        # installed before the version changes, so no reader finds the cache empty.
+        self.primes: dict[Any, Any] = {}
 
 
 class VersionedStore:
@@ -63,6 +66,8 @@ class VersionedStore:
         self._cache: dict[Any, tuple[str, Any]] = {}
         self._lock = threading.Lock()
         self._local = threading.local()
+        self._flights: dict[Any, _Flight] = {}
+        self._pending: dict[Any, tuple[str, Any]] = {}  # a batch's primes, until its version lands
 
     def _batch(self) -> Batch | None:
         return getattr(self._local, "batch", None)
@@ -92,6 +97,8 @@ class VersionedStore:
                     self._bump()
             elif b.wrote:
                 new = str(uuid.uuid4())
+                with self._lock:  # readers at the new version find these the moment it lands
+                    self._pending = {k: (new, v) for k, v in b.primes.items()}
                 b.ops.append(
                     f"""DELETE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
                         INSERT {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> "{new}" }} }}
@@ -105,12 +112,16 @@ class VersionedStore:
                 else:
                     self._bump()  # someone else wrote: make sure the version moves anyway
                     b.version = self.version()
+                    b.primes = {}
             else:
                 self._send(b)  # bookkeeping only
                 b.version = b.expect
                 b.clean = self.version() == b.expect
-            with self._lock:
+            with self._lock:  # keep only what is known to hold at the new version
+                pending, self._pending = self._pending, {}
                 self._cache.clear()
+                if b.clean:
+                    self._cache.update({k: v for k, v in pending.items() if v[0] == b.version})
 
     def _send(self, b: Batch) -> None:
         if b.ops:
@@ -145,6 +156,11 @@ class VersionedStore:
         """The value cached for ``key`` at ``version``, or None."""
         hit = self._cache.get(key)
         return hit[1] if hit is not None and hit[0] == version else None
+
+    def entries_at(self, version: str) -> dict[Any, Any]:
+        """Every value cached at ``version``, by key (a snapshot)."""
+        with self._lock:
+            return {k: v for k, (ver, v) in self._cache.items() if ver == version}
 
     def peek(self, key: Any) -> Any:
         """The cached value for ``key`` if it is current, else None (nothing is computed)."""
@@ -204,7 +220,22 @@ class VersionedStore:
         )["results"]["bindings"]
         return rows[0]["h"]["value"] if rows else None
 
+    @contextmanager
+    def pinned(self) -> Iterator[str]:
+        """Read the version once for a unit of read-only work (one decision check): every
+        ``version()`` inside, on this thread, returns it instead of asking the store."""
+        prev = getattr(self._local, "pinned", None)
+        v = prev if prev is not None else self.version()
+        self._local.pinned = v
+        try:
+            yield v
+        finally:
+            self._local.pinned = prev
+
     def version(self) -> str:
+        pinned = getattr(self._local, "pinned", None)
+        if pinned is not None:
+            return pinned
         rows = self.inner.query(
             f"SELECT ?v WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?v }} }}"
         )["results"]["bindings"]
@@ -233,18 +264,51 @@ def _combine(ops: list[str]) -> list[str]:
     return [head + " ;\n".join(bodies)]
 
 
+class _Flight:
+    """One computation of a cached value that other threads are waiting for."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.value: Any = None
+        self.failed = False
+
+
 def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
-    """``compute()``, reused until the model changes. Stores without versions are not cached."""
+    """``compute()``, reused until the model changes. Stores without versions are not cached.
+
+    When several threads miss the same value at the same version (right after an edit,
+    under load), one computes it and the others wait for that result instead of each
+    computing it again."""
     if not isinstance(store, VersionedStore) or store._batch() is not None:
         return compute()  # inside a batch the store is changing: read it as it is
     version = store.version()
     hit = store._cache.get(key)
     if hit is not None and hit[0] == version:
         return hit[1]
-    value = compute()
+    hit = store._pending.get(key)
+    if hit is not None and hit[0] == version:
+        return hit[1]
     with store._lock:
-        store._cache[key] = (version, value)
-    return value
+        flight = store._flights.get((key, version))
+        leader = flight is None
+        if leader:
+            flight = store._flights[(key, version)] = _Flight()
+    if not leader:
+        flight.done.wait()
+        return compute() if flight.failed else flight.value
+    try:
+        value = compute()
+        flight.value = value
+        with store._lock:
+            store._cache[key] = (version, value)
+        return value
+    except BaseException:
+        flight.failed = True
+        raise
+    finally:
+        flight.done.set()
+        with store._lock:
+            store._flights.pop((key, version), None)
 
 
 @contextmanager

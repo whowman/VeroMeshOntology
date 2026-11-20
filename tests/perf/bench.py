@@ -37,7 +37,6 @@ sys.path.insert(0, str(HERE))
 
 import capacity  # noqa: E402
 import orggen  # noqa: E402
-
 from veromesh import changesets, coverage, decide, decisions, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
