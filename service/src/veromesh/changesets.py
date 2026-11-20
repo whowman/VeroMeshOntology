@@ -152,6 +152,10 @@ def list_entities(store: RDFStore, type_: str, base: str, source: str | None = N
     E.check_type(type_)
 
     def compute():
+        if source is None:
+            kept = P.from_planner_effective(store, base, lambda g: entity_rows(g, type_, base))
+            if kept is not None:
+                return kept
         g = model_graph(store, source, base=base)
         return entity_rows(g, type_, base)
 
@@ -165,6 +169,11 @@ def shared_entities(store: RDFStore, type_: str, base: str) -> tuple[list[dict],
     E.check_type(type_)
 
     def rows():
+        # The planner's copy of the effective model when it holds one at this version:
+        # read in memory, not fetched again from the store.
+        kept = P.from_planner_effective(store, base, lambda g: entity_rows(g, type_, base))
+        if kept is not None:
+            return kept
         return entity_rows(model_graph(store, None, base=base), type_, base)
 
     def compute():

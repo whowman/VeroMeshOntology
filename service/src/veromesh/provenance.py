@@ -22,6 +22,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field, replace
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 
 from rdflib import Graph, Literal, Namespace, URIRef
@@ -908,22 +909,43 @@ def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Att
 
 def _from_planner(store: RDFStore, day: date):
     """Today's model as the change planner already holds it at this version (the same
-    entities, shared rather than resolved a second time), or None.
+    entities, shared rather than resolved a second time), or None. See ``_planner``."""
+    with _planner(store) as st:
+        if st is not None and st.day == day:
+            return dict(st.today.resolved), [a for atts in st.atts.values() for a in atts]
+    return None
+
+
+def from_planner_effective(store: RDFStore, base: str, read):
+    """``read(graph)`` on the effective model as the change planner holds it in memory at
+    this version (no read from the store), or None when it does not hold it. ``read``
+    must not keep the graph: the planner changes it at the next commit."""
+    with _planner(store) as st:
+        if st is not None and st.base == base and st.stored_effective_ok and st.day == clock.today():
+            return read(st.today.graph)
+    return None
+
+
+@contextmanager
+def _planner(store: RDFStore):
+    """The change planner's state for the store's current version, or None.
 
     A commit changes the planner's state before the version moves on, under the
-    planner's lock: while a change is in progress this returns None rather than wait,
-    and the caller resolves the claims itself."""
+    planner's lock: while a change is in progress this gives None rather than wait,
+    and the caller reads the store itself."""
     from . import incremental
     from .modelcache import VersionedStore
 
     if not isinstance(store, VersionedStore) or not incremental._LOCK.acquire(blocking=False):
-        return None
+        yield None
+        return
     try:
-        version = store.version()
-        for key, st in store.entries_at(version).items():
-            if isinstance(key, tuple) and key[0] == "incremental" and st is not None and st.day == day:
-                return dict(st.today.resolved), [a for atts in st.atts.values() for a in atts]
-        return None
+        found = None
+        for key, st in store.entries_at(store.version()).items():
+            if isinstance(key, tuple) and key[0] == "incremental" and st is not None:
+                found = st
+                break
+        yield found
     finally:
         incremental._LOCK.release()
 

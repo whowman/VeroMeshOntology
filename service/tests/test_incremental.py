@@ -349,3 +349,13 @@ def test_checks_share_the_planners_model_and_it_is_the_same():
         t.start()
         t.join()
     assert seen == [None]
+
+
+def test_entity_lists_from_the_planner_match_the_store():
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    C.apply(store, source="hr", items=[person("Zed")], base=BASE, ontology_dir=ONT)
+    for t in E.TYPES:
+        kept = P.from_planner_effective(store, BASE, lambda g, t=t: C.entity_rows(g, t, BASE))
+        assert kept is not None
+        assert kept == C.entity_rows(P._effective_graph(store), t, BASE), t
