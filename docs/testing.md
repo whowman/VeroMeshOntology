@@ -46,7 +46,7 @@ The e2e suites work against your development stack. Everything they create is na
 
 ## Performance
 
-`tests/perf/bench.py` builds a synthetic organization (copies of the worked example, one per domain, plus people filling its roles) and times what users and agents do: load it one domain at a time, edit one fact, read all people, find a person, ask the decision check, and read straight after an edit.
+`tests/perf/bench.py` builds a synthetic organization (copies of the worked example, one per domain, plus people filling its roles) and times what users and agents do: load it one domain at a time, edit one fact, read all people, find a person, ask the decision check, read straight after an edit, and re-sync the whole source with one change.
 
 ```bash
 PYTHONPATH=service/src python tests/perf/bench.py --size small      # smoke, small, medium, large

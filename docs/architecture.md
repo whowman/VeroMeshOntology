@@ -57,7 +57,9 @@ An edit, a decision check or a read takes time that depends on what it touches, 
 - **Changesets** that upsert in merge mode are planned from the entities they touch (`service/src/veromesh/incremental.py`). They re-resolve only those entities, validate the exact change, and write the difference to the source graph, the claims and the effective model. Replace loads, deletes and anything the fast path cannot show to be equivalent take the full path.
 - **Reads** are kept in memory until the model changes. Every write records a model version in the store, so a write by another replica is seen at once. A commit writes the version once, by compare-and-swap, and carries its state and the readers' lists forward only when nobody else wrote in between.
 
-Bulk loads are still slow: adding a domain of 1,000 new people to 100,000 takes 26 s. SHACL on the new entities is about 5 ms each, and part of the rest grows with the model; that is the next piece of work.
+- **Validation focus:** a changed triple (s, p, o) changes s, and changes o only when a shape follows p backwards or the triple changes o's entailed types. A value many entities share, such as a sensitivity level, does not pull them all in.
+- **Loads:** replace loads (what batch connectors send), deletes and removed entities take the fast path too. A load costs about 2 to 4 ms per new entity, mostly SHACL, whatever the size of the model. A nightly sync that changes little costs reading the batch.
+- **Warnings:** they are reported for the entities a changeset changes, not every entity it sends, so an unchanged re-sync is quiet.
 
 ## Next steps
 
