@@ -30,22 +30,24 @@ source's claims (with history) and stores the new effective model.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 
-from pyshacl import validate as shacl_validate
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
 from . import entities as E
+from . import incremental, validation
 from . import provenance as P
+from .modelcache import VersionedStore, cached, unversioned
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -68,6 +70,17 @@ class Conflict(Exception):
     def __init__(self, message: str, report: dict | None = None) -> None:
         super().__init__(message)
         self.report = report
+
+
+def _bookkeeping(fn):
+    """Writes changeset records only, never the model: the model version stays."""
+
+    @functools.wraps(fn)
+    def wrapper(store, *args, **kwargs):
+        with unversioned(store):
+            return fn(store, *args, **kwargs)
+
+    return wrapper
 
 
 def _not_found(msg: str) -> Exception:
@@ -107,7 +120,12 @@ def _term(b: dict):
 
 
 def read_sources(store: RDFStore) -> dict[str, Graph]:
-    """All source graphs, keyed by graph IRI."""
+    """All source graphs, keyed by graph IRI. The graphs are shared until the model
+    changes: read them, or copy before changing one."""
+    return dict(cached(store, "sources", lambda: _read_sources(store)))
+
+
+def _read_sources(store: RDFStore) -> dict[str, Graph]:
     res = store.query(
         f"""SELECT ?g ?s ?p ?o WHERE {{ GRAPH ?g {{ ?s ?p ?o }}
             FILTER(STRSTARTS(STR(?g), "{SOURCE_GRAPH_BASE}")) }}"""
@@ -128,8 +146,37 @@ def model_graph(store: RDFStore, source: str | None = None, *, base: str = "") -
 
 def list_entities(store: RDFStore, type_: str, base: str, source: str | None = None) -> list[dict]:
     E.check_type(type_)
-    g = model_graph(store, source, base=base)
-    return [E.to_entity(g, s, type_, base) for s in E.subjects_of_type(g, type_)]
+
+    def compute():
+        g = model_graph(store, source, base=base)
+        return entity_rows(g, type_, base)
+
+    # Copies, so a caller changing one cannot change what the next caller gets.
+    return [_copy(e) for _, e in cached(store, ("entities", type_, base, source), compute)]
+
+
+def shared_entities(store: RDFStore, type_: str, base: str) -> tuple[list[dict], dict[str, dict]]:
+    """Every entity of ``type_`` in the effective model, and the same by ID, without
+    copying: shared with every other reader until the model changes. Read only."""
+    E.check_type(type_)
+
+    def rows():
+        return entity_rows(model_graph(store, None, base=base), type_, base)
+
+    def compute():
+        ents = [e for _, e in cached(store, ("entities", type_, base, None), rows)]
+        return ents, {e["id"]: e for e in ents if "id" in e}
+
+    return cached(store, ("shared-entities", type_, base), compute)
+
+
+def entity_rows(g: Graph, type_: str, base: str) -> list[tuple[str, dict]]:
+    """(subject IRI, entity) for every entity of ``type_`` in ``g``, in subject order."""
+    return [(str(s), E.to_entity(g, s, type_, base)) for s in E.subjects_of_type(g, type_)]
+
+
+def _copy(entity: dict) -> dict:
+    return {k: list(v) if isinstance(v, list) else v for k, v in entity.items()}
 
 
 def get_entity(store: RDFStore, type_: str, rid: str, base: str, as_of: str | None = None) -> dict:
@@ -227,6 +274,7 @@ def _item_iri(cs: str, type_: str, rid: str) -> URIRef:
     return URIRef(f"{CHANGESET_BASE}{cs}/item/{type_}/{quote(rid, safe='._-')}")
 
 
+@_bookkeeping
 def create(
     store: RDFStore,
     *,
@@ -269,7 +317,8 @@ def create(
               <{_cs_iri(cs)}> a <{VM.Changeset}> ;
                 <{VM.source}> {literal(source)} ; <{VM.mode}> "{mode}" ; <{VM.kind}> "{kind}" ;
                 <{VM.status}> "open" ;
-                <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> {extra} .
+                <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> ;
+                <{VM.createdSeq}> {time.time_ns()} {extra} .
             }} }}"""
     )
     return {**get(store, cs), "reused": False}
@@ -317,8 +366,10 @@ def list_changesets(
     if status:
         filters += f" ?c <{VM.status}> {literal(status)} ."
     res = store.query(
-        f"""SELECT ?c ?at WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{ ?c a <{VM.Changeset}> ; <{VM.createdAt}> ?at .{filters} }} }}
-            ORDER BY DESC(?at) LIMIT {max(1, min(int(limit), 500))}"""
+        f"""SELECT ?c ?at ?seq WHERE {{ GRAPH <{CHANGESET_GRAPH}> {{
+              ?c a <{VM.Changeset}> ; <{VM.createdAt}> ?at .{filters}
+              OPTIONAL {{ ?c <{VM.createdSeq}> ?seq }} }} }}
+            ORDER BY DESC(?at) DESC(?seq) LIMIT {max(1, min(int(limit), 500))}"""
     )
     return [
         get(store, b["c"]["value"][len(CHANGESET_BASE) :], with_report=False)
@@ -326,6 +377,7 @@ def list_changesets(
     ]
 
 
+@_bookkeeping
 def _set_status(store: RDFStore, cs: str, status: str, report: dict | None = None, extra: str = "") -> None:
     iri = _cs_iri(cs)
     ins = f'<{iri}> <{VM.status}> "{status}"'
@@ -379,10 +431,26 @@ def _check_times(n: int, raw: dict) -> dict:
     return out
 
 
+@_bookkeeping
 def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
     """Add or replace items: ``{"type": "kpis", "op": "upsert"|"delete", "entity": {...}}``.
     Delete items need only ``{"id": ...}`` as the entity."""
     _require_open(store, cs)
+    g, nodes = _item_triples(cs, items)
+    if nodes:
+        for i in range(0, len(nodes), 200):
+            values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
+            store.update(
+                f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
+                    WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
+            )
+        store.load_turtle(g.serialize(format="nt"), _items_graph(cs), replace=False)
+    _set_status(store, cs, "open")
+    return get(store, cs, with_report=False)
+
+
+def _item_triples(cs: str, items: list[dict]) -> tuple[Graph, list]:
+    """The items as triples in the changeset's items graph, checked (ValueError)."""
     g = Graph()
     nodes = []
     seen: dict[tuple[str, str], int] = {}
@@ -417,16 +485,7 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
         times = _check_times(n, raw)
         if times:
             g.add((node, VM.itemMeta, Literal(json.dumps(times))))
-    if nodes:
-        for i in range(0, len(nodes), 200):
-            values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
-            store.update(
-                f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
-                    WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
-            )
-        store.load_turtle(g.serialize(format="turtle"), _items_graph(cs), replace=False)
-    _set_status(store, cs, "open")
-    return get(store, cs, with_report=False)
+    return g, nodes
 
 
 def _load_items(store: RDFStore, cs: str) -> list[Item]:
@@ -447,6 +506,7 @@ def _load_items(store: RDFStore, cs: str) -> list[Item]:
     ]
 
 
+@_bookkeeping
 def discard(store: RDFStore, cs: str) -> dict:
     meta = _require_open(store, cs)
     store.update(f"DROP SILENT GRAPH <{_items_graph(cs)}>")
@@ -457,29 +517,8 @@ def discard(store: RDFStore, cs: str) -> dict:
 # --------------------------------------------------------------------------- validation
 
 
-@lru_cache(maxsize=4)
-def _model(ontology_dir: str) -> tuple[Graph, Graph]:
-    root = Path(ontology_dir)
-    ont = Graph().parse(root / "veromesh-core.ttl").parse(root / "veromesh-org.ttl")
-    shapes = Graph().parse(root / "shapes" / "veromesh-org-shapes.ttl")
-    return ont, shapes
-
-
-def _shacl(data: Graph, ontology_dir: str) -> list[tuple[str, object, str]]:
-    ont, shapes = _model(ontology_dir)
-    _, results, _ = shacl_validate(
-        data, shacl_graph=shapes, ont_graph=ont, inference="rdfs", advanced=True, allow_warnings=True
-    )
-    out = []
-    for r in results.subjects(SH.resultSeverity, None):
-        out.append(
-            (
-                str(results.value(r, SH.resultSeverity)).split("#")[-1],
-                results.value(r, SH.focusNode),
-                str(results.value(r, SH.resultMessage) or "Validation rule failed."),
-            )
-        )
-    return out
+def _shacl(data: Graph, ontology_dir: str, focus=None) -> list[tuple[str, object, str]]:
+    return validation.validate(data, ontology_dir, focus)
 
 
 def _tidy(message: str, base: str) -> str:
@@ -662,8 +701,15 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
         return _Plan(target, errors, report)
 
     before, _, _ = _effective({**graphs, target_iri: current}, base, stored=stored, atts=atts, cats=cats)
-    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir)}
-    touched = {E.iri_for(base, it.id) for it in upserts}
+    touched = _touched(upserts, current, target, base)
+    # Validate only what this change can affect (validation.affected), unless told to
+    # validate everything. Same verdict either way; the tests check that they agree.
+    focus = None
+    if not validation.full_validation():
+        focus = validation.affected(
+            [before, after], validation.changed_nodes(before, after, ontology_dir) | touched
+        )
+    before_findings = {(sev, str(f), m) for sev, f, m in _shacl(before, ontology_dir, focus)}
 
     def describe(sev: str, focus, message: str) -> dict:
         types = E.types_of(after, focus) if isinstance(focus, URIRef) else []
@@ -674,12 +720,15 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
             "severity": sev,
         }
 
-    for sev, focus, message in _shacl(after, ontology_dir):
-        if sev == "Violation" and (sev, str(focus), message) not in before_findings:
-            report["violations"].append(describe(sev, focus, message))
-        elif sev != "Violation" and focus in touched:
-            report["warnings"].append(describe(sev, focus, message))
+    for sev, node, message in _shacl(after, ontology_dir, focus):
+        if sev == "Violation" and (sev, str(node), message) not in before_findings:
+            report["violations"].append(describe(sev, node, message))
+        elif sev != "Violation" and node in touched:
+            report["warnings"].append(describe(sev, node, message))
+    # Violations that were already there, among the entities this change could affect
+    # (the whole model under full validation).
     report["preexistingViolations"] = sum(1 for sev, _, _ in before_findings if sev == "Violation")
+    report["validated"] = "all" if focus is None else len(focus)
     for k in ("violations", "warnings"):
         report[k].sort(key=lambda f: (f["type"] or "", f["id"], f["message"]))
         report["summary"][k] = len(report[k])
@@ -688,9 +737,40 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
     return _Plan(target, errors, report, effective=after, item_meta=item_meta)
 
 
+def _fast_plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_dir: str):
+    """(state, version, (report, errors, edit)) from the incremental planner, or None.
+    Call with incremental._LOCK held; the plan must be committed or undone."""
+    if not incremental.enabled():
+        return None
+    version = store.version() if isinstance(store, VersionedStore) else ""
+    st = incremental.state(store, base, version or None)
+    if st is None:
+        incremental.STATS["full"] += 1
+        return None
+    got = incremental.plan(st, meta, items, base, ontology_dir)
+    incremental.STATS["full" if got is None else "fast"] += 1
+    return None if got is None else (st, version, got)
+
+
+def _touched(upserts: list[Item], current: Graph, target: Graph, base: str) -> set:
+    """The upserted entities this changeset changes in its source (or dates anew): the
+    ones its warnings are reported for. Re-sending an unchanged entity reports nothing."""
+    delta = (current - target) + (target - current)
+    nodes = set(delta.subjects()) | {o for o in delta.objects() if isinstance(o, URIRef)}
+    return {E.iri_for(base, it.id) for it in upserts if it.meta or E.iri_for(base, it.id) in nodes}
+
+
 def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
     meta = _require_open(store, cs)
-    plan = _plan(store, meta, _load_items(store, cs), base, ontology_dir)
+    items = _load_items(store, cs)
+    with incremental._LOCK:
+        fast = _fast_plan(store, meta, items, base, ontology_dir)
+        if fast is not None:
+            st, _, (report, _, edit) = fast
+            incremental.undo(st, edit)
+            _set_status(store, cs, "valid" if report["valid"] else "invalid", report)
+            return report
+    plan = _plan(store, meta, items, base, ontology_dir)
     _set_status(store, cs, "valid" if plan.report["valid"] else "invalid", plan.report)
     return plan.report
 
@@ -724,7 +804,24 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
             f"(now at version {current}, changeset started from {meta['baseVersion']}). "
             "Nothing was written; re-run the load against the current state."
         )
-    plan = _plan(store, meta, _load_items(store, cs), base, ontology_dir)
+    items = _load_items(store, cs)
+    with incremental._LOCK:
+        fast = _fast_plan(store, meta, items, base, ontology_dir)
+        if fast is not None:
+            st, version, (report, _, edit) = fast
+            if not report["valid"]:
+                incremental.undo(st, edit)
+                _set_status(store, cs, "invalid", report)
+                raise Conflict("Changeset is not valid; nothing was written.", report)
+            try:
+                return incremental.commit(store, st, meta, cs, report, edit, ontology_dir, version)
+            except BaseException:
+                incremental.undo(st, edit)
+                if isinstance(store, VersionedStore):
+                    with store._lock:
+                        store._cache.clear()
+                raise
+    plan = _plan(store, meta, items, base, ontology_dir)
     if not plan.report["valid"]:
         _set_status(store, cs, "invalid", plan.report)
         raise Conflict("Changeset is not valid; nothing was written.", plan.report)
@@ -732,7 +829,7 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
     store.load_turtle((root / "veromesh-core.ttl").read_text(), CORE_GRAPH)
     store.load_turtle((root / "veromesh-org.ttl").read_text(), ORG_GRAPH)
     graph_iri = source_graph(meta["source"])
-    store.load_turtle(plan.target.serialize(format="turtle"), graph_iri)
+    store.load_turtle(plan.target.serialize(format="nt"), graph_iri)
     at = now()
     file_triple = f"; dcterms:source {literal(meta['file'])}" if meta.get("file") else ""
     store.update(
@@ -761,12 +858,41 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
     return report
 
 
+# A one-shot changeset of at most this many items is written in one request with its items.
+ONE_REQUEST_ITEMS = 20
+
+
 def apply(
     store: RDFStore, *, source: str, items: list[dict], base: str, ontology_dir: str, kind: str = "api"
 ) -> dict:
-    """One-shot merge changeset for single-entity REST writes: commit or raise Conflict."""
-    meta = create(store, source=source, mode="merge", kind=kind)
-    add_items(store, meta["id"], items)
+    """One-shot merge changeset for single-entity REST writes: commit or raise Conflict.
+    A few items are written with the changeset in one request; many are uploaded."""
+    if len(items) > ONE_REQUEST_ITEMS:
+        meta = create(store, source=source, mode="merge", kind=kind)
+        add_items(store, meta["id"], items)
+        try:
+            return commit(store, meta["id"], base=base, ontology_dir=ontology_dir)
+        except Conflict:
+            discard(store, meta["id"])
+            raise
+    check_source(source)
+    if kind not in KINDS:
+        raise ValueError(f"Kind must be one of: {', '.join(KINDS)}.")
+    cs = uuid.uuid4().hex[:16]
+    g, _ = _item_triples(cs, items)
+    with unversioned(store):
+        store.update(
+            f"""INSERT DATA {{ GRAPH <{CHANGESET_GRAPH}> {{
+                  <{_cs_iri(cs)}> a <{VM.Changeset}> ;
+                    <{VM.source}> {literal(source)} ; <{VM.mode}> "merge" ; <{VM.kind}> "{kind}" ;
+                    <{VM.status}> "open" ;
+                    <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> ;
+                    <{VM.createdSeq}> {time.time_ns()} ;
+                    <{VM.baseVersion}> {literal(source_version(store, source))} .
+                }}
+                GRAPH <{_items_graph(cs)}> {{ {g.serialize(format="nt")} }} }}"""
+        )
+    meta = {"id": cs}
     try:
         return commit(store, meta["id"], base=base, ontology_dir=ontology_dir)
     except Conflict:

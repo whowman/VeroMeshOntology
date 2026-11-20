@@ -24,10 +24,12 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | quick | `ontology` | `ontology/` | SHACL validation rules fire as intended; every Turtle file parses |
 | quick | `branding` | `branding/` | DataHub theme generator (palette mapping, contrast) and asset injector |
 | quick | `contracts` | interfaces | golden snapshots (below) |
+| quick | `perf` | the service's speed | a synthetic organization of about 200 people loads, and an edit, a decision check, a person lookup and reading all people stay within the budgets in `tests/perf/targets.json` |
 | quick | `licenses` | dependencies | no GPL / AGPL / SSPL / Elastic License package; report in the results folder |
 | quick | `helm` | `deploy/helm/` | the chart lints and renders for every value set in `ci/`; bad values are refused by the schema; services, selectors and the Fuseki NetworkPolicy line up; backups need the customer's key and go where they are told; with the mesh on, every pod is enrolled, Fuseki takes mutual TLS from the service's and backup job's identities only, and the NetworkPolicy lets the mesh through; every container runs unprivileged with limits; manifests pass Kubernetes schemas (kubeconform); the DataHub overlays render against DataHub's official charts at the pinned versions and load the plugin, brand and PostgreSQL |
 | quick | `scripts`, `compose` | `scripts/`, `deploy/` | shell scripts parse; compose file is valid |
 | integration | `fuseki` | `service/`, `connectors/` | the whole service and connector suites again, on a real Fuseki |
+| integration | `perf-fuseki` | the service's speed on Fuseki | the small synthetic organization (about 2,000 people) on a real Fuseki: timings only, in `perf-fuseki-small.json` among the results |
 | integration | `images` | Dockerfiles | service and connector images build, start, and carry their license files |
 | integration | `datahub-frontend` | `branding/datahub/` | the VeroMesh-branded DataHub frontend image builds with the theme and logos in place |
 | integration | `k8s` | `deploy/helm/` | the chart installs into a throwaway kind cluster with a single-node Kafka; `helm test` passes; the worked example loads through the API; both read replicas hold exactly what the writer Fuseki holds; reads keep working while the writer is down; the model survives a writer restart and later writes reach the replicas; a replica with an empty volume rebuilds from Kafka; a pod other than the service cannot reach the writer or the replicas; an encrypted backup restores the graph on the writer and both replicas, keeps a decision log that holds entries, and brings back a lost one with its hash chain intact (needs kind, kubectl and Helm) |
@@ -42,6 +44,30 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 `scripts/test.sh --list` prints the same table from the registry. You can run one suite or one component by name: `scripts/test.sh connectors`, `scripts/test.sh fuseki`, `scripts/test.sh stack`.
 
 The e2e suites work against your development stack. Everything they create is named `regtest`, and they remove it afterwards, so your own sources are left alone.
+
+## Performance
+
+`tests/perf/bench.py` builds a synthetic organization (copies of the worked example, one per domain, plus people filling its roles) and times what users and agents do: load it one domain at a time, edit one fact, read all people, find a person, ask the decision check, read straight after an edit, and re-sync the whole source with one change.
+
+```bash
+PYTHONPATH=service/src python tests/perf/bench.py --size small      # smoke, small, medium, large
+PYTHONPATH=service/src python tests/perf/bench.py --size smoke --check
+PYTHONPATH=service/src python tests/perf/bench.py --domains 20 --people 500 --store fuseki:http://localhost:3030/veromesh
+```
+
+CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are tightened as the work lands so it cannot slip back. `goals` are what each size must reach; `baseline` and `measured` record before and after. On the in-memory store:
+
+| Size | People | Edit one fact | Decision check | Read all people | Find a person |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small, before | 2,020 | 13.1 s | 1.82 s | 300 ms | 100 ms |
+| Small | 2,020 | 53 ms | 3 ms | 3 ms | 1 ms |
+| Medium | 20,080 | 25 ms | 4 ms | 18 ms | 11 ms |
+| Large | 100,200 | 35 ms | 23 ms | 137 ms | under 1 ms |
+| Small, on Fuseki (CI) | 2,020 | 78 ms | 32 ms | 4 ms | 2 ms |
+
+Loading the large organization (100 domains, one changeset each) takes 4.5 minutes, 2.4 s for the last domain of 1,000 people; it took 22.5 minutes before loads were made proportional to the batch. A nightly sync of the whole source as one replace load with one change takes 0.7 s for 2,290 entities and 30 s for 102,900.
+
+Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 
 ## Contract snapshots
 

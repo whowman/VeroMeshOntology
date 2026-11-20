@@ -198,6 +198,13 @@ def oxigraph_store(base_url: str, *, client: httpx.Client | None = None) -> Spar
 
 
 def make_store(spec: str, read_fallback: str | None = None) -> RDFStore:
+    """The configured store, wrapped so the model it holds can be cached (modelcache)."""
+    from .modelcache import VersionedStore
+
+    return VersionedStore(_make_store(spec, read_fallback))
+
+
+def _make_store(spec: str, read_fallback: str | None = None) -> RDFStore:
     if read_fallback and not read_fallback.startswith(("http://", "https://")):
         raise ValueError(
             f"Unsupported VEROMESH_RDF_STORE_READ_FALLBACK value {read_fallback!r}; "

@@ -159,6 +159,18 @@ SUITES: list[Suite] = [
         ),
     ),
     Suite(
+        name="perf-fuseki",
+        component="service",
+        tier="integration",
+        needs=frozenset({"fuseki"}),
+        description="Performance on a real Fuseki: the small synthetic organization (about 2,000 people), timings only",
+        covers=("tests/perf",),
+        steps=(
+            "PYTHONPATH=service/src python tests/perf/bench.py --size small --store fuseki:{fuseki} --clear"
+            " --out {results}/perf-fuseki-small.json",
+        ),
+    ),
+    Suite(
         name="decision-log",
         component="service",
         tier="integration",
@@ -234,6 +246,17 @@ SUITES: list[Suite] = [
         needs=frozenset({"docker", "kind"}),
         description="Helm chart in a throwaway kind cluster with Kafka and PostgreSQL: helm test, example load, replicas match the writer, reads while the writer restarts, replica rebuild, NetworkPolicy, encrypted backup and restore",
         steps=("tests/k8s/kind_smoke.sh {results}",),
+    ),
+    Suite(
+        name="perf",
+        component="service",
+        tier="quick",
+        description="Performance smoke: a synthetic organization (2 domains, about 200 people), timings within budget (tests/perf/targets.json)",
+        steps=(
+            "PYTHONPATH=service/src python tests/perf/bench.py --size smoke --check"
+            " --out {results}/perf-smoke.json",
+        ),
+        covers=("tests/perf",),
     ),
     Suite(
         name="k8s-mesh",

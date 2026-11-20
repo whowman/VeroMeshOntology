@@ -66,9 +66,10 @@ def test_store_client_errors_raise_store_request_error():
 
 
 def test_make_store():
-    assert isinstance(make_store("memory"), MemoryStore)
+    # Wrapped so the model can be cached (modelcache.VersionedStore).
+    assert isinstance(make_store("memory").inner, MemoryStore)
     fuseki = make_store("fuseki:http://fuseki:3030/veromesh")
-    assert isinstance(fuseki, SparqlHttpStore) and fuseki.graph_store_url.endswith("/veromesh/data")
+    assert isinstance(fuseki.inner, SparqlHttpStore) and fuseki.graph_store_url.endswith("/veromesh/data")
     oxigraph = make_store("oxigraph:http://oxigraph:7878")
     assert oxigraph.graph_store_url == "http://oxigraph:7878/store"
     with pytest.raises(ValueError):
@@ -185,7 +186,7 @@ def test_writes_never_fall_back():
 
 def test_make_store_takes_a_read_fallback():
     store = make_store("fuseki:http://writer:3030/veromesh", "http://replicas:3030/veromesh")
-    assert isinstance(store, SparqlHttpStore)
+    assert isinstance(store.inner, SparqlHttpStore)
     assert store.fallback_query_url == "http://replicas:3030/veromesh/query"
     assert make_store("fuseki:http://writer:3030/veromesh").fallback_query_url is None
     with pytest.raises(ValueError, match="READ_FALLBACK"):

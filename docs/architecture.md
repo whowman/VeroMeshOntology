@@ -49,6 +49,19 @@ Veromesh adds the organizational ontology beside DataHub without forking it.
 
 `datahub-model/` defines `veromeshOntologyBindings` (on datasets, schema fields, dashboards, charts and containers). It records class IRI, ontology IRI and version, which glossary terms alone can't carry. It's built as a DataHub custom-model plugin and mounted into GMS from `~/.datahub/plugins/models/` (or a ConfigMap on Kubernetes); see DataHub's `metadata-models-custom` docs.
 
+## Performance
+
+An edit, a decision check or a read takes time that depends on what it touches, not on the size of the model (`docs/testing.md`, "Performance", for the numbers):
+
+- **Validation** checks only the nodes a change can affect: those within three links of a changed triple (any depth along capability nesting), plus the other holders of values that must be unique. The RDFS entailments the shapes need are computed directly, and each SPARQL constraint is parsed once.
+- **Changesets** that upsert in merge mode are planned from the entities they touch (`service/src/veromesh/incremental.py`). They re-resolve only those entities, validate the exact change, and write the difference to the source graph, the claims and the effective model. Replace loads, deletes and anything the fast path cannot show to be equivalent take the full path.
+- **Reads** are kept in memory until the model changes. Every write records a model version in the store, so a write by another replica is seen at once. A commit writes the version once, by compare-and-swap, and carries its state and the readers' lists forward only when nobody else wrote in between.
+
+- **Validation focus:** a changed triple (s, p, o) changes s, and changes o only when a shape follows p backwards or the triple changes o's entailed types. A value many entities share, such as a sensitivity level, does not pull them all in.
+- **Loads:** replace loads (what batch connectors send), deletes and removed entities take the fast path too. A load costs about 2 to 4 ms per new entity, mostly SHACL, whatever the size of the model. A nightly sync that changes little costs reading the batch.
+- **Round trips:** a small commit (an edit) goes to the store as one update request, one transaction on Fuseki; the ontology files are uploaded only when they change. Larger loads use bulk uploads. An edit through the API makes two writes in all.
+- **Warnings:** they are reported for the entities a changeset changes, not every entity it sends, so an unchanged re-sync is quiet.
+
 ## Next steps
 
 1. **DataHub → Veromesh events.** Subscribe to DataHub's change stream (DataHub Actions framework, Apache-2.0) to keep bindings in sync when someone edits glossary terms in the DataHub UI, and to remove bindings for deleted assets.

@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from rdflib import Graph, Literal, Namespace, URIRef
@@ -29,6 +29,7 @@ from rdflib.namespace import RDF, XSD
 
 from . import clock
 from . import entities as E
+from .modelcache import cached
 from .ontology import literal
 from .rdf_store import RDFStore
 
@@ -262,6 +263,10 @@ class Resolved:
 
 
 def categories(store: RDFStore) -> dict[str, str]:
+    return dict(cached(store, "categories", lambda: _categories(store)))
+
+
+def _categories(store: RDFStore) -> dict[str, str]:
     res = store.query(
         f"""SELECT ?name ?cat WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
               ?s <{VMP.name}> ?name ; <{VMP.category}> ?cat }} }}"""
@@ -326,13 +331,21 @@ def extract(graph: Graph, base: str) -> dict[tuple[str, str], dict]:
     return out
 
 
-def _claim_rows(store: RDFStore, where: str) -> list[Claim]:
+def _claim_rows(
+    store: RDFStore, where: str, iri: str | None = None, changeset: str | None = None
+) -> list[Claim]:
+    """Claims matching ``where``; or the one claim ``iri``, or the claims ``changeset``
+    created (each looked up directly, not by reading every claim)."""
+    c = f"<{iri}>" if iri else "?c"
+    select = f"(<{iri}> AS ?c)" if iri else "?c"
+    by_cs = f"?c <{PROV.wasGeneratedBy}> <{CHANGESET_BASE}{changeset}> ." if changeset and not iri else ""
     res = store.query(
-        f"""SELECT ?c ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
-              ?c a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
+        f"""SELECT {select} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+              {by_cs}
+              {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
-              OPTIONAL {{ ?c <{VMP.validFrom}> ?vf }} OPTIONAL {{ ?c <{VMP.validUntil}> ?vu }}
-              OPTIONAL {{ ?c <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ ?c <{PROV.wasGeneratedBy}> ?cs }}
+              OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
+              OPTIONAL {{ {c} <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ {c} <{PROV.wasGeneratedBy}> ?cs }}
               {where} }} }}"""
     )
 
@@ -367,11 +380,35 @@ def read_claims(
         where += f" FILTER(?src = {literal(source)})"
     if entity:
         where += f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})"
+    if current and not source and not entity:
+        return list(cached(store, "claims", lambda: _read_claims(store, where)))
+    return _read_claims(store, where)
+
+
+def _read_claims(store: RDFStore, where: str) -> list[Claim]:
     cats = categories(store)
     out = _claim_rows(store, where)
     for c in out:
         c.category = cats.get(c.source, DEFAULT_CATEGORY)
     return out
+
+
+def read_written(store: RDFStore, changes: dict, cats: dict[str, str] | None = None) -> list[Claim]:
+    """The claims ``record_source`` wrote (``changes``), as the store gives them back
+    (it may normalise times). ``cats``: the sources' categories, when the caller has them."""
+    written = changes["written"]
+    back: list[Claim] = []
+    if len(written) > 20 and changes.get("changeset"):  # a load: the changeset's claims, in one query
+        wanted = set(written)
+        back = [c for c in _claim_rows(store, "", changeset=changes["changeset"]) if c.iri in wanted]
+        found = {c.iri for c in back}
+        written = [iri for iri in written if iri not in found]  # refreshed ones are older claims
+    for iri in written:
+        back += _claim_rows(store, "", iri=iri)
+    cats = categories(store) if cats is None else cats
+    for c in back:
+        c.category = cats.get(c.source, DEFAULT_CATEGORY)
+    return back
 
 
 def has_claims(store: RDFStore) -> bool:
@@ -386,10 +423,21 @@ def record_source(
     *,
     changeset: str | None,
     at: str,
+    current: dict[tuple[str, str], Claim] | None = None,
+    changes: dict | None = None,
+    read_back: bool = True,
+    cats: dict[str, str] | None = None,
 ) -> dict:
     """Bring the source's claims in line with what it now states: supersede changed or
-    removed entities, add claims for new values, refresh the observed time of unchanged ones."""
-    current = {c.key: c for c in read_claims(store, source=source)}
+    removed entities, add claims for new values, refresh the observed time of unchanged ones.
+
+    ``current``: the source's current claims for just the entities being changed
+    (the caller knows them); only those entities are compared. ``changes``, when
+    given, receives what was written: ``created`` (Claims, as they read back),
+    ``superseded`` (claim IRIs) and ``refreshed`` ((claim IRI, observed time))."""
+    if current is None:
+        current = {c.key: c for c in read_claims(store, source=source)}
+    created: list[Claim] = []
     g = Graph()
     supersede, refresh = [], []
     added = unchanged = 0
@@ -426,6 +474,7 @@ def record_source(
             g.add((c, VMP.validFrom, Literal(m["validFrom"][:10], datatype=XSD.date)))
         if m.get("validUntil"):
             g.add((c, VMP.validUntil, Literal(m["validUntil"][:10], datatype=XSD.date)))
+        created.append(c)
     supersede += [c.iri for key, c in current.items() if key not in entities]
     for i in range(0, len(supersede), 200):
         values = " ".join(f"<{iri}>" for iri in supersede[i : i + 200])
@@ -440,7 +489,36 @@ def record_source(
                 WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{ <{iri}> <{VMP.observedAt}> ?o }} }}"""
         )
     if len(g):
-        store.load_turtle(g.serialize(format="turtle"), CLAIMS_GRAPH, replace=False)
+        store.load_turtle(g.serialize(format="nt"), CLAIMS_GRAPH, replace=False)
+    if changes is not None:
+        written = [str(c) for c in created] + [iri for iri, _ in refresh]
+        changes.update(superseded=supersede, written=written, changeset=changeset)
+        if read_back:
+            changes["claims"] = read_written(store, changes)
+        else:  # the store has not been written yet (a deferred batch): as written, for now
+            cats = categories(store) if cats is None else cats
+            refreshed = dict(refresh)
+            mine = []
+            for c in created:
+                mine.append(
+                    Claim(
+                        source=source,
+                        type=str(g.value(c, VMP.entityType)),
+                        id=str(g.value(c, VMP.entityId)),
+                        values=json.loads(str(g.value(c, VMP.values))),
+                        observed_at=str(g.value(c, VMP.observedAt)),
+                        category=cats.get(source, DEFAULT_CATEGORY),
+                        valid_from=str(g.value(c, VMP.validFrom)) if g.value(c, VMP.validFrom) else None,
+                        valid_until=str(g.value(c, VMP.validUntil)) if g.value(c, VMP.validUntil) else None,
+                        generated_at=str(g.value(c, PROV.generatedAtTime)),
+                        changeset=changeset,
+                        iri=str(c),
+                    )
+                )
+            for old in current.values():
+                if old.iri in refreshed:
+                    mine.append(replace(old, observed_at=refreshed[old.iri]))
+            changes["claims"] = mine
     return {"added": added, "superseded": len(supersede), "unchanged": unchanged}
 
 
@@ -448,6 +526,12 @@ def record_source(
 
 
 def read_attestations(store: RDFStore, entity: tuple[str, str] | None = None) -> list[Attestation]:
+    if entity is None:
+        return list(cached(store, "attestations", lambda: _read_attestations(store, None)))
+    return _read_attestations(store, entity)
+
+
+def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[Attestation]:
     where = f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})" if entity else ""
     res = store.query(
         f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
@@ -525,7 +609,7 @@ def write_attestation(
         g.add((s, VMP.expiresAt, Literal(expires, datatype=XSD.dateTime)))
     if note:
         g.add((s, VMP.note, Literal(note)))
-    store.load_turtle(g.serialize(format="turtle"), ATTESTATIONS_GRAPH, replace=False)
+    store.load_turtle(g.serialize(format="nt"), ATTESTATIONS_GRAPH, replace=False)
     return a
 
 
@@ -619,10 +703,15 @@ def to_graph(resolved: dict[tuple[str, str], Resolved], base: str) -> tuple[Grap
 
 
 def store_effective(store: RDFStore, graph: Graph) -> None:
-    store.load_turtle(graph.serialize(format="turtle"), EFFECTIVE_GRAPH)
+    store.load_turtle(graph.serialize(format="nt"), EFFECTIVE_GRAPH)
 
 
 def effective_graph(store: RDFStore) -> Graph:
+    """The effective model (read-only: the same Graph is shared until the model changes)."""
+    return cached(store, "effective", lambda: _effective_graph(store))
+
+
+def _effective_graph(store: RDFStore) -> Graph:
     from .changesets import _term
 
     res = store.query(f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
@@ -800,8 +889,13 @@ def review_queue(
 
 
 def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Attestation]]:
-    atts = read_attestations(store)
-    return resolve(read_claims(store), atts), atts
+    """What VeroMesh believes today (shared and read-only until the model or the day changes)."""
+
+    def compute():
+        atts = read_attestations(store)
+        return resolve(read_claims(store), atts), atts
+
+    return cached(store, ("current", clock.today()), compute)
 
 
 def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case: bool = False) -> list[str]:
@@ -810,13 +904,18 @@ def matching(store: RDFStore, type_: str, field: str, value: str, *, ignore_case
     def norm(v: str) -> str:
         return v.strip().casefold() if ignore_case else v.strip()
 
-    want = norm(value)
-    resolved, _ = _current(store)
-    return sorted(
-        rid
-        for (t, rid), r in resolved.items()
-        if t == type_ and isinstance(r.values.get(field), str) and norm(r.values[field]) == want
-    )
+    def build() -> dict[str, list[str]]:
+        resolved, _ = _current(store)
+        index: dict[str, list[str]] = {}
+        for (t, rid), r in resolved.items():
+            v = r.values.get(field)
+            if t == type_ and isinstance(v, str):
+                index.setdefault(norm(v), []).append(rid)
+        return {k: sorted(ids) for k, ids in index.items()}
+
+    # One index per field, kept until the model (or the day) changes.
+    index = cached(store, ("matching", type_, field, ignore_case, clock.today()), build)
+    return list(index.get(norm(value), []))
 
 
 def person_matching(store: RDFStore, field: str, value: str) -> str | None:
