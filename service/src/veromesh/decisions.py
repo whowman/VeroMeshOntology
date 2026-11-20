@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import queue
+import secrets
 import socket
 import threading
 import uuid
@@ -405,65 +406,55 @@ class PostgresLog:
         self._wconn = None
 
     def _write(self, batch: list[_Pending]) -> None:
+        """Chain and insert ``batch`` in one transaction, in two round trips to the server:
+        begin, lock and read the chain's end (and the entries referred to); then insert
+        and commit. Values go into the SQL text as quoted literals (see ``_sql``), since a
+        request that carries several statements cannot carry parameters."""
         if self._wconn is None:
             self._wconn = self._open()
         c = self._wconn
         for p in batch:
             p.entry, p.error = None, None
-        c.run("BEGIN")
+        refs = sorted({p.ref for p in batch if p.ref})  # each one checked by _uuid: a UUID's characters only
         try:
-            c.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
-            refs = sorted({p.ref for p in batch if p.ref})
-            known: set[str] = set()
-            if refs:
-                rows = c.run(
-                    "SELECT id::text FROM veromesh_decision_log WHERE id = ANY(CAST(:ids AS uuid[]))",
-                    ids=refs,
-                )
-                known = {r[0] for r in rows}
-            last = c.run("SELECT seq, hash FROM veromesh_decision_log ORDER BY seq DESC LIMIT 1")
-            seq, prev = (last[0][0] + 1, last[0][1]) if last else (1, GENESIS)
-            entries = []
+            rows = c.run(
+                f"BEGIN; SELECT pg_advisory_xact_lock({int(LOCK_KEY)});"
+                " SELECT l.seq, l.hash, ARRAY(SELECT id::text FROM veromesh_decision_log"
+                f" WHERE id = ANY('{{{','.join(refs)}}}'::uuid[]))"
+                " FROM (SELECT 1) AS one LEFT JOIN LATERAL"
+                " (SELECT seq, hash FROM veromesh_decision_log ORDER BY seq DESC LIMIT 1) AS l ON true"
+            )
+            last_seq, last_hash, found = rows[-1]
+            known = set(found or [])
+            seq, prev = (last_seq + 1, last_hash) if last_seq is not None else (1, GENESIS)
+            values = []
             for p in batch:
                 if p.ref and p.ref not in known:
                     p.error = InvalidEntry(f"No entry {p.fields['refersTo']} to refer to.")
                     continue
-                entry = _new_entry(p.fields, seq, prev)
-                p.entry = entry
-                known.add(entry["id"])
-                seq, prev = seq + 1, entry["hash"]
-                entries.append(entry)
-            for i in range(0, len(entries), 100):
-                part = entries[i : i + 100]
-                values, params = [], {}
-                for j, e in enumerate(part):
-                    values.append(
-                        f"(:s{j}, CAST(:i{j} AS uuid), CAST(:t{j} AS timestamptz), :k{j}, CAST(:r{j} AS uuid),"
-                        f" :g{j}, :p{j}, :a{j}, CAST(:e{j} AS jsonb), :h{j})"
-                    )
-                    params.update(
-                        {
-                            f"s{j}": e["seq"],
-                            f"i{j}": e["id"],
-                            f"t{j}": e["recordedAt"],
-                            f"k{j}": e["kind"],
-                            f"r{j}": e.get("refersTo"),
-                            f"g{j}": e.get("agent"),
-                            f"p{j}": e.get("principal"),
-                            f"a{j}": e.get("action"),
-                            f"e{j}": json.dumps(e),
-                            f"h{j}": e["hash"],
-                        }
-                    )
-                c.run(
-                    "INSERT INTO veromesh_decision_log"
-                    " (seq, id, recorded_at, kind, refers_to, agent, principal, action, entry, hash)"
-                    " VALUES " + ", ".join(values),
-                    **params,
+                e = _new_entry(p.fields, seq, prev)
+                p.entry = e
+                known.add(e["id"])
+                seq, prev = seq + 1, e["hash"]
+                values.append(
+                    f"({int(e['seq'])}, {_sql(e['id'])}::uuid, {_sql(e['recordedAt'])}::timestamptz,"
+                    f" {_sql(e['kind'])}, {_sql(e.get('refersTo'))}::uuid, {_sql(e.get('agent'))},"
+                    f" {_sql(e.get('principal'))}, {_sql(e.get('action'))}, {_sql(json.dumps(e))}::jsonb,"
+                    f" {_sql(e['hash'])})"
                 )
-            c.run("COMMIT")
+            insert = (
+                "INSERT INTO veromesh_decision_log"
+                " (seq, id, recorded_at, kind, refers_to, agent, principal, action, entry, hash)"
+                " VALUES " + ", ".join(values) + "; "
+                if values
+                else ""
+            )
+            c.run(insert + "COMMIT")
         except Exception:
-            c.run("ROLLBACK")
+            try:
+                c.run("ROLLBACK")
+            except Exception:  # noqa: BLE001 — the connection is gone: the caller reconnects
+                pass
             for p in batch:
                 if not isinstance(p.error, InvalidEntry):
                     p.entry = None
@@ -510,6 +501,18 @@ class PostgresLog:
 
 def _entry(value) -> dict:
     return json.loads(value) if isinstance(value, str) else value
+
+
+def _sql(value: str | None) -> str:
+    """``value`` as an SQL literal: NULL, or dollar-quoted under a random tag that does
+    not occur in it (so no character of the value is special)."""
+    if value is None:
+        return "NULL"
+    value = str(value)
+    while True:
+        tag = f"$v{secrets.token_hex(4)}$"
+        if tag not in value:
+            return f"{tag}{value}{tag}"
 
 
 def _uuid(value: str) -> str:

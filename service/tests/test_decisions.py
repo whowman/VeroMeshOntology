@@ -288,3 +288,14 @@ def test_many_writers_at_once_each_get_their_own_answer(dlog):
     assert len({r["seq"] for r in written}) == len(written)
     assert all(r.get("note") == f"writer {k}" for k, r in results.items() if k % 5 > 1)
     assert dlog.verify().ok
+
+
+def test_any_text_is_stored_exactly(dlog):
+    """Values are written as quoted SQL literals: text that looks like quoting or SQL
+    comes back exactly as given, and the chain still verifies."""
+    awkward = "it's $$ a $v0000$ test'); DROP TABLE veromesh_decision_log; --\n\\x00 é 🤖"
+    e = dlog.append(decision(agent=awkward, principal=awkward, action=awkward, reasons=[awkward]))
+    assert dlog.get(e["id"])["agent"] == awkward
+    assert dlog.get(e["id"])["reasons"] == [awkward]
+    assert dlog.find(agent=awkward)[0]["id"] == e["id"]
+    assert dlog.verify().ok
