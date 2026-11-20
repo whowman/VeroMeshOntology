@@ -37,9 +37,9 @@ from rdflib import BNode, Graph, URIRef
 from rdflib.namespace import XSD
 
 from . import clock, validation
-from .compactgraph import compact_graph, decode, encode
 from . import entities as E
 from . import provenance as P
+from .compactgraph import compact_graph, decode, encode
 from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached
 
 _LOCK = threading.RLock()

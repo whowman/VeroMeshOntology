@@ -33,9 +33,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import orggen  # noqa: E402
-from veromesh import changesets, decide, decisions  # noqa: E402
+from veromesh import changesets, decide, decisions, gcsetup  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
-from veromesh import gcsetup  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
 ROOT = HERE.parents[1]

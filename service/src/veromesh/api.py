@@ -30,10 +30,10 @@ from . import (
     decisions,
     entities,
     followup,
+    gcsetup,
     mcp_server,
     suggest,
 )
-from . import gcsetup
 from . import provenance as prov
 from .config import Settings, get_settings
 from .datahub import DataHubPort, DataHubSdkPort

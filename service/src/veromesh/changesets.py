@@ -45,9 +45,9 @@ from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
 from . import entities as E
-from .compactgraph import compact_graph
 from . import incremental, validation
 from . import provenance as P
+from .compactgraph import compact_graph
 from .modelcache import VersionedStore, cached, unversioned
 from .ontology import literal
 from .rdf_store import RDFStore
