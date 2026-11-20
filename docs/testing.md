@@ -61,7 +61,9 @@ CI runs the smoke size against `budgets` in `tests/perf/targets.json`, which are
 | Small, before | 2,020 | 13.1 s | 1.82 s | 300 ms | 100 ms |
 | Small | 2,020 | 53 ms | 3 ms | 3 ms | 1 ms |
 | Medium | 20,080 | 25 ms | 4 ms | 18 ms | 11 ms |
-| Large | 100,200 | 41 ms | 24 ms | 119 ms | 61 ms, before the person index |
+| Large | 100,200 | 35 ms | 23 ms | 137 ms | under 1 ms |
+
+Loading the large organization (100 domains, one changeset each) takes 4.5 minutes, 2.4 s for the last domain of 1,000 people; it took 22.5 minutes before loads were made proportional to the batch. A nightly sync of the whole source as one replace load with one change takes 0.7 s for 2,290 entities and 30 s for 102,900.
 
 Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 

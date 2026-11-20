@@ -60,7 +60,7 @@
     }
   },
   "measured": {
-    "_date": "2026-11-19, in-memory store; medium with the incremental planner (0c5cd16), large with shared entity lists (f0b3530)",
+    "_date": "2026-11-19, in-memory store; medium with the incremental planner (0c5cd16), large with batch-proportional loads (0ead0c9)",
     "medium": {
       "people": 20080,
       "triples": 126880,
@@ -77,16 +77,16 @@
     "large": {
       "people": 100200,
       "triples": 617200,
-      "load_total_s": 1349.757,
-      "load_last_domain_s": 24.543,
-      "edit_s": 0.041,
-      "read_people_s": 0.119,
-      "find_person_s": 0.061,
-      "check_s": 0.024,
-      "check_after_edit_s": 0.055,
-      "read_people_after_edit_s": 0.12,
+      "load_total_s": 271.065,
+      "load_last_domain_s": 2.356,
+      "edit_s": 0.035,
+      "read_people_s": 0.137,
+      "find_person_s": 0.0,
+      "check_s": 0.023,
+      "check_after_edit_s": 0.054,
+      "read_people_after_edit_s": 0.122,
       "coverage_s": 0.001,
-      "_note": "find_person_s before the person index (indexed since; 0 ms at small)"
+      "resync_s": 30.392
     }
   }
 }
