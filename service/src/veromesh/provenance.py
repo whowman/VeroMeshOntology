@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from rdflib import Graph, Literal, Namespace, URIRef
@@ -393,6 +393,24 @@ def _read_claims(store: RDFStore, where: str) -> list[Claim]:
     return out
 
 
+def read_written(store: RDFStore, changes: dict, cats: dict[str, str] | None = None) -> list[Claim]:
+    """The claims ``record_source`` wrote (``changes``), as the store gives them back
+    (it may normalise times). ``cats``: the sources' categories, when the caller has them."""
+    written = changes["written"]
+    back: list[Claim] = []
+    if len(written) > 20 and changes.get("changeset"):  # a load: the changeset's claims, in one query
+        wanted = set(written)
+        back = [c for c in _claim_rows(store, "", changeset=changes["changeset"]) if c.iri in wanted]
+        found = {c.iri for c in back}
+        written = [iri for iri in written if iri not in found]  # refreshed ones are older claims
+    for iri in written:
+        back += _claim_rows(store, "", iri=iri)
+    cats = categories(store) if cats is None else cats
+    for c in back:
+        c.category = cats.get(c.source, DEFAULT_CATEGORY)
+    return back
+
+
 def has_claims(store: RDFStore) -> bool:
     return bool(store.query(f"ASK {{ GRAPH <{CLAIMS_GRAPH}> {{ ?c a <{VMP.Claim}> }} }}").get("boolean"))
 
@@ -407,6 +425,8 @@ def record_source(
     at: str,
     current: dict[tuple[str, str], Claim] | None = None,
     changes: dict | None = None,
+    read_back: bool = True,
+    cats: dict[str, str] | None = None,
 ) -> dict:
     """Bring the source's claims in line with what it now states: supersede changed or
     removed entities, add claims for new values, refresh the observed time of unchanged ones.
@@ -471,20 +491,34 @@ def record_source(
     if len(g):
         store.load_turtle(g.serialize(format="nt"), CLAIMS_GRAPH, replace=False)
     if changes is not None:
-        # The written claims as the store gives them back (it may normalise times).
-        made = {str(c) for c in created}
-        back: list[Claim] = []
-        if len(made) > 20 and changeset:  # a load: the claims this changeset made, in one query
-            back = [c for c in _claim_rows(store, "", changeset=changeset) if c.iri in made]
-        else:
-            for iri in made:
-                back += _claim_rows(store, "", iri=iri)
-        for iri, _ in refresh:
-            back += _claim_rows(store, "", iri=iri)
-        cats = categories(store)
-        for c in back:
-            c.category = cats.get(c.source, DEFAULT_CATEGORY)
-        changes.update(claims=back, superseded=supersede)
+        written = [str(c) for c in created] + [iri for iri, _ in refresh]
+        changes.update(superseded=supersede, written=written, changeset=changeset)
+        if read_back:
+            changes["claims"] = read_written(store, changes)
+        else:  # the store has not been written yet (a deferred batch): as written, for now
+            cats = categories(store) if cats is None else cats
+            refreshed = dict(refresh)
+            mine = []
+            for c in created:
+                mine.append(
+                    Claim(
+                        source=source,
+                        type=str(g.value(c, VMP.entityType)),
+                        id=str(g.value(c, VMP.entityId)),
+                        values=json.loads(str(g.value(c, VMP.values))),
+                        observed_at=str(g.value(c, VMP.observedAt)),
+                        category=cats.get(source, DEFAULT_CATEGORY),
+                        valid_from=str(g.value(c, VMP.validFrom)) if g.value(c, VMP.validFrom) else None,
+                        valid_until=str(g.value(c, VMP.validUntil)) if g.value(c, VMP.validUntil) else None,
+                        generated_at=str(g.value(c, PROV.generatedAtTime)),
+                        changeset=changeset,
+                        iri=str(c),
+                    )
+                )
+            for old in current.values():
+                if old.iri in refreshed:
+                    mine.append(replace(old, observed_at=refreshed[old.iri]))
+            changes["claims"] = mine
     return {"added": added, "superseded": len(supersede), "unchanged": unchanged}
 
 

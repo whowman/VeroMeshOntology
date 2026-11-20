@@ -436,6 +436,21 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
     """Add or replace items: ``{"type": "kpis", "op": "upsert"|"delete", "entity": {...}}``.
     Delete items need only ``{"id": ...}`` as the entity."""
     _require_open(store, cs)
+    g, nodes = _item_triples(cs, items)
+    if nodes:
+        for i in range(0, len(nodes), 200):
+            values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
+            store.update(
+                f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
+                    WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
+            )
+        store.load_turtle(g.serialize(format="nt"), _items_graph(cs), replace=False)
+    _set_status(store, cs, "open")
+    return get(store, cs, with_report=False)
+
+
+def _item_triples(cs: str, items: list[dict]) -> tuple[Graph, list]:
+    """The items as triples in the changeset's items graph, checked (ValueError)."""
     g = Graph()
     nodes = []
     seen: dict[tuple[str, str], int] = {}
@@ -470,16 +485,7 @@ def add_items(store: RDFStore, cs: str, items: list[dict]) -> dict:
         times = _check_times(n, raw)
         if times:
             g.add((node, VM.itemMeta, Literal(json.dumps(times))))
-    if nodes:
-        for i in range(0, len(nodes), 200):
-            values = " ".join(f"<{n}>" for n in nodes[i : i + 200])
-            store.update(
-                f"""DELETE {{ GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}
-                    WHERE {{ VALUES ?n {{ {values} }} GRAPH <{_items_graph(cs)}> {{ ?n ?p ?o }} }}"""
-            )
-        store.load_turtle(g.serialize(format="nt"), _items_graph(cs), replace=False)
-    _set_status(store, cs, "open")
-    return get(store, cs, with_report=False)
+    return g, nodes
 
 
 def _load_items(store: RDFStore, cs: str) -> list[Item]:
@@ -737,7 +743,7 @@ def _fast_plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontolo
     if not incremental.enabled():
         return None
     version = store.version() if isinstance(store, VersionedStore) else ""
-    st = incremental.state(store, base)
+    st = incremental.state(store, base, version or None)
     if st is None:
         incremental.STATS["full"] += 1
         return None
@@ -855,9 +861,26 @@ def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_
 def apply(
     store: RDFStore, *, source: str, items: list[dict], base: str, ontology_dir: str, kind: str = "api"
 ) -> dict:
-    """One-shot merge changeset for single-entity REST writes: commit or raise Conflict."""
-    meta = create(store, source=source, mode="merge", kind=kind)
-    add_items(store, meta["id"], items)
+    """One-shot merge changeset for single-entity REST writes: commit or raise Conflict.
+    The changeset and its items are written in one request."""
+    check_source(source)
+    if kind not in KINDS:
+        raise ValueError(f"Kind must be one of: {', '.join(KINDS)}.")
+    cs = uuid.uuid4().hex[:16]
+    g, _ = _item_triples(cs, items)
+    with unversioned(store):
+        store.update(
+            f"""INSERT DATA {{ GRAPH <{CHANGESET_GRAPH}> {{
+                  <{_cs_iri(cs)}> a <{VM.Changeset}> ;
+                    <{VM.source}> {literal(source)} ; <{VM.mode}> "merge" ; <{VM.kind}> "{kind}" ;
+                    <{VM.status}> "open" ;
+                    <{VM.createdAt}> "{now()}"^^<{XSD.dateTime}> ;
+                    <{VM.createdSeq}> {time.time_ns()} ;
+                    <{VM.baseVersion}> {literal(source_version(store, source))} .
+                }}
+                GRAPH <{_items_graph(cs)}> {{ {g.serialize(format="nt")} }} }}"""
+        )
+    meta = {"id": cs}
     try:
         return commit(store, meta["id"], base=base, ontology_dir=ontology_dir)
     except Conflict:

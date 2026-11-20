@@ -24,6 +24,7 @@ Two refinements keep a commit from throwing away more than it must:
 
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from collections.abc import Callable, Iterator
@@ -37,10 +38,19 @@ _VERSION = "https://veromesh.ai/ontology/core#modelVersion"
 T = TypeVar("T")
 
 
+ONTOLOGY_SUBJECT = "urn:veromesh:ontology"
+ONTOLOGY_HASH = "https://veromesh.ai/ontology/core#ontologyHash"
+_FLUSH_BYTES = 4_000_000  # a deferred batch sends what it holds once it reaches this
+
+
 class Batch:
-    def __init__(self, expect: str | None) -> None:
+    def __init__(self, expect: str | None, defer: bool) -> None:
         self.expect = expect
-        self.wrote = False
+        self.defer = defer
+        self.ops: list[str] = []  # deferred writes, sent as one request
+        self.size = 0
+        self.wrote = False  # a write that changes the model (sent or held)
+        self.sent = False  # some of it already reached the store
         self.version: str | None = None
         self.clean = False
 
@@ -58,34 +68,63 @@ class VersionedStore:
         return getattr(self._local, "batch", None)
 
     @contextmanager
-    def batch(self, expect: str | None = None) -> Iterator[Batch]:
+    def batch(self, expect: str | None = None, *, defer: bool = False) -> Iterator[Batch]:
         """Writes inside change the version once, when the batch ends (this thread only).
-        ``expect``: the version the caller's knowledge is from (default: now)."""
+        ``expect``: the version the caller's knowledge is from (default: now).
+
+        ``defer``: hold the writes and send them, with the version change, as one update
+        request when the batch ends (one transaction on Fuseki; very large batches are
+        sent in parts). Reads inside the batch then do not see its writes. If the batch
+        fails, what is still held is never sent."""
         if self._batch() is not None:
             raise RuntimeError("batches do not nest")
-        b = Batch(expect if expect is not None else self.version())
+        b = Batch(expect if expect is not None else self.version(), defer)
         self._local.batch = b
+        ok = False
         try:
             yield b
+            ok = True
         finally:
             self._local.batch = None
-            if b.wrote:
+            if not ok:
+                b.ops.clear()
+                if b.sent:
+                    self._bump()
+            elif b.wrote:
                 new = str(uuid.uuid4())
-                self.inner.update(
+                b.ops.append(
                     f"""DELETE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
                         INSERT {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> "{new}" }} }}
                         WHERE {{ OPTIONAL {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
                                  FILTER(COALESCE(STR(?old), "0") = "{b.expect}") }}"""
                 )
+                self._send(b)
                 b.clean = self.version() == new
-                if not b.clean:
+                if b.clean:
+                    b.version = new
+                else:
                     self._bump()  # someone else wrote: make sure the version moves anyway
-                b.version = self.version()
+                    b.version = self.version()
             else:
+                self._send(b)  # bookkeeping only
                 b.version = b.expect
                 b.clean = self.version() == b.expect
             with self._lock:
                 self._cache.clear()
+
+    def _send(self, b: Batch) -> None:
+        if b.ops:
+            for request in _combine(b.ops):
+                self.inner.update(request)
+            b.ops.clear()
+            b.size = 0
+            b.sent = True
+
+    def _hold(self, b: Batch, op: str) -> None:
+        b.ops.append(op)
+        b.size += len(op)
+        if b.size > _FLUSH_BYTES:
+            self._send(b)
 
     @contextmanager
     def unversioned(self) -> Iterator[None]:
@@ -121,11 +160,24 @@ class VersionedStore:
 
     # Writes bump the version.
     def update(self, sparql: str) -> None:
-        self.inner.update(sparql)
+        b = self._batch()
+        if b is not None and b.defer:
+            self._hold(b, sparql)
+        else:
+            self.inner.update(sparql)
         self._wrote()
 
     def load_turtle(self, data: str, graph: str, *, replace: bool = True) -> None:
-        self.inner.load_turtle(data, graph, replace=replace)
+        b = self._batch()
+        if b is not None and b.defer:
+            from rdflib import Graph
+
+            nt = Graph().parse(data=data, format="turtle").serialize(format="nt")
+            if replace:
+                self._hold(b, f"DROP SILENT GRAPH <{graph}>")
+            self._hold(b, f"INSERT DATA {{ GRAPH <{graph}> {{ {nt} }} }}")
+        else:
+            self.inner.load_turtle(data, graph, replace=replace)
         self._wrote()
 
     def _wrote(self) -> None:
@@ -139,11 +191,18 @@ class VersionedStore:
 
     def _bump(self) -> None:
         self.inner.update(
-            f"""DELETE WHERE {{ GRAPH <{VERSION_GRAPH}> {{ ?s ?p ?o }} }} ;
+            f"""DELETE WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?v }} }} ;
                 INSERT DATA {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> "{uuid.uuid4()}" }} }}"""
         )
         with self._lock:
             self._cache.clear()
+
+    def ontology_hash(self) -> str | None:
+        """The hash of the ontology files last loaded through the fast commit, if recorded."""
+        rows = self.inner.query(
+            f"SELECT ?h WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{ONTOLOGY_SUBJECT}> <{ONTOLOGY_HASH}> ?h }} }}"
+        )["results"]["bindings"]
+        return rows[0]["h"]["value"] if rows else None
 
     def version(self) -> str:
         rows = self.inner.query(
@@ -153,6 +212,25 @@ class VersionedStore:
 
     def __getattr__(self, name: str) -> Any:  # other attributes of the store (URLs, etc.)
         return getattr(self.inner, name)
+
+
+_PREFIX = re.compile(r"^\s*PREFIX\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>", re.IGNORECASE)
+
+
+def _combine(ops: list[str]) -> list[str]:
+    """``ops`` as few update requests as possible: one, with every PREFIX at the top
+    (not every store accepts a PREFIX after ';'), unless two ops disagree on a prefix."""
+    prefixes: dict[str, str] = {}
+    bodies: list[str] = []
+    for op in ops:
+        while (m := _PREFIX.match(op)) is not None:
+            name, iri = m.group(1) or "", m.group(2)
+            if prefixes.setdefault(name, iri) != iri:
+                return list(ops)
+            op = op[m.end() :]
+        bodies.append(op.strip())
+    head = "".join(f"PREFIX {n}: <{i}>\n" for n, i in prefixes.items())
+    return [head + " ;\n".join(bodies)]
 
 
 def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:

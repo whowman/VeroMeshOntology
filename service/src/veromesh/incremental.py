@@ -24,6 +24,7 @@ turns it off. The tests run both paths on the same changes and compare.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import threading
@@ -37,7 +38,7 @@ from rdflib.namespace import XSD
 from . import clock, validation
 from . import entities as E
 from . import provenance as P
-from .modelcache import VersionedStore, cached
+from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached
 
 _LOCK = threading.RLock()
 STATS: Counter = Counter()  # "fast" and "full": which path planned each changeset (for tests and the bench)
@@ -217,6 +218,7 @@ class State:
     today: View  # claims valid today: the stored effective model
     day: date
     stored_effective_ok: bool  # the stored effective model is ``today``'s graph
+    ontology: str | None = None  # hash of the ontology files the store holds (fast commits record it)
 
 
 def _typed(graph: Graph, base: str) -> dict[str, set[str]]:
@@ -283,6 +285,7 @@ def _build(store, base: str) -> State | None:
         today=today,
         day=day,
         stored_effective_ok=set(stored) == set(today.graph),
+        ontology=store.ontology_hash() if isinstance(store, VersionedStore) else None,
     )._index()
 
 
@@ -296,9 +299,14 @@ def _index_state(self: State) -> State:
 State._index = _index_state  # type: ignore[attr-defined]
 
 
-def state(store, base: str) -> State | None:
-    """The state for the store's current version (built if not kept)."""
+def state(store, base: str, version: str | None = None) -> State | None:
+    """The state for the store's current version (built if not kept). ``version``: the
+    version the caller just read, to reuse a kept state without asking again."""
     if isinstance(store, VersionedStore):
+        if version is not None:
+            kept = store.peek_at(("incremental", base), version)
+            if kept is not None:
+                return kept
         return cached(store, ("incremental", base), lambda: _build(store, base))
     return _build(store, base)
 
@@ -644,12 +652,23 @@ def commit(
     # What readers have cached at this version, to carry forward with this change.
     lists = {t: store.peek_at(("entities", t, base, None), version) for t in E.TYPES} if versioned else {}
     believed = store.peek_at(("current", st.day), version) if versioned else None
-    batch = store.batch(expect=version) if versioned else None
+    # Every write below goes to the store as one update request when the batch ends.
+    batch = store.batch(expect=version, defer=True) if versioned else None
     ctx = batch if batch is not None else _Null()
     with ctx as b:
         root = Path(ontology_dir)
-        store.load_turtle((root / "veromesh-core.ttl").read_text(), CORE_GRAPH)
-        store.load_turtle((root / "veromesh-org.ttl").read_text(), ORG_GRAPH)
+        core = (root / "veromesh-core.ttl").read_text()
+        org = (root / "veromesh-org.ttl").read_text()
+        digest = hashlib.sha256((core + "\n" + org).encode()).hexdigest()
+        if not versioned or st.ontology != digest:  # unchanged ontology files: nothing to send
+            store.load_turtle(core, CORE_GRAPH)
+            store.load_turtle(org, ORG_GRAPH)
+            if versioned:
+                store.update(
+                    f"""DELETE WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{ONTOLOGY_SUBJECT}> <{ONTOLOGY_HASH}> ?h }} }} ;
+                        INSERT DATA {{ GRAPH <{VERSION_GRAPH}> {{ <{ONTOLOGY_SUBJECT}> <{ONTOLOGY_HASH}> "{digest}" }} }}"""
+                )
+            st.ontology = digest
         _write_delta(store, graph_iri, edit.removed, edit.added)
         at = now()
         file_triple = f"; dcterms:source {literal(meta['file'])}" if meta.get("file") else ""
@@ -675,7 +694,16 @@ def commit(
         current = {k: st.claims[k][source] for k in edit.keys if source in st.claims.get(k, {})}
         stated = {k: v for k, v in edit.values.items() if v is not None}
         claims = P.record_source(
-            store, source, stated, item_meta, changeset=cs, at=at, current=current, changes=changes
+            store,
+            source,
+            stated,
+            item_meta,
+            changeset=cs,
+            at=at,
+            current=current,
+            changes=changes,
+            read_back=not versioned,  # deferred: read back once written, below
+            cats=st.cats,
         )
         # The state's claims, as they now are in the store.
         superseded = set(changes["superseded"])
@@ -717,6 +745,10 @@ def commit(
 
         result = {**report, "committed": True, "facts": size, "version": cs, "claims": claims}
         _set_status(store, cs, "committed", result, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
+    if versioned:
+        # The claims as the store gives them back (it may normalise times), now written.
+        for c in P.read_written(store, changes, st.cats):
+            st.claims.setdefault(c.key, {})[source] = c
     if b is not None and b.clean:
         store.prime(("incremental", base), b.version, st)
         if effective_changed is not None:
