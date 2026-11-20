@@ -25,6 +25,8 @@ import bisect
 import hashlib
 import json
 import logging
+import queue
+import socket
 import threading
 import uuid
 from dataclasses import dataclass
@@ -243,6 +245,21 @@ CREATE TRIGGER veromesh_decision_log_no_truncate BEFORE TRUNCATE ON veromesh_dec
 LOCK_KEY = int.from_bytes(hashlib.sha256(b"veromesh_decision_log").digest()[:8], "big", signed=True)
 
 
+# The most entries one group commit writes.
+BATCH_MAX = 500
+
+
+class _Pending:
+    """An entry waiting for the writer, and what became of it."""
+
+    def __init__(self, fields: dict, ref: str | None) -> None:
+        self.fields = fields
+        self.ref = ref
+        self.done = threading.Event()
+        self.entry: dict | None = None
+        self.error: BaseException | None = None
+
+
 class PostgresLog:
     def __init__(self, url: str) -> None:
         u = urlparse(url)
@@ -267,19 +284,40 @@ class PostgresLog:
         self._lock = threading.Lock()
         self._conn = None
         self._ready = False
+        self._wlock = threading.Lock()
+        self._wconn = None
+        self._writer: threading.Thread | None = None
+        self._queue: queue.Queue[_Pending] = queue.Queue()
 
-    def _connect(self):
+    def _open(self):
+        """A new connection, with the schema in place (the first time)."""
         import pg8000.native  # BSD-3-Clause
 
-        if self._conn is None:
-            self._conn = pg8000.native.Connection(**{k: v for k, v in self._params.items() if v is not None})
+        # pg8000 leaves Nagle's algorithm on, and it sends a query in more than one
+        # write: under load the second write waits for the server's delayed ACK, about
+        # 40 ms a round trip. The socket is opened here with TCP_NODELAY instead.
+        params = {k: v for k, v in self._params.items() if v is not None}
+        sock = socket.create_connection((params.pop("host"), params.pop("port")))
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        try:
+            conn = pg8000.native.Connection(sock=sock, **params)
+        except Exception:
+            sock.close()
+            raise
         if not self._ready:
-            self._conn.run("BEGIN")
-            self._conn.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
+            conn.run("BEGIN")
+            conn.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
             for stmt in _statements(SCHEMA):
-                self._conn.run(stmt)
-            self._conn.run("COMMIT")
+                conn.run(stmt)
+            conn.run("COMMIT")
             self._ready = True
+        return conn
+
+    def _connect(self):
+        """The connection reads use (the writer has its own, so reads never wait for writes)."""
+        if self._conn is None:
+            self._conn = self._open()
         return self._conn
 
     def _run(self, fn):
@@ -303,41 +341,133 @@ class PostgresLog:
                         raise
 
     def append(self, fields: dict) -> dict:
-        def go(c):
-            c.run("BEGIN")
+        """Append and return the entry once it is committed.
+
+        Entries are group-committed: one writer per log takes every entry waiting,
+        chains them, and writes them in one transaction under the advisory lock, so a
+        busy service pays one lock and one commit for many decisions instead of one
+        each. Each caller still waits for its own entry's commit."""
+        check(fields)  # a malformed entry is refused here, before it waits for the writer
+        ref = _uuid(fields["refersTo"]) if fields.get("refersTo") else None
+        pending = _Pending(fields, ref)
+        self._ensure_writer()
+        self._queue.put(pending)
+        pending.done.wait()
+        if pending.error is not None:
+            raise pending.error
+        return dict(pending.entry)
+
+    def _ensure_writer(self) -> None:
+        with self._wlock:
+            if self._writer is None or not self._writer.is_alive():
+                self._writer = threading.Thread(
+                    target=self._write_loop, name="decision-log-writer", daemon=True
+                )
+                self._writer.start()
+
+    def _write_loop(self) -> None:
+        while True:
+            batch = [self._queue.get()]
+            while len(batch) < BATCH_MAX:
+                try:
+                    batch.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
             try:
-                c.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
-                if fields.get("refersTo"):
-                    if not c.run(
-                        "SELECT 1 FROM veromesh_decision_log WHERE id = :i", i=_uuid(fields["refersTo"])
-                    ):
-                        raise InvalidEntry(f"No entry {fields['refersTo']} to refer to.")
-                last = c.run("SELECT seq, hash FROM veromesh_decision_log ORDER BY seq DESC LIMIT 1")
-                seq, prev = (last[0][0] + 1, last[0][1]) if last else (1, GENESIS)
-                entry = _new_entry(fields, seq, prev)
+                for attempt in (1, 2):
+                    try:
+                        self._write(batch)
+                        break
+                    except Exception as exc:
+                        broken = type(exc).__name__ in ("InterfaceError", "ConnectionError")
+                        self._drop_writer_connection()
+                        if attempt == 2 or not broken:
+                            raise
+            except Exception as exc:  # noqa: BLE001 — every waiting caller hears of it
+                for p in batch:
+                    if p.entry is None and p.error is None:
+                        p.error = exc
+                    p.entry = None if p.error is not None else p.entry
+            finally:
+                for p in batch:
+                    p.done.set()
+
+    def _drop_writer_connection(self) -> None:
+        if self._wconn is not None:
+            try:
+                self._wconn.run("ROLLBACK")
+            except Exception:
+                pass
+            try:
+                self._wconn.close()
+            except Exception:
+                pass
+        self._wconn = None
+
+    def _write(self, batch: list[_Pending]) -> None:
+        if self._wconn is None:
+            self._wconn = self._open()
+        c = self._wconn
+        for p in batch:
+            p.entry, p.error = None, None
+        c.run("BEGIN")
+        try:
+            c.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
+            refs = sorted({p.ref for p in batch if p.ref})
+            known: set[str] = set()
+            if refs:
+                rows = c.run(
+                    "SELECT id::text FROM veromesh_decision_log WHERE id = ANY(CAST(:ids AS uuid[]))",
+                    ids=refs,
+                )
+                known = {r[0] for r in rows}
+            last = c.run("SELECT seq, hash FROM veromesh_decision_log ORDER BY seq DESC LIMIT 1")
+            seq, prev = (last[0][0] + 1, last[0][1]) if last else (1, GENESIS)
+            entries = []
+            for p in batch:
+                if p.ref and p.ref not in known:
+                    p.error = InvalidEntry(f"No entry {p.fields['refersTo']} to refer to.")
+                    continue
+                entry = _new_entry(p.fields, seq, prev)
+                p.entry = entry
+                known.add(entry["id"])
+                seq, prev = seq + 1, entry["hash"]
+                entries.append(entry)
+            for i in range(0, len(entries), 100):
+                part = entries[i : i + 100]
+                values, params = [], {}
+                for j, e in enumerate(part):
+                    values.append(
+                        f"(:s{j}, CAST(:i{j} AS uuid), CAST(:t{j} AS timestamptz), :k{j}, CAST(:r{j} AS uuid),"
+                        f" :g{j}, :p{j}, :a{j}, CAST(:e{j} AS jsonb), :h{j})"
+                    )
+                    params.update(
+                        {
+                            f"s{j}": e["seq"],
+                            f"i{j}": e["id"],
+                            f"t{j}": e["recordedAt"],
+                            f"k{j}": e["kind"],
+                            f"r{j}": e.get("refersTo"),
+                            f"g{j}": e.get("agent"),
+                            f"p{j}": e.get("principal"),
+                            f"a{j}": e.get("action"),
+                            f"e{j}": json.dumps(e),
+                            f"h{j}": e["hash"],
+                        }
+                    )
                 c.run(
                     "INSERT INTO veromesh_decision_log"
                     " (seq, id, recorded_at, kind, refers_to, agent, principal, action, entry, hash)"
-                    " VALUES (:seq, CAST(:id AS uuid), CAST(:at AS timestamptz), :kind, CAST(:ref AS uuid),"
-                    " :agent, :principal, :action, CAST(:entry AS jsonb), :hash)",
-                    seq=seq,
-                    id=entry["id"],
-                    at=entry["recordedAt"],
-                    kind=entry["kind"],
-                    ref=entry.get("refersTo"),
-                    agent=entry.get("agent"),
-                    principal=entry.get("principal"),
-                    action=entry.get("action"),
-                    entry=json.dumps(entry),
-                    hash=entry["hash"],
+                    " VALUES " + ", ".join(values),
+                    **params,
                 )
-                c.run("COMMIT")
-                return entry
-            except Exception:
-                c.run("ROLLBACK")
-                raise
-
-        return self._run(go)
+            c.run("COMMIT")
+        except Exception:
+            c.run("ROLLBACK")
+            for p in batch:
+                if not isinstance(p.error, InvalidEntry):
+                    p.entry = None
+            raise
 
     def get(self, entry_id: str) -> dict | None:
         try:

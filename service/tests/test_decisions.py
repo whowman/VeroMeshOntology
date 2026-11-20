@@ -245,3 +245,46 @@ def test_the_daily_tally_on_each_log(dlog):
     dlog.append({"kind": "outcome", "refersTo": d["id"], "subject": "client-1", "outcome": "not_done"})
     assert followup.done_today(dlog, "ApproveSupplierInvoice", today) == 2
     assert followup.done_today_by_reading(dlog, "ApproveSupplierInvoice", today) == 2
+
+
+def test_many_writers_at_once_each_get_their_own_answer(dlog):
+    """Appends that arrive together (one group commit on PostgreSQL) each come back
+    with their own entry, or their own refusal, and the chain still verifies."""
+    import threading
+
+    first = dlog.append(decision())
+    results: dict[int, object] = {}
+
+    def write(k: int) -> None:
+        try:
+            if k % 5 == 0:  # refers to nothing: refused, alone
+                fields = {
+                    "kind": "outcome",
+                    "refersTo": str(uuid.uuid4()),
+                    "subject": "client-1",
+                    "outcome": "done",
+                }
+            elif k % 5 == 1:  # refers to a committed entry: fine
+                fields = {
+                    "kind": "outcome",
+                    "refersTo": first["id"],
+                    "subject": "client-1",
+                    "outcome": "done",
+                }
+            else:
+                fields = decision(note=f"writer {k}")
+            results[k] = dlog.append(fields)
+        except D.InvalidEntry as exc:
+            results[k] = exc
+
+    threads = [threading.Thread(target=write, args=(k,)) for k in range(40)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(isinstance(results[k], D.InvalidEntry) for k in range(0, 40, 5))
+    written = [r for k, r in results.items() if k % 5]
+    assert all(isinstance(r, dict) for r in written)
+    assert len({r["seq"] for r in written}) == len(written)
+    assert all(r.get("note") == f"writer {k}" for k, r in results.items() if k % 5 > 1)
+    assert dlog.verify().ok
