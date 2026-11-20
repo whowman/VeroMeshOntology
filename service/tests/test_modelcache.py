@@ -29,13 +29,34 @@ def test_reused_until_a_write():
     assert len(calls) == 2
 
 
-def test_a_write_by_another_replica_is_seen():
+def test_a_write_by_another_replica_is_seen_within_the_max_age():
+    import time
+
     shared = MemoryStore()
     one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0.2
     one.load_turtle("<a:s> <a:p> <a:o> .", G)
     assert cached(two, "n", lambda: count(two)) == 1
     one.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:o2> }} }}")
+    time.sleep(0.25)
     assert cached(two, "n", lambda: count(two)) == 2
+
+
+def test_readers_reuse_a_recent_version_and_see_their_own_writes_at_once():
+    inner = MemoryStore()
+    store = VersionedStore(inner)
+    store.max_age = 60
+    store.load_turtle("<a:s> <a:p> <a:o> .", G)
+    asked = []
+    real = inner.query
+    inner.query = lambda q: (asked.append(q) if "modelVersion" in q else None, real(q))[1]
+    v = store.version()
+    for _ in range(5):
+        assert store.version() == v
+    assert len(asked) <= 1  # asked once at most, then reused
+    store.update(f"INSERT DATA {{ GRAPH <{G}> {{ <a:s> <a:p> <a:o2> }} }}")  # this process writes
+    assert store.version() != v
+    assert cached(store, "n", lambda: count(store)) == 2
 
 
 def test_the_version_graph_is_hidden_and_plain_stores_are_not_cached():
