@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -29,9 +30,10 @@ from rdflib.namespace import RDF, XSD
 
 from . import clock
 from . import entities as E
+from .compactgraph import compact_graph
 from .modelcache import cached
 from .ontology import literal
-from .rdf_store import RDFStore
+from .rdf_store import RDFStore, select
 
 VMP = Namespace("https://veromesh.ai/ontology/provenance#")
 PROV = Namespace("http://www.w3.org/ns/prov#")
@@ -176,7 +178,7 @@ def _as_of_end(as_of: str) -> datetime:
 # ---------------------------------------------------------------------------- data
 
 
-@dataclass
+@dataclass(slots=True)
 class Claim:
     source: str
     type: str
@@ -246,7 +248,7 @@ class Attestation:
         }
 
 
-@dataclass
+@dataclass(slots=True)
 class Resolved:
     """One entity in the effective model."""
 
@@ -337,16 +339,17 @@ def _claim_rows(
     """Claims matching ``where``; or the one claim ``iri``, or the claims ``changeset``
     created (each looked up directly, not by reading every claim)."""
     c = f"<{iri}>" if iri else "?c"
-    select = f"(<{iri}> AS ?c)" if iri else "?c"
+    head = f"(<{iri}> AS ?c)" if iri else "?c"
     by_cs = f"?c <{PROV.wasGeneratedBy}> <{CHANGESET_BASE}{changeset}> ." if changeset and not iri else ""
-    res = store.query(
-        f"""SELECT {select} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+    rows = select(
+        store,
+        f"""SELECT {head} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
               {by_cs}
               {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
               OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
               OPTIONAL {{ {c} <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ {c} <{PROV.wasGeneratedBy}> ?cs }}
-              {where} }} }}"""
+              {where} }} }}""",
     )
 
     def v(b, k):
@@ -366,7 +369,7 @@ def _claim_rows(
             changeset=v(b, "cs")[len(CHANGESET_BASE) :] if v(b, "cs") else None,
             iri=v(b, "c"),
         )
-        for b in res["results"]["bindings"]
+        for b in rows
     ]
 
 
@@ -533,13 +536,14 @@ def read_attestations(store: RDFStore, entity: tuple[str, str] | None = None) ->
 
 def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[Attestation]:
     where = f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})" if entity else ""
-    res = store.query(
+    rows = select(
+        store,
         f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
               ?a a <{VMP.Attestation}> ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ; <{VMP.source}> ?src ;
                  <{VMP.fieldHashes}> ?h ; <{VMP.verdict}> ?verdict ; <{PROV.endedAtTime}> ?at ;
                  <{VMP.attestedBy}> ?person ; <{VMP.inRole}> ?role .
               OPTIONAL {{ ?a <{VMP.expiresAt}> ?exp }} OPTIONAL {{ ?a <{VMP.note}> ?note }} {where} }} }}
-            ORDER BY ?at"""
+            ORDER BY ?at""",
     )
     return [
         Attestation(
@@ -555,7 +559,7 @@ def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[
             expires_at=b.get("exp", {}).get("value"),
             note=b.get("note", {}).get("value"),
         )
-        for b in res["results"]["bindings"]
+        for b in rows
     ]
 
 
@@ -676,7 +680,9 @@ def resolve(
         fields = sorted({k for c in cs for k, v in c.values.items() if not empty(v)})
         for f in fields:
             cands = [c for c in cs if not empty(c.values.get(f))]
-            live = [c for c in cands if not disputed(ea, c, f)] or cands
+            if len(cands) == len(cs):
+                cands = cs  # every claim states it (the usual case): share the list, one fewer object to keep
+            live = [c for c in cands if not disputed(ea, c, f)] or list(cands)
             live.sort(key=lambda c: (rank(type_, f, c.category), -_dt(c.observed_at).timestamp(), c.source))
             win = live[0]
             r.values[f] = win.values[f]
@@ -714,9 +720,9 @@ def effective_graph(store: RDFStore) -> Graph:
 def _effective_graph(store: RDFStore) -> Graph:
     from .changesets import _term
 
-    res = store.query(f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
-    g = Graph()
-    for b in res["results"]["bindings"]:
+    rows = select(store, f"SELECT ?s ?p ?o WHERE {{ GRAPH <{EFFECTIVE_GRAPH}> {{ ?s ?p ?o }} }}")
+    g = compact_graph()  # cached until the model changes
+    for b in rows:
         g.add((_term(b["s"]), _term(b["p"]), _term(b["o"])))
     return g
 
@@ -891,11 +897,70 @@ def review_queue(
 def _current(store: RDFStore) -> tuple[dict[tuple[str, str], Resolved], list[Attestation]]:
     """What VeroMesh believes today (shared and read-only until the model or the day changes)."""
 
+    day = clock.today()
+
     def compute():
+        kept = _from_planner(store, day)
+        if kept is not None:
+            return kept
         atts = read_attestations(store)
         return resolve(read_claims(store), atts), atts
 
-    return cached(store, ("current", clock.today()), compute)
+    return cached(store, ("current", day), compute)
+
+
+# How long a read waits for a change in progress before reading the store itself.
+PLANNER_WAIT = 5.0
+
+
+def _from_planner(store: RDFStore, day: date):
+    """Today's model as the change planner already holds it at this version (the same
+    entities, shared rather than resolved a second time), or None. See ``_planner``."""
+    with _planner(store) as st:
+        if st is not None and st.day == day:
+            return dict(st.today.resolved), [a for atts in st.atts.values() for a in atts]
+    return None
+
+
+def from_planner_effective(store: RDFStore, base: str, read):
+    """``read(graph)`` on the effective model as the change planner holds it in memory at
+    this version (no read from the store), or None when it does not hold it. ``read``
+    must not keep the graph: the planner changes it at the next commit."""
+    with _planner(store) as st:
+        if st is not None and st.base == base and st.stored_effective_ok and st.day == clock.today():
+            return read(st.today.graph)
+    return None
+
+
+@contextmanager
+def _planner(store: RDFStore):
+    """The change planner's state, or None.
+
+    A commit changes the planner's state before the version moves on, under the
+    planner's lock. While a change is in progress this waits for it (up to
+    PLANNER_WAIT seconds: far less than reading the whole model from the store, which
+    on a large organization holds every other thread up for seconds). The state is
+    the one for the version the caller reads at, or else the one the change just
+    made: the caller then gets the model as of that change, as reading the store
+    would have given it."""
+    from . import incremental
+    from .modelcache import VersionedStore
+
+    if not isinstance(store, VersionedStore) or not incremental._LOCK.acquire(timeout=PLANNER_WAIT):
+        yield None
+        return
+    try:
+        found = None
+        for version in dict.fromkeys((store.version(), store._newest)):
+            for key, st in store.entries_at(version).items():
+                if isinstance(key, tuple) and key[0] == "incremental" and st is not None:
+                    found = st
+                    break
+            if found is not None:
+                break
+        yield found
+    finally:
+        incremental._LOCK.release()
 
 
 def _current_index(

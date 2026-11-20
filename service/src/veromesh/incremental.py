@@ -39,6 +39,7 @@ from rdflib.namespace import XSD
 from . import clock, validation
 from . import entities as E
 from . import provenance as P
+from .compactgraph import CompactMemory, compact_graph, decode, encode
 from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached
 
 _LOCK = threading.RLock()
@@ -65,9 +66,11 @@ class View:
 
     resolved: dict[Key, P.Resolved]
     base: str
-    triples: dict[Key, list] = field(default_factory=dict)
+    # Each entity's triples, and how many entities state each triple, as encoded strings
+    # (compactgraph.encode): the garbage collector need not walk them.
+    triples: dict[Key, tuple] = field(default_factory=dict)
     count: Counter = field(default_factory=Counter)
-    graph: Graph = field(default_factory=Graph)
+    graph: Graph = field(default_factory=compact_graph)
     ids: dict[str, str] = field(default_factory=dict)  # ID -> type: what references resolve against
     looked: dict[Key, set[str]] = field(default_factory=dict)
     referrers: dict[str, set[Key]] = field(default_factory=dict)
@@ -79,12 +82,20 @@ class View:
         v = cls(resolved=resolved, base=base)
         v.ids = {rid: t for (t, rid) in resolved}
         for key, r in resolved.items():
-            v.triples[key] = v._convert(key)
+            v.triples[key] = _pack(v._convert(key))
             v.count.update(v.triples[key])
             v.conflicts += len(r.conflicts)
         for t in v.count:
-            v.graph.add(t)
+            v.graph.add(_unpack(t))
         return v
+
+    def triples_of(self, key: Key) -> list:
+        """``key``'s triples, as rdflib terms."""
+        return [_unpack(t) for t in self.triples.get(key, ())]
+
+    def stated(self, triple) -> int:
+        """How many entities state ``triple``."""
+        return self.count.get(_pack1(triple), 0)
 
     def error_count(self) -> int:
         return sum(len(e) for e in self.errors.values())
@@ -173,23 +184,24 @@ class View:
         touched: set = set()
         for k, r in changes.items():
             if r is None:
-                old = self.triples.pop(k, [])
+                old = self.triples.pop(k, ())
                 self._unlook(k)
                 self.errors.pop(k, None)
                 self.count.subtract(old)
                 touched.update(old)
         for k in todo:
-            old = self.triples.get(k, [])
-            new = self._convert(k)
+            old = self.triples.get(k, ())
+            new = _pack(self._convert(k))
             self.triples[k] = new
             self.count.subtract(old)
             self.count.update(new)
             touched.update(old)
             touched.update(new)
         lost, gained = [], []
-        for t in touched:
-            if self.count[t] <= 0:
-                del self.count[t]
+        for e in touched:
+            t = _unpack(e)
+            if self.count[e] <= 0:
+                del self.count[e]
                 if t in self.graph:
                     self.graph.remove(t)
                     lost.append(t)
@@ -205,6 +217,28 @@ class Preview:
     errors: list[dict]
 
 
+def _share(model: dict[Key, P.Resolved], today: dict) -> dict:
+    """``today`` with each entity whose claims are all valid today replaced by the model's
+    own (resolving the same claims gives the same entity): one copy kept, not two."""
+    for k, r in today.items():
+        m = model.get(k)
+        if r is not None and m is not None and len(m.claims) == len(r.claims):
+            today[k] = m
+    return today
+
+
+def _pack1(t) -> tuple[str, str, str]:
+    return (encode(t[0]), encode(t[1]), encode(t[2]))
+
+
+def _pack(triples) -> tuple:
+    return tuple(_pack1(t) for t in triples)
+
+
+def _unpack(e: tuple[str, str, str]) -> tuple:
+    return (decode(e[0]), decode(e[1]), decode(e[2]))
+
+
 def _convert(r: P.Resolved, base: str, index) -> tuple[list, list]:
     conv = E.to_triples(r.type, {"id": r.id, **r.values}, base, index, partial=True)
     return list(conv.triples), conv.errors
@@ -214,7 +248,7 @@ def _convert(r: P.Resolved, base: str, index) -> tuple[list, list]:
 class State:
     base: str
     graphs: dict[str, Graph]  # source graph IRI -> its triples (this state's own copies)
-    typed: dict[str, dict[str, set[str]]]  # local ID -> source graph IRI -> type names there
+    typed: dict[str, dict[str, tuple[str, ...]]]  # local ID -> source graph IRI -> type names there
     claims: dict[Key, dict[str, P.Claim]]  # entity -> source -> current claim
     atts: dict[Key, list[P.Attestation]]
     cats: dict[str, str]
@@ -276,7 +310,7 @@ def _build(store, base: str) -> State | None:
     if model.error_count():
         return None  # references that already point nowhere: the full path reports them
     day = clock.today()
-    today = View.build(P.resolve(claims_list, atts_list, day), base)
+    today = View.build(_share(resolved, P.resolve(claims_list, atts_list, day)), base)
     stored = P._effective_graph(store)
     return State(
         base=base,
@@ -296,7 +330,9 @@ def _build(store, base: str) -> State | None:
 def _index_state(self: State) -> State:
     for iri, g in self.graphs.items():
         for rid, types in _typed(g, self.base).items():
-            self.typed.setdefault(rid, {})[iri] = types
+            self.typed.setdefault(rid, {})[iri] = tuple(
+                sorted(types)
+            )  # a tuple of strings: not walked by the GC
     return self
 
 
@@ -345,19 +381,21 @@ def _apply_graph(g: Graph, removed, added) -> None:
 def undo(st: State, edit: Edit) -> None:
     """Put the state back as it was before ``plan`` (a plan that is not committed)."""
     if edit.applied:
-        _apply_graph(st.graphs.setdefault(edit.target_iri, Graph()), edit.added, edit.removed)
+        _apply_graph(st.graphs.setdefault(edit.target_iri, compact_graph()), edit.added, edit.removed)
         _retype(st, edit)
         edit.applied = False
 
 
 def _retype(st: State, edit: Edit) -> None:
-    g = st.graphs.get(edit.target_iri, Graph())
+    g = st.graphs.get(edit.target_iri)
+    if g is None:
+        g = compact_graph()
     for n in _nodes(edit.removed + edit.added):
         rid = E.local_id(st.base, n)
         types = set(E.types_of(g, n))
         per = st.typed.setdefault(rid, {})
         if types:
-            per[edit.target_iri] = types
+            per[edit.target_iri] = tuple(sorted(types))
         else:
             per.pop(edit.target_iri, None)
 
@@ -390,15 +428,18 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
         return None
     source = meta["source"]
     target_iri = source_graph(source)
-    g = st.graphs.get(target_iri, Graph())
+    g = st.graphs.get(target_iri)
+    if g is None:
+        g = compact_graph()
 
     # The source graph after the change, exactly as the full path builds it: in
     # replace mode the changeset is the whole source; in merge mode each item's
     # entity is removed first, then the upserts are added.
     inverse_props = {c.prop for sh in E.TYPES.values() for c in sh.cols if c.inverse}
     item_ids = {it.id for it in items}
+    compact = isinstance(g.store, CompactMemory)
     if mode == "replace":
-        remove: set = set(g)
+        remove: set = set() if compact else set(g)  # compact: compared encoded, below
     else:
         remove = set()
         for it in items:
@@ -418,7 +459,7 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
             return _first(others)
         if mode == "replace" or rid in item_ids:
             return None  # its triples in this source are gone before the index is built
-        return _first(per.get(target_iri, set()))
+        return _first(set(per.get(target_iri, ())))
 
     errors: list[dict] = []
     index: dict[str, str] = {}
@@ -441,7 +482,10 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
         conv = E.to_triples(it.type, it.entity, base, lookup, partial=partial)
         errors.extend(e.as_dict() for e in conv.errors)
         new.update(conv.triples)
-    removed = [t for t in remove if t not in new]
+    if mode == "replace" and compact:
+        removed = g.store.missing_from(new)
+    else:
+        removed = [t for t in remove if t not in new]
     added = [t for t in new if t not in g]
     if any(isinstance(x, BNode) for t in removed + added for x in t):
         return None  # DELETE DATA cannot name a blank node: the full path rewrites the graph
@@ -558,12 +602,12 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
     # The model's change, triple by triple (a triple two entities state stays until both drop it).
     count = Counter()
     for k, ts in edit.model_new.items():
-        count.subtract(model.triples.get(k, []))
+        count.subtract(model.triples_of(k))
         count.update(ts)
     for t, d in count.items():
-        if d < 0 and model.count[t] + d <= 0 and t in model.graph:
+        if d < 0 and model.stated(t) + d <= 0 and t in model.graph:
             edit.model_removed.append(t)
-        elif d > 0 and model.count[t] == 0:
+        elif d > 0 and model.stated(t) == 0:
             edit.model_added.append(t)
     delta = edit.model_removed + edit.model_added
     objects = validation.object_candidates(delta, ontology_dir)
@@ -738,10 +782,13 @@ def commit(
 
         # The stored effective model: what is believed today.
         lost, gained = st.today.update(
-            {
-                k: P.resolve(list(st.claims.get(k, {}).values()), st.atts.get(k, []), st.day).get(k)
-                for k in sorted(edit.keys)
-            }
+            _share(
+                st.model.resolved,
+                {
+                    k: P.resolve(list(st.claims.get(k, {}).values()), st.atts.get(k, []), st.day).get(k)
+                    for k in sorted(edit.keys)
+                },
+            )
         )
         effective_changed: set | None = None  # None: the whole graph was rewritten
         if st.stored_effective_ok:
@@ -754,11 +801,18 @@ def commit(
         # What readers will find at the new version, carried forward rather than rebuilt:
         # installed just before the version changes, so no check finds the cache empty.
         if b is not None and effective_changed is not None:
+            from .changesets import entity_rows
+
             for t, rows in lists.items():
                 if rows is not None:
                     new_rows, gone, came = _patch(rows, st.today.graph, t, base, effective_changed)
                     b.primes[("entities", t, base, None)] = new_rows
                     b.primes.update(_shared_primes(readers, t, base, new_rows, gone, came))
+                elif t in store.wanted_lists:
+                    # Readers use this list but none is cached at this version (a reader was
+                    # still building it, or an edit landed meanwhile): build it here, from the
+                    # state as committed, so no reader rebuilds it while every other waits.
+                    b.primes[("entities", t, base, None)] = entity_rows(st.today.graph, t, base)
             if believed is not None:  # a changeset writes no attestations: they carry over
                 now = dict(st.today.resolved)
                 b.primes[("current", st.day)] = (now, believed[1])

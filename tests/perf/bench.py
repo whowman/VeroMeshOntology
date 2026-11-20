@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -37,14 +38,20 @@ sys.path.insert(0, str(HERE))
 
 import capacity  # noqa: E402
 import orggen  # noqa: E402
-from veromesh import changesets, coverage, decide, decisions, incremental  # noqa: E402
+from veromesh import changesets, coverage, decide, decisions, gcsetup, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
 ROOT = HERE.parents[1]
 ONTOLOGY = str(ROOT / "ontology")
 BASE = "https://example.com/org#"
-SIZES = {"smoke": (2, 100), "small": (10, 200), "medium": (40, 500), "large": (100, 1000), "xl": (500, 1000)}
+SIZES = {
+    "smoke": (2, 100),
+    "small": (10, 200),
+    "medium": (40, 500),
+    "large": (100, 1000),
+    "xl": (500, 1000),
+}
 
 
 def timed(fn, repeat: int = 1) -> tuple[float, object]:
@@ -57,6 +64,23 @@ def timed(fn, repeat: int = 1) -> tuple[float, object]:
     return statistics.median(times), out
 
 
+def profile_checks(store, log, pool, n: int = 300) -> None:
+    """With VEROMESH_BENCH_PROFILE set: where ``n`` checks in a row spend their time."""
+    import cProfile
+    import io
+    import pstats
+
+    pr = cProfile.Profile()
+    pr.enable()
+    for i in range(n):
+        capacity.check_once(store, log, pool[i % len(pool)])
+    pr.disable()
+    for key in ("cumulative", "tottime"):
+        out = io.StringIO()
+        pstats.Stats(pr, stream=out).sort_stats(key).print_stats(30)
+        print(f"--- {n} checks, by {key}:\n" + out.getvalue(), file=sys.stderr)
+
+
 def run(
     domains: int,
     people: int,
@@ -67,6 +91,7 @@ def run(
     seconds: float = 5.0,
     edits_every: float | None = None,
 ) -> dict:
+    gcsetup.after_startup()  # as the service does once it has started
     store = make_store(store_spec)
     batches = orggen.organization(domains, people)
     counts = orggen.counts(batches)
@@ -91,7 +116,11 @@ def run(
 
     def edit():
         n[0] += 1
-        item = {"type": "people", "op": "upsert", "entity": {"id": "Person1-d0", "name": f"Renamed {n[0]}"}}
+        item = {
+            "type": "people",
+            "op": "upsert",
+            "entity": {"id": "Person1-d0", "name": f"Renamed {n[0]}"},
+        }
         return changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
 
     def check():
@@ -152,10 +181,19 @@ def run(
         def fresh():  # each run starts the day with an empty in-memory log
             return decisions.make_log("memory") if log_spec == "memory" else log
 
+        if os.environ.get("VEROMESH_BENCH_PROFILE"):
+            profile_checks(store, fresh(), pool)
         runs = [capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency]
         if edits_every:
             runs.append(
-                capacity.throughput(store, fresh(), pool, max(concurrency), seconds, edit_every=edits_every)
+                capacity.throughput(
+                    store,
+                    fresh(),
+                    pool,
+                    max(concurrency),
+                    seconds,
+                    edit_every=edits_every,
+                )
             )
         growth = capacity.log_growth(store, pool)
     return {
@@ -212,7 +250,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--size", choices=sorted(SIZES), help="a named size (see the module docstring)")
     ap.add_argument("--domains", type=int)
     ap.add_argument("--people", type=int, help="extra people per domain")
-    ap.add_argument("--store", default="memory", help="memory, or fuseki:<dataset URL> (an empty dataset)")
+    ap.add_argument(
+        "--store",
+        default="memory",
+        help="memory, or fuseki:<dataset URL> (an empty dataset)",
+    )
     ap.add_argument(
         "--repeat",
         type=int,
@@ -221,10 +263,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", help="write the result as JSON here")
     ap.add_argument("--check", action="store_true", help="fail when over the budget in targets.json")
-    ap.add_argument("--log", default="memory", help="the decision log: memory, or a postgresql:// URL")
-    ap.add_argument("--throughput", help="concurrencies to measure checks per second at, e.g. 1,4,16")
+    ap.add_argument(
+        "--log",
+        default="memory",
+        help="the decision log: memory, or a postgresql:// URL",
+    )
+    ap.add_argument(
+        "--throughput",
+        help="concurrencies to measure checks per second at, e.g. 1,4,16",
+    )
     ap.add_argument("--seconds", type=float, default=5.0, help="length of each throughput run")
-    ap.add_argument("--edits-every", type=float, help="also measure with an edit every this many seconds")
+    ap.add_argument(
+        "--edits-every",
+        type=float,
+        help="also measure with an edit every this many seconds",
+    )
     ap.add_argument(
         "--clear",
         action="store_true",

@@ -324,3 +324,53 @@ def test_run_history_is_newest_first_within_one_second(monkeypatch):
     monkeypatch.setattr(C, "now", lambda: "2026-11-19T12:00:00+00:00")
     ids = [C.create(store, source="hr", mode="merge")["id"] for _ in range(5)]
     assert [c["id"] for c in C.list_changesets(store, source="hr")] == ids[::-1]
+
+
+def test_checks_share_the_planners_model_and_it_is_the_same(monkeypatch):
+    """What a check believes today, taken from the planner's state, is what resolving the
+    stored claims gives; and while a change holds the planner's lock past the wait, it
+    is not taken."""
+    from veromesh import clock
+
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    C.apply(store, source="hr", items=[person("Zed")], base=BASE, ontology_dir=ONT)
+    day = clock.today()
+    shared = P._from_planner(store, day)
+    assert shared is not None
+    fresh = P.resolve(
+        P._read_claims(store, f" FILTER NOT EXISTS {{ ?c <{P.PROV.invalidatedAtTime}> ?x }}"), []
+    )
+    assert {k: r.values for k, r in shared[0].items()} == {k: r.values for k, r in fresh.items()}
+    monkeypatch.setattr(P, "PLANNER_WAIT", 0.1)  # a change that does not end in time: the store is read
+    with incremental._LOCK:
+        import threading
+
+        seen = []
+        t = threading.Thread(target=lambda: seen.append(P._from_planner(store, day)))
+        t.start()
+        t.join()
+    assert seen == [None]
+
+
+def test_entity_lists_from_the_planner_match_the_store():
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    C.apply(store, source="hr", items=[person("Zed")], base=BASE, ontology_dir=ONT)
+    for t in E.TYPES:
+        kept = P.from_planner_effective(store, BASE, lambda g, t=t: C.entity_rows(g, t, BASE))
+        assert kept is not None
+        assert kept == C.entity_rows(P._effective_graph(store), t, BASE), t
+
+
+def test_an_edit_builds_the_lists_readers_use_even_when_none_is_cached():
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    C.shared_entities(store, "people", BASE)  # a reader uses the people list
+    with store._lock:
+        store._cache.clear()  # ...but none is cached when the next edit comes
+    C.apply(store, source="hr", items=[person("Zed")], base=BASE, ontology_dir=ONT)
+    held = store.entries_at(store.version()).get(("entities", "people", BASE, None))
+    assert held is not None, "the edit carried no people list forward"
+    assert held == C.entity_rows(P._effective_graph(store), "people", BASE)
+    assert any(e.get("id") == "Zed" for _, e in held)

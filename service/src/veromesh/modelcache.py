@@ -24,8 +24,10 @@ Two refinements keep a commit from throwing away more than it must:
 
 from __future__ import annotations
 
+import os
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -41,6 +43,13 @@ T = TypeVar("T")
 ONTOLOGY_SUBJECT = "urn:veromesh:ontology"
 ONTOLOGY_HASH = "https://veromesh.ai/ontology/core#ontologyHash"
 _FLUSH_BYTES = 4_000_000  # a deferred batch sends what it holds once it reaches this
+
+
+def version_max_age() -> float:
+    """How old (seconds) a version read from the store may be when a reader uses it
+    again instead of asking the store (VEROMESH_VERSION_MAX_AGE, default 0.25). This
+    process's own writes are seen at once; another replica's within this time."""
+    return float(os.environ.get("VEROMESH_VERSION_MAX_AGE", "0.25"))
 
 
 class Batch:
@@ -64,6 +73,16 @@ class VersionedStore:
     def __init__(self, inner: Any) -> None:
         self.inner = inner
         self._cache: dict[Any, tuple[str, Any]] = {}
+        self._newest: str | None = None  # the version this process last read or wrote
+        self._seen: tuple[str, float] | None = None  # (version, when read): reused by readers
+        self.max_age = version_max_age()
+        self._writes = 0  # this process's version changes, so a read begun before one is not kept
+        # Entity lists (by type) that readers have built: a commit makes them for the new
+        # version even when none is cached at the old one, so no reader has to.
+        self.wanted_lists: set[str] = set()
+        # The values cached at the version before this process's last write, for readers
+        # that began before it (a check pins its version): they are still right for it.
+        self._previous: tuple[str, dict[Any, Any]] | None = None
         self._lock = threading.Lock()
         self._local = threading.local()
         self._flights: dict[Any, _Flight] = {}
@@ -83,7 +102,7 @@ class VersionedStore:
         fails, what is still held is never sent."""
         if self._batch() is not None:
             raise RuntimeError("batches do not nest")
-        b = Batch(expect if expect is not None else self.version(), defer)
+        b = Batch(expect if expect is not None else self._read_version(), defer)
         self._local.batch = b
         ok = False
         try:
@@ -106,19 +125,32 @@ class VersionedStore:
                                  FILTER(COALESCE(STR(?old), "0") = "{b.expect}") }}"""
                 )
                 self._send(b)
-                b.clean = self.version() == new
+                b.clean = self._read_version() == new
                 if b.clean:
                     b.version = new
                 else:
                     self._bump()  # someone else wrote: make sure the version moves anyway
-                    b.version = self.version()
+                    b.version = self._read_version()
                     b.primes = {}
             else:
                 self._send(b)  # bookkeeping only
                 b.version = b.expect
-                b.clean = self.version() == b.expect
+                b.clean = self._read_version() == b.expect
             with self._lock:  # keep only what is known to hold at the new version
                 pending, self._pending = self._pending, {}
+                if b.clean and b.version != b.expect:
+                    self._previous = (
+                        b.expect,
+                        {
+                            k: v
+                            for k, (ver, v) in self._cache.items()
+                            # not the planner's state: the commit has changed it in place
+                            if ver == b.expect and not (isinstance(k, tuple) and k[:1] == ("incremental",))
+                        },
+                    )
+                self._newest = b.version
+                self._writes += 1
+                self._seen = (b.version, time.monotonic())  # this process's write: seen at once
                 self._cache.clear()
                 if b.clean:
                     self._cache.update({k: v for k, v in pending.items() if v[0] == b.version})
@@ -211,6 +243,8 @@ class VersionedStore:
                 INSERT DATA {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> "{uuid.uuid4()}" }} }}"""
         )
         with self._lock:
+            self._writes += 1
+            self._seen = None  # the next read asks the store
             self._cache.clear()
 
     def ontology_hash(self) -> str | None:
@@ -233,13 +267,29 @@ class VersionedStore:
             self._local.pinned = prev
 
     def version(self) -> str:
+        """The model's version, for reading: the version this unit of work pinned, or one
+        read from the store at most ``max_age`` seconds ago (a decision check need not
+        ask the store every time), or a fresh one."""
         pinned = getattr(self._local, "pinned", None)
         if pinned is not None:
             return pinned
+        seen = self._seen
+        if seen is not None and time.monotonic() - seen[1] < self.max_age:
+            return seen[0]
+        return self._read_version()
+
+    def _read_version(self) -> str:
+        """The version as the store has it now (writes compare against this)."""
+        t, writes = time.monotonic(), self._writes
         rows = self.inner.query(
             f"SELECT ?v WHERE {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?v }} }}"
         )["results"]["bindings"]
-        return rows[0]["v"]["value"] if rows else "0"
+        v = rows[0]["v"]["value"] if rows else "0"
+        with self._lock:
+            if self._writes == writes:  # no write of ours landed meanwhile: this read is current
+                self._newest = v
+                self._seen = (v, t)  # as of when it was asked for
+        return v
 
     def __getattr__(self, name: str) -> Any:  # other attributes of the store (URLs, etc.)
         return getattr(self.inner, name)
@@ -288,6 +338,9 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     hit = store._pending.get(key)
     if hit is not None and hit[0] == version:
         return hit[1]
+    prev = store._previous
+    if prev is not None and prev[0] == version and key in prev[1]:
+        return prev[1][key]  # a reader that began before this process's last write
     with store._lock:
         flight = store._flights.get((key, version))
         leader = flight is None
@@ -300,7 +353,11 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
         value = compute()
         flight.value = value
         with store._lock:
-            store._cache[key] = (version, value)
+            # A computation that began before an edit can end after it: it must not
+            # replace what the edit carried forward to the new version.
+            held = store._cache.get(key)
+            if held is None or held[0] == version or held[0] != store._newest:
+                store._cache[key] = (version, value)
         return value
     except BaseException:
         flight.failed = True

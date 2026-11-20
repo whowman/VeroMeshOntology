@@ -30,8 +30,10 @@ from . import (
     decisions,
     entities,
     followup,
+    gcsetup,
     mcp_server,
     suggest,
+    validation,
 )
 from . import provenance as prov
 from .config import Settings, get_settings
@@ -155,6 +157,8 @@ def create_app(
             log.warning(
                 "The decision log is in memory: decisions are lost on restart. Set VEROMESH_DECISION_LOG."
             )
+        validation.start_worker(s.ontology_dir)  # so the first edit does not wait for it
+        gcsetup.after_startup()  # libraries loaded: full collections need not visit them again
         async with app.state.mcp.session_manager.run():
             yield
 
