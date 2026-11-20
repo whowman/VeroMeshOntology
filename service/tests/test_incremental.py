@@ -212,8 +212,11 @@ def same_state(kept: incremental.State, fresh: incremental.State) -> None:
         assert {r: ks for r, ks in k.referrers.items() if ks} == f.referrers, view
 
 
+@pytest.mark.parametrize("one_request", [True, False])
 @pytest.mark.parametrize("validate_first", [False, True])
-def test_same_results_as_the_full_path(monkeypatch, validate_first):
+def test_same_results_as_the_full_path(monkeypatch, validate_first, one_request):
+    if not one_request:  # every commit sends its writes as it goes (as large loads do)
+        monkeypatch.setattr(incremental, "SMALL_TRIPLES", -1)
     fast, full = make_store("memory"), make_store("memory")
     incremental.STATS.clear()
     primed = 0

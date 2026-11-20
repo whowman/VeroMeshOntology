@@ -50,6 +50,9 @@ def enabled() -> bool:
 
 Key = tuple[str, str]
 
+# A change to at most this many source triples is written in one request.
+SMALL_TRIPLES = 200
+
 
 # --------------------------------------------------------------------------- the state
 
@@ -652,8 +655,11 @@ def commit(
     # What readers have cached at this version, to carry forward with this change.
     lists = {t: store.peek_at(("entities", t, base, None), version) for t in E.TYPES} if versioned else {}
     believed = store.peek_at(("current", st.day), version) if versioned else None
-    # Every write below goes to the store as one update request when the batch ends.
-    batch = store.batch(expect=version, defer=True) if versioned else None
+    # A small change goes to the store as one update request when the batch ends (one
+    # transaction); a large one is sent as it goes, where bulk uploads are faster than
+    # one big SPARQL text. Either way the version changes once.
+    small = len(edit.removed) + len(edit.added) <= SMALL_TRIPLES
+    batch = store.batch(expect=version, defer=small) if versioned else None
     ctx = batch if batch is not None else _Null()
     with ctx as b:
         root = Path(ontology_dir)
@@ -702,7 +708,7 @@ def commit(
             at=at,
             current=current,
             changes=changes,
-            read_back=not versioned,  # deferred: read back once written, below
+            read_back=not (versioned and small),  # deferred: read back once written, below
             cats=st.cats,
         )
         # The state's claims, as they now are in the store.
@@ -745,7 +751,7 @@ def commit(
 
         result = {**report, "committed": True, "facts": size, "version": cs, "claims": claims}
         _set_status(store, cs, "committed", result, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
-    if versioned:
+    if versioned and small:
         # The claims as the store gives them back (it may normalise times), now written.
         for c in P.read_written(store, changes, st.cats):
             st.claims.setdefault(c.key, {})[source] = c
