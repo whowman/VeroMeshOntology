@@ -2,7 +2,7 @@
 
 The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
-What it does today (main, 18 November 2026):
+What it does today (main, 21 November 2026):
 
 - **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
 - **Kept true:** loaded from spreadsheets, CSV and connectors, one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
@@ -12,6 +12,7 @@ What it does today (main, 18 November 2026):
 - **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions, measures and the data element inventory.
 - **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
 - **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
+- **Enterprise scale:** measured on Fuseki with the PostgreSQL decision log at 100,000 people, one copy of the service on 4 CPUs: a decision check in 5 ms, 213 to 275 checks a second with up to 16 agents asking at once, none slower than 311 ms while edits arrive every second, and a nightly re-sync in 26 s ([docs/testing.md](docs/testing.md#capacity-on-fuseki)). The same runs on the Azure reference machines, up to 500,000 people, are ready to start ([deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)).
 - **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
 Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
@@ -27,7 +28,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
 | `branding/` | VeroMesh palette, logos, and the DataHub theme; see [branding/README.md](branding/README.md) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
-| `deploy/` | Pinned versions, the compose file for Veromesh services, and the Helm charts for Kubernetes; see [deploy/helm/README.md](deploy/helm/README.md) |
+| `deploy/` | Pinned versions, the compose file for Veromesh services, the Helm charts for Kubernetes ([deploy/helm/README.md](deploy/helm/README.md)), and the capacity runs on Azure ([deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)) |
 | `scripts/` | Local stack helpers, and `test.sh`, the regression test harness |
 | `tests/` | Regression harness, contract snapshots and end-to-end tests; see [docs/testing.md](docs/testing.md) |
 | `docs/` | Architecture, connectors, testing and licensing |
@@ -98,6 +99,8 @@ scripts/test.sh integration         # + a real Fuseki and the container images
 scripts/test.sh e2e                 # end-to-end against the running stack
 scripts/test.sh all --start-stack   # everything
 ```
+
+Capacity (decision checks per second, memory, re-syncs on a real Fuseki) runs by hand: **Actions → Capacity** on a GitHub runner, **Actions → Capacity on Azure** on the reference machines ([deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)).
 
 Needs only Docker and `python3`; add `--local` to run without Docker. CI runs the same commands. Suites, snapshots and how to add a component: [docs/testing.md](docs/testing.md).
 
