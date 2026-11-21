@@ -77,7 +77,7 @@ They are identifiers, not secrets: without the federated credential, nobody can 
 | `sizes` | For `bench`, the sizes in order: `medium` (20,080 people), `large` (100,200), `xl` (500,000; E machines only) |
 | `throughput` | Concurrencies for checks per second, default `1,4,16` |
 | `disk_gb` | The machine's premium disk, which Fuseki writes to: `128` (P10, 500 operations a second), `512` (P20, 2,300) or `1024` (P30, 5,000). Premium disks get faster with size. The first D4s v6 run, on 128 GB, wrote 2–4 times slower than a GitHub runner; a larger disk costs about $0.03 (512) or $0.17 (1024) an hour more |
-| `local_data` | Keep Fuseki's and PostgreSQL's storage on the machine's local NVMe drive instead of its network-attached disk (only sizes with one: `Standard_D4ds_v6`). The drive is wiped when the machine stops, so this is for measuring, not for a customer install |
+| `storage` | Where Fuseki and PostgreSQL keep their data. `os-disk` is the machine's network-attached premium disk. `local-nvme` is the local NVMe drive of a size that has one (`Standard_D4ds_v6`); it's wiped when the machine stops, so it's for measuring only. `premium-ssd-v2` is an attached 128 GB Premium SSD v2 disk (low latency, durable), with the machine placed in availability zone 1, which that disk needs. Every Fuseki commit waits for the disk: on a D4s v6 an edit took 380–440 ms on the OS disk and 68–83 ms on the local drive |
 | `fuseki_heap` | Fuseki's Java heap. `auto` is a quarter of the machine's memory |
 | `hours` | The most the run may take on the machine (1–6). It is stopped after that, and the machine is still deleted |
 | `keep_machine` | Leave the machine running at the end, to look around. Delete it afterwards with `teardown.sh machines` |

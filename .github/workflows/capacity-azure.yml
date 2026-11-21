@@ -34,10 +34,11 @@ on:
         type: choice
         options: ["128", "512", "1024"]
         default: "128"
-      local_data:
-        description: "keep Fuseki's and PostgreSQL's storage on the machine's local NVMe drive (sizes with a d: Standard_D4ds_v6)"
-        type: boolean
-        default: false
+      storage:
+        description: "where Fuseki and PostgreSQL keep their data: the OS disk; the local NVMe drive (sizes with a d: Standard_D4ds_v6); or an attached Premium SSD v2"
+        type: choice
+        options: [os-disk, local-nvme, premium-ssd-v2]
+        default: os-disk
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
@@ -77,10 +78,10 @@ jobs:
           MODE: ${{ inputs.mode }}
           SIZES: ${{ inputs.sizes }}
           HOURS: ${{ inputs.hours }}
-          LOCAL_DATA: ${{ inputs.local_data }}
+          STORAGE: ${{ inputs.storage }}
         run: |
-          if [ "$LOCAL_DATA" = true ] && ! printf '%s' "$SIZE" | grep -q 'ds_v'; then
-            echo "::error::local_data needs a size with a local drive (a d before the s): Standard_D4ds_v6"; exit 1
+          if [ "$STORAGE" = local-nvme ] && ! printf '%s' "$SIZE" | grep -q 'ds_v'; then
+            echo "::error::local-nvme needs a size with a local drive (a d before the s): Standard_D4ds_v6"; exit 1
           fi
           [ -n "$RG" ] && [ -n "$LOCATION" ] || { echo "::error::Set the AZURE_* variables on the capacity environment (deploy/azure-capacity/README.md)"; exit 1; }
           case "$HOURS" in ''|*[!0-9]*) echo "::error::hours must be a whole number"; exit 1 ;; esac
@@ -104,6 +105,8 @@ jobs:
         env:
           HOURS: ${{ inputs.hours }}
           DISK_GB: ${{ inputs.disk_gb }}
+          STORAGE: ${{ inputs.storage }}
+          DATA_DISK: disk-cap-${{ github.run_id }}
         run: |
           delete_after=$(date -u -d "+$((HOURS + 1)) hours" +%Y-%m-%dT%H:%MZ)
           tags=(purpose=veromesh-capacity "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -111,14 +114,25 @@ jobs:
           # A public address for the way out (packages, the repository, images); the subnet's
           # security group lets nothing in. The workflow talks to the machine through Azure.
           az network public-ip create -g "$RG" -n "$IP" -l "$LOCATION" --sku Standard --tags "${tags[@]}" -o none
-          az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" \
+          zone=()
+          if [ "$STORAGE" = premium-ssd-v2 ]; then
+            # Premium SSD v2 attaches only to a machine in an availability zone: both go in zone 1.
+            # 128 GB at the baseline it includes at no charge: 3,000 IOPS, 125 MB/s.
+            zone=(--zone 1)
+            az disk create -g "$RG" -n "$DATA_DISK" -l "$LOCATION" --zone 1 --sku PremiumV2_LRS \
+              --size-gb 128 --tags "${tags[@]}" -o none
+          fi
+          az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" "${zone[@]}" \
             --image Canonical:ubuntu-24_04-lts:server:latest \
             --vnet-name vnet-veromesh-capacity --subnet snet-capacity --nsg "" --public-ip-address "$IP" \
             --os-disk-size-gb "$DISK_GB" --storage-sku Premium_LRS --disk-controller-type NVMe \
             --os-disk-delete-option Delete --nic-delete-option Delete \
             --admin-username azureuser --generate-ssh-keys \
             --tags "${tags[@]}" -o none
-          echo "Created $VM ($SIZE, $DISK_GB GB premium disk) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
+          if [ "$STORAGE" = premium-ssd-v2 ]; then
+            az vm disk attach -g "$RG" --vm-name "$VM" --name "$DATA_DISK" -o none
+          fi
+          echo "Created $VM ($SIZE, $DISK_GB GB premium OS disk, storage on $STORAGE) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
 
       - name: Measure
         env:
@@ -127,11 +141,11 @@ jobs:
           THROUGHPUT: ${{ inputs.throughput }}
           HEAP: ${{ inputs.fuseki_heap }}
           HOURS: ${{ inputs.hours }}
-          LOCAL_DATA: ${{ inputs.local_data && '1' || '0' }}
+          STORAGE: ${{ inputs.storage }}
         run: |
           # The script that runs on the machine, with this run's settings in front.
           {
-            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nLOCAL_DATA=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$LOCAL_DATA"
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE"
             cat deploy/azure-capacity/vm-run.sh
           } > run.sh
           az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \
@@ -151,7 +165,7 @@ jobs:
             --query instanceView.error -o tsv)
           [ -n "$err" ] && printf '\nErrors:\n%s\n' "$err"
           {
-            echo "### $SIZE, ${{ inputs.disk_gb }} GB disk: $MODE ${SIZES}"
+            echo "### $SIZE, storage ${{ inputs.storage }}, ${{ inputs.disk_gb }} GB OS disk: $MODE ${SIZES}"
             echo '```'
             cat results.txt
             echo '```'
@@ -167,7 +181,11 @@ jobs:
           if az network public-ip show -g "$RG" -n "$IP" -o none 2>/dev/null; then
             az network public-ip delete -g "$RG" -n "$IP" -o none
           fi
-          echo "Deleted $VM and $IP."
+          disk="disk-cap-${{ github.run_id }}"  # a Premium SSD v2 data disk, if this run made one
+          if az disk show -g "$RG" -n "$disk" -o none 2>/dev/null; then
+            az disk delete -g "$RG" -n "$disk" --yes -o none
+          fi
+          echo "Deleted $VM, $IP and any data disk."
 
       - name: Kept
         if: always() && inputs.keep_machine

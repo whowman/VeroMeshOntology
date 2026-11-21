@@ -8,8 +8,9 @@
 #   SIZES        bench: sizes to run in order, e.g. "medium large" or "xl" (500,000 people)
 #   THROUGHPUT   bench: concurrencies for checks per second, e.g. 1,4,16
 #   HEAP         Fuseki's Java heap, e.g. 16g, or "auto" (a quarter of the machine's memory)
-#   LOCAL_DATA   1: keep Docker's data (Fuseki's and PostgreSQL's storage) on the machine's
-#                local NVMe drive (a size with a "d", e.g. D4ds v6) instead of its network disk
+#   STORAGE      where Docker's data (Fuseki's and PostgreSQL's storage) lives: os-disk (the
+#                machine's network-attached OS disk), local-nvme (its local NVMe drive, on a size
+#                with a "d", e.g. D4ds v6) or premium-ssd-v2 (an attached Premium SSD v2 disk)
 #
 # Everything the steps print goes to /var/log/veromesh-capacity.log on the machine. Azure
 # returns only the end of what a run command prints, so this prints only the results:
@@ -19,7 +20,7 @@ set -euo pipefail
 LOG=/var/log/veromesh-capacity.log
 WORK=/opt/veromesh-capacity
 REPO=https://github.com/whowman/VeroMeshOntology.git
-: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${LOCAL_DATA:=0}"
+: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${STORAGE:=os-disk}"
 
 fail() {
   echo "FAILED at: $1"
@@ -47,19 +48,29 @@ step "packages"
   systemctl enable --now docker
 } >>"$LOG" 2>&1 || fail "installing Docker, git and Python"
 
-DATA_ON="network disk (OS disk)"
-if [ "$LOCAL_DATA" = 1 ]; then
-  step "local NVMe drive"
+# Docker's data on a disk of its own: v6 machines present disks through NVMe. The local
+# drive shows as "Microsoft NVMe Direct Disk" and arrives raw; managed (network) disks,
+# the OS disk and an attached data disk, show as "MSFT NVMe Accelerator".
+data_device() {
+  case "$STORAGE" in
+    local-nvme) lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}' ;;
+    premium-ssd-v2)  # the managed disk with no partitions and nothing mounted: not the OS disk
+      for d in $(lsblk -dnpo NAME,MODEL | awk '/NVMe Accelerator/ {print $1}'); do
+        [ "$(lsblk -nro NAME "$d" | wc -l)" = 1 ] && [ -z "$(lsblk -nro MOUNTPOINT "$d" | tr -d '[:space:]')" ] && { echo "$d"; return; }
+      done ;;
+  esac
+}
+DATA_ON="network disk (the OS disk, premium SSD)"
+if [ "$STORAGE" != os-disk ]; then
+  step "storage: $STORAGE"
   {
-    # v6 machines present their local NVMe drive raw and unformatted; managed (network)
-    # disks show as "MSFT NVMe Accelerator", the local one as "Microsoft NVMe Direct Disk".
     lsblk -dnpo NAME,MODEL,SIZE,MOUNTPOINT
-    dev=$(lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}')
+    for _ in $(seq 30); do dev=$(data_device); [ -n "$dev" ] && break; sleep 2; done  # an attached disk can take a moment
     [ -n "$dev" ]
     mnt=$(lsblk -nro MOUNTPOINT "$dev" | awk 'NF {print; exit}')
     if [ -z "$mnt" ]; then
       mkfs.ext4 -F -q "$dev"
-      mnt=/mnt/local
+      mnt=/mnt/data
       mkdir -p "$mnt"
       mount -o noatime,discard "$dev" "$mnt"
     fi
@@ -68,8 +79,9 @@ if [ "$LOCAL_DATA" = 1 ]; then
     printf '{"data-root": "%s/docker"}\n' "$mnt" > /etc/docker/daemon.json
     systemctl start docker
     docker info --format '{{.DockerRootDir}}'
-  } >>"$LOG" 2>&1 || fail "putting Docker's data on the local NVMe drive (does this size have one?)"
-  DATA_ON="local NVMe drive ($(lsblk -dnpo NAME,MODEL,SIZE "$(lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}')" | tr -s ' '))"
+  } >>"$LOG" 2>&1 || fail "putting Docker's data on the $STORAGE disk (does this machine have one?)"
+  dev=$(data_device)
+  DATA_ON="$STORAGE ($(lsblk -dnpo NAME,MODEL,SIZE "$dev" | tr -s ' '))"
 fi
 
 step "checkout $REF"
