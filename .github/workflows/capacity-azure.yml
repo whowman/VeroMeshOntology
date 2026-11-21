@@ -114,25 +114,37 @@ jobs:
           # A public address for the way out (packages, the repository, images); the subnet's
           # security group lets nothing in. The workflow talks to the machine through Azure.
           az network public-ip create -g "$RG" -n "$IP" -l "$LOCATION" --sku Standard --tags "${tags[@]}" -o none
-          zone=()
-          if [ "$STORAGE" = premium-ssd-v2 ]; then
-            # Premium SSD v2 attaches only to a machine in an availability zone: both go in zone 1.
-            # 128 GB at the baseline it includes at no charge: 3,000 IOPS, 125 MB/s.
-            zone=(--zone 1)
-            az disk create -g "$RG" -n "$DATA_DISK" -l "$LOCATION" --zone 1 --sku PremiumV2_LRS \
-              --size-gb 128 --tags "${tags[@]}" -o none
-          fi
-          az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" "${zone[@]}" \
+          # Premium SSD v2 attaches only to a machine in an availability zone, so the disk and
+          # the machine go in the same zone: 1, then 2, then 3 when a zone has no capacity for
+          # the size (SkuNotAvailable). 128 GB at the baseline it includes at no charge:
+          # 3,000 IOPS, 125 MB/s. Other storage needs no zone.
+          zones=(none)
+          [ "$STORAGE" = premium-ssd-v2 ] && zones=(1 2 3)
+          created=""
+          for z in "${zones[@]}"; do
+            zone=()
+            if [ "$z" != none ]; then
+              zone=(--zone "$z")
+              az disk create -g "$RG" -n "$DATA_DISK" -l "$LOCATION" --zone "$z" --sku PremiumV2_LRS \
+                --size-gb 128 --tags "${tags[@]}" -o none
+            fi
+            if az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" "${zone[@]}" \
             --image Canonical:ubuntu-24_04-lts:server:latest \
             --vnet-name vnet-veromesh-capacity --subnet snet-capacity --nsg "" --public-ip-address "$IP" \
             --os-disk-size-gb "$DISK_GB" --storage-sku Premium_LRS --disk-controller-type NVMe \
             --os-disk-delete-option Delete --nic-delete-option Delete \
             --admin-username azureuser --generate-ssh-keys \
-            --tags "${tags[@]}" -o none
+            --tags "${tags[@]}" -o none; then
+              created="zone ${z}"; break
+            fi
+            echo "No $SIZE in zone $z now; trying the next."
+            [ "$z" != none ] && az disk delete -g "$RG" -n "$DATA_DISK" --yes -o none
+          done
+          [ -n "$created" ] || { echo "::error::$SIZE could not be created in $LOCATION (zones: ${zones[*]})"; exit 1; }
           if [ "$STORAGE" = premium-ssd-v2 ]; then
             az vm disk attach -g "$RG" --vm-name "$VM" --name "$DATA_DISK" -o none
           fi
-          echo "Created $VM ($SIZE, $DISK_GB GB premium OS disk, storage on $STORAGE) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
+          echo "Created $VM ($SIZE, $created, $DISK_GB GB premium OS disk, storage on $STORAGE) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
 
       - name: Measure
         env:
