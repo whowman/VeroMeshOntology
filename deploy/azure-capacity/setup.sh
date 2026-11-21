@@ -7,6 +7,7 @@
 #
 #   ./setup.sh            everything below, then prints what to set in GitHub
 #   ./setup.sh quota      only the vCPU quota check
+#   ./setup.sh raise      ask Azure for the Esv6 quota the 500,000 run needs
 #   ./setup.sh show       only print what to set in GitHub
 #
 # What it creates, in resource group veromesh-capacity:
@@ -29,33 +30,52 @@ VNET=vnet-veromesh-capacity
 SUBNET=snet-capacity
 NSG=nsg-veromesh-capacity
 
-# vCPUs the runs need per family: D4s v5 + D8s v5 at once = 12; E8s v5 = 8; E16s v5 = 16
-# (the 500,000 run). The E family needs 16 to run the 500,000 test, 24 for E8s and E16s at once.
-NEED_DSV5=12
-NEED_ESV5=16
+# vCPUs the runs need per family. v6, not v5: this subscription has no v5 quota in
+# westus2 and Azure refuses to grant it. One machine runs at a time (the workflow's
+# concurrency group), so each family needs its largest machine: D8s v6 = 8, E16s v6 = 16
+# (the 500,000 run).
+NEED_D=8
+NEED_E=16
+FAMILY_D="Standard Dsv6 Family vCPUs"
+FAMILY_E="Standard Esv6 Family vCPUs"
 
 say() { printf '\n== %s\n' "$*"; }
 
 quota() {
-  say "vCPU quota in $LOCATION (needed: Dsv5 $NEED_DSV5, Esv5 $NEED_ESV5)"
+  say "vCPU quota in $LOCATION (needed: Dsv6 $NEED_D, Esv6 $NEED_E, all regional $((NEED_E + 4)))"
   local short=0
+  # Match on the display name, ignoring case: Azure spells the families' internal names
+  # inconsistently (standardDSv5Family, standardDsv6Family, ...).
   while IFS=$'\t' read -r name current limit; do
-    need=0
+    need=-1
+    shopt -s nocasematch
     case "$name" in
-      standardDSv5Family) need=$NEED_DSV5 ;;
-      standardESv5Family) need=$NEED_ESV5 ;;
-      cores) need=$((NEED_DSV5 + NEED_ESV5)) ;;
+      "$FAMILY_D") need=$NEED_D ;;
+      "$FAMILY_E") need=$NEED_E ;;
+      "Total Regional vCPUs") need=$((NEED_E + 4)) ;;  # the largest machine, beside a 4-vCPU AKS
     esac
+    shopt -u nocasematch
+    [ "$need" -lt 0 ] && continue
     free=$((limit - current))
     status="ok"
     if [ "$free" -lt "$need" ]; then status="TOO LOW: ask for $((current + need))"; short=1; fi
-    printf '  %-22s in use %4s of %4s   %s\n' "$name" "$current" "$limit" "$status"
-  done < <(az vm list-usage -l "$LOCATION" \
-    --query "[?name.value=='standardDSv5Family' || name.value=='standardESv5Family' || name.value=='cores'].[name.value, currentValue, limit]" -o tsv)
+    printf '  %-28s in use %4s of %4s   %s\n' "$name" "$current" "$limit" "$status"
+  done < <(az vm list-usage -l "$LOCATION" --query "[].[localName, currentValue, limit]" -o tsv)
   if [ "$short" = 1 ]; then
-    echo "  Raise it in the portal: Subscriptions > $SUBSCRIPTION > Usage + quotas, region $LOCATION"
-    echo "  (free; usually approved within minutes, sometimes a day). The other runs can go ahead meanwhile."
+    echo "  Raise it in the portal (Quotas > Compute, region $LOCATION; set the usage filter to show all),"
+    echo "  or: ./setup.sh raise. Free; usually approved within minutes. Smaller runs can go ahead meanwhile."
   fi
+}
+
+raise() {
+  az extension add --name quota --only-show-errors
+  local scope="/subscriptions/$SUBSCRIPTION/providers/Microsoft.Compute/locations/$LOCATION"
+  local esv6
+  esv6=$(az vm list-usage -l "$LOCATION" --query "[?localName=='$FAMILY_E'].name.value | [0]" -o tsv)
+  say "Asking for $NEED_E vCPU of $FAMILY_E ($esv6)"
+  az quota update --resource-name "$esv6" --scope "$scope" --limit-object value="$NEED_E" \
+    --resource-type dedicated --query "properties.limit.value" -o tsv
+  quota
 }
 
 setup() {
@@ -131,6 +151,7 @@ EOF
 case "${1:-all}" in
   all) setup ;;
   quota) az account set --subscription "$SUBSCRIPTION"; quota ;;
+  raise) az account set --subscription "$SUBSCRIPTION"; raise ;;
   show) show ;;
-  *) echo "usage: $0 [all|quota|show]" >&2; exit 2 ;;
+  *) echo "usage: $0 [all|quota|raise|show]" >&2; exit 2 ;;
 esac

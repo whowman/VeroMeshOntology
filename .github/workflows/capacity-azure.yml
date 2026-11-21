@@ -6,8 +6,8 @@ name: Capacity on Azure
 # real Fuseki and PostgreSQL, prints the results here, and deletes the machine, also when
 # the run fails or is cancelled.
 #
-# It costs money while the machine runs: about $0.19 an hour (D4s v5) to $1.01 (E16s v5),
-# pay-as-you-go list prices in East US. The `capacity` environment can require an approval before
+# It costs money while the machine runs: about $0.20 an hour (D4s v6) to $1.06 (E16s v6),
+# pay-as-you-go list prices in West US 2. (v6, not v5: the subscription has no v5 quota.) The `capacity` environment can require an approval before
 # a run starts (Settings -> Environments -> capacity -> Required reviewers).
 
 on:
@@ -16,8 +16,8 @@ on:
       machine:
         description: "Azure machine size"
         type: choice
-        options: [Standard_D4s_v5, Standard_D8s_v5, Standard_E8s_v5, Standard_E16s_v5]
-        default: Standard_D4s_v5
+        options: [Standard_D4s_v6, Standard_D8s_v6, Standard_E8s_v6, Standard_E16s_v6]
+        default: Standard_D4s_v6
       mode:
         description: "bench: time each size; grow: load until the machine runs out"
         type: choice
@@ -45,7 +45,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: capacity-azure-${{ inputs.machine }}
+  # One machine at a time: the Dsv6 and Esv6 quotas (10 vCPU each) do not fit two at once.
+  group: capacity-azure
   cancel-in-progress: false
 
 jobs:
@@ -77,7 +78,7 @@ jobs:
           # 500,000 people need the memory of the E family (the service and Fuseki together
           # hold about 30 GB at that size, by extrapolation from 2.6 GB + Fuseki at 100,000).
           if [ "$MODE" = bench ] && printf ' %s ' "$SIZES" | grep -q ' xl ' && case "$SIZE" in Standard_E*) false ;; *) true ;; esac; then
-            echo "::error::xl (500,000 people) needs Standard_E8s_v5 or Standard_E16s_v5"; exit 1
+            echo "::error::xl (500,000 people) needs Standard_E8s_v6 or Standard_E16s_v6"; exit 1
           fi
 
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -99,7 +100,7 @@ jobs:
           az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" \
             --image Canonical:ubuntu-24_04-lts:server:latest \
             --vnet-name vnet-veromesh-capacity --subnet snet-capacity --nsg "" --public-ip-address "$IP" \
-            --os-disk-size-gb 128 --storage-sku Premium_LRS \
+            --os-disk-size-gb 128 --storage-sku Premium_LRS --disk-controller-type NVMe \
             --os-disk-delete-option Delete --nic-delete-option Delete \
             --admin-username azureuser --generate-ssh-keys \
             --tags "${tags[@]}" -o none

@@ -18,17 +18,19 @@ Each run creates one machine, runs the benchmark on it, puts the results in the 
 
 ## Cost
 
-These are pay-as-you-go Linux list prices in East US; other US regions are similar but check the [pricing page](https://azure.microsoft.com/pricing/details/virtual-machines/linux/) for yours. A deleted machine costs nothing; the network and the identity are free.
+The machines are the v6 sizes. The sizing proposal named v5, but this subscription has no v5 quota in West US 2, and Azure refuses to grant it (`QuotaNotAvailableForResource`). The v6 sizes have the same vCPU and memory.
+
+These are pay-as-you-go Linux prices in West US 2. D4s v6 is listed at $0.202 an hour; the others are estimated at the same ratio over v5. Check the [pricing page](https://azure.microsoft.com/pricing/details/virtual-machines/linux/) for current figures. A deleted machine costs nothing; the network and the identity are free.
 
 | Machine | vCPU / memory | Per hour | Run | About | Cost |
 | --- | ---: | ---: | --- | ---: | ---: |
-| D4s v5 | 4 / 16 GB | $0.192 | `medium large` | 1.5 h | $0.29 |
-| D8s v5 | 8 / 32 GB | $0.384 | `medium large` | 1.5 h | $0.58 |
-| E8s v5 | 8 / 64 GB | $0.504 | `large`, then `grow` | 3 h | $1.51 |
-| E16s v5 | 16 / 128 GB | $1.008 | `xl` (500,000 people) | 3 h | $3.02 |
-| **All four** | | | | **9 h** | **about $5.40** |
+| D4s v6 | 4 / 16 GB | $0.202 | `medium large` | 1.5 h | $0.30 |
+| D8s v6 | 8 / 32 GB | about $0.40 | `medium large` | 1.5 h | $0.61 |
+| E8s v6 | 8 / 64 GB | about $0.53 | `large`, then `grow` | 3 h | $1.59 |
+| E16s v6 | 16 / 128 GB | about $1.06 | `xl` (500,000 people) | 3 h | $3.18 |
+| **All four** | | | | **9 h** | **about $5.70** |
 
-Allow twice that for runs repeated after a fix. Each run has a ceiling (`hours`, default 6). The most a single run can cost is therefore 6 hours of its machine: $6 for an E16s v5.
+Allow twice that for runs repeated after a fix. Each run has a ceiling (`hours`, default 6). The most a single run can cost is therefore 6 hours of its machine: about $6.40 for an E16s v6.
 
 ## 1. Set up Azure (once, about 5 minutes)
 
@@ -49,7 +51,12 @@ It creates:
 
 At the end it checks the vCPU quota, and prints the five values for GitHub.
 
-**Quota.** The runs need 12 vCPU of the Dsv5 family (D4s and D8s at once) and 16 of the Esv5 family (the E16s v5 for 500,000 people). If `setup.sh` reports "TOO LOW", raise it in the portal under Subscriptions → *your subscription* → Usage + quotas, in the same region. It's free and usually approved in minutes. The D-machine runs can go ahead while you wait.
+**Quota.** One machine runs at a time, so each family needs room for its largest machine:
+- Dsv6: 8 vCPU, for the D8s v6. The subscription has 10.
+- Esv6: 16 vCPU, for the E16s v6 (500,000 people). The subscription has 10.
+- Total regional vCPUs: 20, the largest machine beside the 4 the assessment's AKS uses.
+
+If `setup.sh` reports "TOO LOW", run `./setup.sh raise`, which asks Azure for the Esv6 increase, or raise it in the portal under **Quotas → Compute**. In the portal, choose the region and set the usage filter to show all, since families with nothing in use are hidden by default. It's free and usually approved in minutes. The D runs and the E8s run fit the quota as it is, so they can go ahead meanwhile.
 
 ## 2. Set up GitHub (once)
 
@@ -65,7 +72,7 @@ They are identifiers, not secrets: without the federated credential, nobody can 
 
 | Input | What it does |
 | --- | --- |
-| `machine` | The Azure size: `Standard_D4s_v5`, `Standard_D8s_v5`, `Standard_E8s_v5` or `Standard_E16s_v5` |
+| `machine` | The Azure size: `Standard_D4s_v6`, `Standard_D8s_v6`, `Standard_E8s_v6` or `Standard_E16s_v6` |
 | `mode` | `bench` times each size. `grow` loads 20,000 people at a time, measuring after each step, until the service holds 60% of the machine's memory |
 | `sizes` | For `bench`, the sizes in order: `medium` (20,080 people), `large` (100,200), `xl` (500,000; E machines only) |
 | `throughput` | Concurrencies for checks per second, default `1,4,16` |
@@ -75,12 +82,12 @@ They are identifiers, not secrets: without the federated credential, nobody can 
 
 The run order that answers the sizing proposal:
 
-1. `Standard_D4s_v5`, `bench`, `medium large`: the Small and Medium tiers, and how far a 4-vCPU machine carries Large.
-2. `Standard_D8s_v5`, `bench`, `medium large`: what doubling the vCPUs buys.
-3. `Standard_E8s_v5`, `bench`, `large`. Then the same machine with `grow`, to find where 64 GB runs out.
-4. `Standard_E16s_v5`, `bench`, `xl`: the Extra large tier, 500,000 people (issue #46). Loading takes most of the run, roughly 45–90 minutes.
+1. `Standard_D4s_v6`, `bench`, `medium large`: the Small and Medium tiers, and how far a 4-vCPU machine carries Large.
+2. `Standard_D8s_v6`, `bench`, `medium large`: what doubling the vCPUs buys.
+3. `Standard_E8s_v6`, `bench`, `large`. Then the same machine with `grow`, to find where 64 GB runs out.
+4. `Standard_E16s_v6`, `bench`, `xl`: the Extra large tier, 500,000 people (issue #46). This needs the Esv6 quota raised to 16. Loading takes most of the run, roughly 45–90 minutes.
 
-Two runs on different machine sizes can run at once (quota allowing). Two on the same size wait for each other.
+Runs go one at a time: a run started while another is going waits for it, because the quota does not fit two machines at once.
 
 ## 4. Read the results
 
@@ -115,7 +122,8 @@ To check, or to clean up after anything unusual, run these in Cloud Shell:
 | --- | --- |
 | "Set the AZURE_* variables on the capacity environment" | Step 2: the variables go on the `capacity` environment, not the repository |
 | `AADSTS70021` / no matching federated identity | The environment must be named exactly `capacity`; `setup.sh` set the credential for that name |
-| `OperationNotAllowed` / quota exceeded when creating the machine | Raise the quota (step 1), or run a smaller size meanwhile |
+| `OperationNotAllowed` / quota exceeded when creating the machine | Raise the quota (step 1: `./setup.sh raise`), or run a smaller size meanwhile |
+| `QuotaNotAvailableForResource` when raising a quota | That family is not offered to this subscription in the region: choose another family or region |
 | `SkuNotAvailable` | That size is not offered in the region now. Run `LOCATION=<other region> ./setup.sh`, then update `AZURE_LOCATION` |
 | "The run on the machine ended: Failed" | The output ends with the last 3 KB of the machine's log and the step that failed |
 | "TimedOut" | Raise `hours` (up to 6), or run fewer sizes per run |
