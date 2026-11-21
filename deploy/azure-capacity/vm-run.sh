@@ -8,6 +8,8 @@
 #   SIZES        bench: sizes to run in order, e.g. "medium large" or "xl" (500,000 people)
 #   THROUGHPUT   bench: concurrencies for checks per second, e.g. 1,4,16
 #   HEAP         Fuseki's Java heap, e.g. 16g, or "auto" (a quarter of the machine's memory)
+#   LOCAL_DATA   1: keep Docker's data (Fuseki's and PostgreSQL's storage) on the machine's
+#                local NVMe drive (a size with a "d", e.g. D4ds v6) instead of its network disk
 #
 # Everything the steps print goes to /var/log/veromesh-capacity.log on the machine. Azure
 # returns only the end of what a run command prints, so this prints only the results:
@@ -17,7 +19,7 @@ set -euo pipefail
 LOG=/var/log/veromesh-capacity.log
 WORK=/opt/veromesh-capacity
 REPO=https://github.com/whowman/VeroMeshOntology.git
-: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}"
+: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${LOCAL_DATA:=0}"
 
 fail() {
   echo "FAILED at: $1"
@@ -44,6 +46,31 @@ step "packages"
   apt-get install -y -q docker.io git python3-venv python3-pip curl
   systemctl enable --now docker
 } >>"$LOG" 2>&1 || fail "installing Docker, git and Python"
+
+DATA_ON="network disk (OS disk)"
+if [ "$LOCAL_DATA" = 1 ]; then
+  step "local NVMe drive"
+  {
+    # v6 machines present their local NVMe drive raw and unformatted; managed (network)
+    # disks show as "MSFT NVMe Accelerator", the local one as "Microsoft NVMe Direct Disk".
+    lsblk -dnpo NAME,MODEL,SIZE,MOUNTPOINT
+    dev=$(lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}')
+    [ -n "$dev" ]
+    mnt=$(lsblk -nro MOUNTPOINT "$dev" | awk 'NF {print; exit}')
+    if [ -z "$mnt" ]; then
+      mkfs.ext4 -F -q "$dev"
+      mnt=/mnt/local
+      mkdir -p "$mnt"
+      mount -o noatime,discard "$dev" "$mnt"
+    fi
+    systemctl stop docker docker.socket
+    mkdir -p "$mnt/docker"
+    printf '{"data-root": "%s/docker"}\n' "$mnt" > /etc/docker/daemon.json
+    systemctl start docker
+    docker info --format '{{.DockerRootDir}}'
+  } >>"$LOG" 2>&1 || fail "putting Docker's data on the local NVMe drive (does this size have one?)"
+  DATA_ON="local NVMe drive ($(lsblk -dnpo NAME,MODEL,SIZE "$(lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}')" | tr -s ' '))"
+fi
 
 step "checkout $REF"
 {
@@ -90,7 +117,7 @@ STORE=fuseki:http://localhost:3030/veromesh
 DLOG=postgresql://veromesh:test-only@localhost:5432/decisions
 mkdir -p results
 
-echo "Machine: $(nproc) vCPU, ${mem_gb} GB, $(lscpu | sed -n 's/^Model name: *//p'); Fuseki heap $HEAP; commit $REF"
+echo "Machine: $(nproc) vCPU, ${mem_gb} GB, $(lscpu | sed -n 's/^Model name: *//p'); Fuseki heap $HEAP; data on $DATA_ON; commit $REF"
 if [ "$MODE" = grow ]; then
   step "grow"
   stop=$((mem_gb * 3 / 5))  # the service may take 60% of memory; Fuseki and the system the rest

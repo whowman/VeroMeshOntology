@@ -16,7 +16,7 @@ on:
       machine:
         description: "Azure machine size"
         type: choice
-        options: [Standard_D4s_v6, Standard_D8s_v6, Standard_E8s_v6, Standard_E16s_v6]
+        options: [Standard_D4s_v6, Standard_D8s_v6, Standard_E8s_v6, Standard_E16s_v6, Standard_D4ds_v6]
         default: Standard_D4s_v6
       mode:
         description: "bench: time each size; grow: load until the machine runs out"
@@ -34,6 +34,10 @@ on:
         type: choice
         options: ["128", "512", "1024"]
         default: "128"
+      local_data:
+        description: "keep Fuseki's and PostgreSQL's storage on the machine's local NVMe drive (sizes with a d: Standard_D4ds_v6)"
+        type: boolean
+        default: false
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
@@ -73,7 +77,11 @@ jobs:
           MODE: ${{ inputs.mode }}
           SIZES: ${{ inputs.sizes }}
           HOURS: ${{ inputs.hours }}
+          LOCAL_DATA: ${{ inputs.local_data }}
         run: |
+          if [ "$LOCAL_DATA" = true ] && ! printf '%s' "$SIZE" | grep -q 'ds_v'; then
+            echo "::error::local_data needs a size with a local drive (a d before the s): Standard_D4ds_v6"; exit 1
+          fi
           [ -n "$RG" ] && [ -n "$LOCATION" ] || { echo "::error::Set the AZURE_* variables on the capacity environment (deploy/azure-capacity/README.md)"; exit 1; }
           case "$HOURS" in ''|*[!0-9]*) echo "::error::hours must be a whole number"; exit 1 ;; esac
           [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 6 ] || { echo "::error::hours must be 1 to 6"; exit 1; }
@@ -119,10 +127,11 @@ jobs:
           THROUGHPUT: ${{ inputs.throughput }}
           HEAP: ${{ inputs.fuseki_heap }}
           HOURS: ${{ inputs.hours }}
+          LOCAL_DATA: ${{ inputs.local_data && '1' || '0' }}
         run: |
           # The script that runs on the machine, with this run's settings in front.
           {
-            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP"
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nLOCAL_DATA=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$LOCAL_DATA"
             cat deploy/azure-capacity/vm-run.sh
           } > run.sh
           az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \
