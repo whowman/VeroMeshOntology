@@ -103,12 +103,23 @@ setup() {
   if ! az identity show -g "$RESOURCE_GROUP" -n "$IDENTITY" -o none 2>/dev/null; then
     az identity create -g "$RESOURCE_GROUP" -n "$IDENTITY" -o none
   fi
-  local subject="repo:$GITHUB_REPO:environment:$GITHUB_ENVIRONMENT"
-  if ! az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$IDENTITY" -n github-capacity -o none 2>/dev/null; then
-    az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$IDENTITY" -n github-capacity \
-      --issuer https://token.actions.githubusercontent.com --subject "$subject" \
-      --audiences api://AzureADTokenExchange -o none
-  fi
+  # GitHub's token names the repository by name, or (newer) with the owner's and the
+  # repository's numeric IDs as well: repo:owner@123/name@456:environment:capacity.
+  # Both are accepted, so the sign-in works whichever GitHub sends.
+  local ids subject_ids
+  ids=$(curl -fsS "https://api.github.com/repos/$GITHUB_REPO" | python3 -c \
+    'import json,sys; r=json.load(sys.stdin); print(r["owner"]["id"], r["id"])')
+  subject_ids="repo:${GITHUB_REPO%%/*}@${ids% *}/${GITHUB_REPO#*/}@${ids#* }:environment:$GITHUB_ENVIRONMENT"
+  local name subject
+  for name in github-capacity github-capacity-ids; do
+    subject="repo:$GITHUB_REPO:environment:$GITHUB_ENVIRONMENT"
+    [ "$name" = github-capacity-ids ] && subject=$subject_ids
+    if ! az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$IDENTITY" -n "$name" -o none 2>/dev/null; then
+      az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$IDENTITY" -n "$name" \
+        --issuer https://token.actions.githubusercontent.com --subject "$subject" \
+        --audiences api://AzureADTokenExchange -o none
+    fi
+  done
   local principal scope
   principal=$(az identity show -g "$RESOURCE_GROUP" -n "$IDENTITY" --query principalId -o tsv)
   scope=$(az group show -n "$RESOURCE_GROUP" --query id -o tsv)

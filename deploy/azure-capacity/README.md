@@ -121,7 +121,7 @@ To check, or to clean up after anything unusual, run these in Cloud Shell:
 | What you see | What to do |
 | --- | --- |
 | "Set the AZURE_* variables on the capacity environment" | Step 2: the variables go on the `capacity` environment, not the repository |
-| `AADSTS70021` / no matching federated identity | The environment must be named exactly `capacity`; `setup.sh` set the credential for that name |
+| `AADSTS700213` / `AADSTS70021`: no matching federated identity | The environment must be named exactly `capacity`. The log shows the subject GitHub sent; `setup.sh` registers both forms (by name, and with the numeric IDs). Run it again to add one that is missing |
 | `OperationNotAllowed` / quota exceeded when creating the machine | Raise the quota (step 1: `./setup.sh raise`), or run a smaller size meanwhile |
 | `QuotaNotAvailableForResource` when raising a quota | That family is not offered to this subscription in the region: choose another family or region |
 | `SkuNotAvailable` | That size is not offered in the region now. Run `LOCATION=<other region> ./setup.sh`, then update `AZURE_LOCATION` |
