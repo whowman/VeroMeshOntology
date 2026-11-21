@@ -76,6 +76,7 @@ They are identifiers, not secrets: without the federated credential, nobody can 
 | `mode` | `bench` times each size. `grow` loads 20,000 people at a time, measuring after each step, until the service holds 60% of the machine's memory |
 | `sizes` | For `bench`, the sizes in order: `medium` (20,080 people), `large` (100,200), `xl` (500,000; E machines only) |
 | `throughput` | Concurrencies for checks per second, default `1,4,16` |
+| `disk_gb` | The machine's premium disk, which Fuseki writes to: `128` (P10, 500 operations a second), `512` (P20, 2,300) or `1024` (P30, 5,000). Premium disks get faster with size. The first D4s v6 run, on 128 GB, wrote 2–4 times slower than a GitHub runner; a larger disk costs about $0.03 (512) or $0.17 (1024) an hour more |
 | `fuseki_heap` | Fuseki's Java heap. `auto` is a quarter of the machine's memory |
 | `hours` | The most the run may take on the machine (1–6). It is stopped after that, and the machine is still deleted |
 | `keep_machine` | Leave the machine running at the end, to look around. Delete it afterwards with `teardown.sh machines` |

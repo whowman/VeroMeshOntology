@@ -29,6 +29,11 @@ on:
       throughput:
         description: "bench: concurrencies for checks per second"
         default: "1,4,16"
+      disk_gb:
+        description: "the machine's disk (premium SSD; Fuseki writes here): 128 GB = P10, 500 IOPS; 512 = P20, 2,300; 1024 = P30, 5,000"
+        type: choice
+        options: ["128", "512", "1024"]
+        default: "128"
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
@@ -90,6 +95,7 @@ jobs:
       - name: Create the machine
         env:
           HOURS: ${{ inputs.hours }}
+          DISK_GB: ${{ inputs.disk_gb }}
         run: |
           delete_after=$(date -u -d "+$((HOURS + 1)) hours" +%Y-%m-%dT%H:%MZ)
           tags=(purpose=veromesh-capacity "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -100,11 +106,11 @@ jobs:
           az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" \
             --image Canonical:ubuntu-24_04-lts:server:latest \
             --vnet-name vnet-veromesh-capacity --subnet snet-capacity --nsg "" --public-ip-address "$IP" \
-            --os-disk-size-gb 128 --storage-sku Premium_LRS --disk-controller-type NVMe \
+            --os-disk-size-gb "$DISK_GB" --storage-sku Premium_LRS --disk-controller-type NVMe \
             --os-disk-delete-option Delete --nic-delete-option Delete \
             --admin-username azureuser --generate-ssh-keys \
             --tags "${tags[@]}" -o none
-          echo "Created $VM ($SIZE) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
+          echo "Created $VM ($SIZE, $DISK_GB GB premium disk) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
 
       - name: Measure
         env:
@@ -136,7 +142,7 @@ jobs:
             --query instanceView.error -o tsv)
           [ -n "$err" ] && printf '\nErrors:\n%s\n' "$err"
           {
-            echo "### $SIZE: $MODE ${SIZES}"
+            echo "### $SIZE, ${{ inputs.disk_gb }} GB disk: $MODE ${SIZES}"
             echo '```'
             cat results.txt
             echo '```'
