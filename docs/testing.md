@@ -77,7 +77,7 @@ The capacity job (Actions → Capacity, `.github/workflows/capacity.yml`) runs t
 | Large | 100,200 | 178 / 275 / 213 | 230 a second, p99 258 ms | 5 ms | 130 ms | 26 s | 2.6 GB |
 | Large, before PR #44 | 100,200 | 26 / 28 / 28 | 3 a second, p99 15.8 s | 50 ms | 78 ms | 31 s | 6.3 GB |
 
-Runner timings vary by up to about 50% between runs; the reference machines (`docs/architecture.md`, sizing) will give steadier figures. The longest pause the service's garbage collector made in these runs was 1.5 s (once), where it was 16 to 22 s.
+Runner timings vary by up to about 50% between runs. The Azure reference machines give steadier figures: `deploy/azure-capacity/README.md` sets them up and runs the same measurements there, up to 500,000 people. The longest pause the service's garbage collector made in these runs was 1.5 s (once), where it was 16 to 22 s.
 
 With `diagnose` set (seconds), the job also profiles 300 checks, prints the stack of any check slower than that, and takes a py-spy dump every half second from outside the process; `tests/perf/gil_holds.py` reports any thread that held Python's interpreter lock for that long while others ran. Mode `grow` loads step after step until the machine is exhausted.
 

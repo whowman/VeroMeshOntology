@@ -1,0 +1,159 @@
+name: Capacity on Azure
+
+# The capacity measurements on an Azure reference machine (deploy/azure-capacity/README.md).
+# Started by hand (Actions -> Capacity on Azure -> Run workflow). Each run creates one
+# machine in the veromesh-capacity resource group, runs the benchmark on it against a
+# real Fuseki and PostgreSQL, prints the results here, and deletes the machine, also when
+# the run fails or is cancelled.
+#
+# It costs money while the machine runs: about $0.19 an hour (D4s v5) to $1.01 (E16s v5),
+# pay-as-you-go list prices in East US. The `capacity` environment can require an approval before
+# a run starts (Settings -> Environments -> capacity -> Required reviewers).
+
+on:
+  workflow_dispatch:
+    inputs:
+      machine:
+        description: "Azure machine size"
+        type: choice
+        options: [Standard_D4s_v5, Standard_D8s_v5, Standard_E8s_v5, Standard_E16s_v5]
+        default: Standard_D4s_v5
+      mode:
+        description: "bench: time each size; grow: load until the machine runs out"
+        type: choice
+        options: [bench, grow]
+        default: bench
+      sizes:
+        description: "bench: sizes in order (medium = 20,000 people, large = 100,000, xl = 500,000)"
+        default: "medium large"
+      throughput:
+        description: "bench: concurrencies for checks per second"
+        default: "1,4,16"
+      fuseki_heap:
+        description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
+        default: auto
+      hours:
+        description: "the most the run may take on the machine before it is stopped"
+        default: "6"
+      keep_machine:
+        description: "keep the machine when the run ends (to look around; delete it with teardown.sh)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write  # the OIDC sign-in to Azure
+  contents: read
+
+concurrency:
+  group: capacity-azure-${{ inputs.machine }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    environment: capacity
+    timeout-minutes: 420
+    env:
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      LOCATION: ${{ vars.AZURE_LOCATION }}
+      VM: vm-cap-${{ github.run_id }}
+      IP: ip-cap-${{ github.run_id }}
+      SIZE: ${{ inputs.machine }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the request
+        env:
+          MODE: ${{ inputs.mode }}
+          SIZES: ${{ inputs.sizes }}
+          HOURS: ${{ inputs.hours }}
+        run: |
+          [ -n "$RG" ] && [ -n "$LOCATION" ] || { echo "::error::Set the AZURE_* variables on the capacity environment (deploy/azure-capacity/README.md)"; exit 1; }
+          case "$HOURS" in ''|*[!0-9]*) echo "::error::hours must be a whole number"; exit 1 ;; esac
+          [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 6 ] || { echo "::error::hours must be 1 to 6"; exit 1; }
+          for s in $SIZES; do
+            case "$s" in smoke|small|medium|large|xl) ;; *) echo "::error::unknown size $s"; exit 1 ;; esac
+          done
+          # 500,000 people need the memory of the E family (the service and Fuseki together
+          # hold about 30 GB at that size, by extrapolation from 2.6 GB + Fuseki at 100,000).
+          if [ "$MODE" = bench ] && printf ' %s ' "$SIZES" | grep -q ' xl ' && case "$SIZE" in Standard_E*) false ;; *) true ;; esac; then
+            echo "::error::xl (500,000 people) needs Standard_E8s_v5 or Standard_E16s_v5"; exit 1
+          fi
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create the machine
+        env:
+          HOURS: ${{ inputs.hours }}
+        run: |
+          delete_after=$(date -u -d "+$((HOURS + 1)) hours" +%Y-%m-%dT%H:%MZ)
+          tags=(purpose=veromesh-capacity "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                "deleteAfter=$delete_after" "publicIp=$IP")
+          # A public address for the way out (packages, the repository, images); the subnet's
+          # security group lets nothing in. The workflow talks to the machine through Azure.
+          az network public-ip create -g "$RG" -n "$IP" -l "$LOCATION" --sku Standard --tags "${tags[@]}" -o none
+          az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" \
+            --image Canonical:ubuntu-24_04-lts:server:latest \
+            --vnet-name vnet-veromesh-capacity --subnet snet-capacity --nsg "" --public-ip-address "$IP" \
+            --os-disk-size-gb 128 --storage-sku Premium_LRS \
+            --os-disk-delete-option Delete --nic-delete-option Delete \
+            --admin-username azureuser --generate-ssh-keys \
+            --tags "${tags[@]}" -o none
+          echo "Created $VM ($SIZE) in $RG; it will be deleted when this run ends (deleteAfter $delete_after)."
+
+      - name: Measure
+        env:
+          MODE: ${{ inputs.mode }}
+          SIZES: ${{ inputs.sizes }}
+          THROUGHPUT: ${{ inputs.throughput }}
+          HEAP: ${{ inputs.fuseki_heap }}
+          HOURS: ${{ inputs.hours }}
+        run: |
+          # The script that runs on the machine, with this run's settings in front.
+          {
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP"
+            cat deploy/azure-capacity/vm-run.sh
+          } > run.sh
+          az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \
+            --script @run.sh --async-execution true --timeout-in-seconds $((HOURS * 3600)) -o none
+          echo "Running on $VM; progress is in /var/log/veromesh-capacity.log on the machine."
+          state=""
+          for _ in $(seq $((HOURS * 60 + 30))); do
+            sleep 60
+            state=$(az vm run-command show -g "$RG" --vm-name "$VM" --name capacity --instance-view \
+              --query instanceView.executionState -o tsv 2>/dev/null || echo Unknown)
+            case "$state" in Succeeded|Failed|TimedOut|Canceled) break ;; esac
+            echo "$(date -u +%H:%M) $state"
+          done
+          az vm run-command show -g "$RG" --vm-name "$VM" --name capacity --instance-view \
+            --query instanceView.output -o tsv | tee results.txt
+          err=$(az vm run-command show -g "$RG" --vm-name "$VM" --name capacity --instance-view \
+            --query instanceView.error -o tsv)
+          [ -n "$err" ] && printf '\nErrors:\n%s\n' "$err"
+          {
+            echo "### $SIZE: $MODE ${SIZES}"
+            echo '```'
+            cat results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$state" = Succeeded ] || { echo "::error::The run on the machine ended: $state"; exit 1; }
+
+      - name: Delete the machine
+        if: always() && !inputs.keep_machine
+        run: |
+          if az vm show -g "$RG" -n "$VM" -o none 2>/dev/null; then
+            az vm delete -g "$RG" -n "$VM" --yes --force-deletion true -o none  # with its disk and network card
+          fi
+          if az network public-ip show -g "$RG" -n "$IP" -o none 2>/dev/null; then
+            az network public-ip delete -g "$RG" -n "$IP" -o none
+          fi
+          echo "Deleted $VM and $IP."
+
+      - name: Kept
+        if: always() && inputs.keep_machine
+        run: |
+          echo "::warning::$VM is still running and costs money until deleted: deploy/azure-capacity/teardown.sh machines"
