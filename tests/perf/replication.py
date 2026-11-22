@@ -90,6 +90,16 @@ def edit_lag(store, writer: str, replicas: list[str], n: int, base: str, ontolog
     """``n`` edits, one a second: each edit's time, and how long until each replica has it."""
     lags: list[float] = []
     edits: list[float] = []
+    # The first edit of a fresh process builds its view of the model; time it on its own.
+    t = time.perf_counter()
+    changesets.apply(
+        store,
+        source="hr",
+        items=[{"type": "people", "op": "upsert", "entity": {"id": "Person3-d0", "name": "First"}}],
+        base=base,
+        ontology_dir=ontology,
+    )
+    first = time.perf_counter() - t
     for i in range(n):
         item = {"type": "people", "op": "upsert", "entity": {"id": "Person3-d0", "name": f"Replicated {i}"}}
         t = time.perf_counter()
@@ -105,6 +115,7 @@ def edit_lag(store, writer: str, replicas: list[str], n: int, base: str, ontolog
     ms = lambda xs, p: round(pct(xs, p) * 1000, 1)  # noqa: E731
     return {
         "edits": n,
+        "first_edit_ms": round(first * 1000, 1),
         "edit_p50_ms": ms(edits, 50),
         "edit_max_ms": ms(edits, 100),
         "lag_p50_ms": ms(lags, 50),
@@ -220,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     out["edit_lag"] = e = edit_lag(store, a.writer, replicas, a.edits, capacity.BASE, capacity.ONTOLOGY)
     print(
-        f"Edits ({e['edits']}, one a second): edit p50 {e['edit_p50_ms']} ms, max {e['edit_max_ms']} ms; "
+        f"Edits ({e['edits']}, one a second, after a first edit of {e['first_edit_ms']} ms): edit p50 {e['edit_p50_ms']} ms, max {e['edit_max_ms']} ms; "
         f"replica lag p50 {e['lag_p50_ms']} ms, p95 {e['lag_p95_ms']} ms, max {e['lag_max_ms']} ms",
         flush=True,
     )

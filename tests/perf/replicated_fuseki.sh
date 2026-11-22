@@ -78,6 +78,10 @@ PREFIX fk:     <http://jena.apache.org/fuseki/kafka#>
     fk:syncTopic         true ;
     fk:replayTopic       false ;
     fk:config ( "isolation.level" "read_committed" ) ;
+    # Commit each change as soon as the replica has caught up. At the default (10) a
+    # quiet topic switches the connector to low-volume batching, which holds changes
+    # until a poll comes back empty: about 10 s behind the writer on every edit.
+    fk:config ( "fuseki.kafka.low.volume.threshold" "0" ) ;
     fk:config ( "auto.offset.reset" "earliest" ) ;
     fk:config ( "allow.auto.create.topics" "false" ) .
 EOF
