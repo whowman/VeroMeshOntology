@@ -3,7 +3,7 @@
 Veromesh adds the organizational ontology beside DataHub without forking it.
 
 ```
-  people (steward screen /steward)   agents (MCP /mcp)   connectors, spreadsheets
+  people (/steward, /admin)   agents (MCP /mcp)   connectors, spreadsheets
                      │                      │                     │
                      └──── OpenID Connect sign-in (Entra ID first, any provider) ───┘
                                             ▼
@@ -11,6 +11,7 @@ Veromesh adds the organizational ontology beside DataHub without forking it.
                  │   Veromesh service (FastAPI)                    │
                  │   model API · changesets · provenance           │
                  │   decision check · follow-up · measures         │
+                 │   licence · usage report · administration       │
                  └──────┬──────────────────┬──────────────┬───────┘
           SPARQL 1.1    │                  │ SQL          │  DataHub SDK
                         ▼                  ▼              ▼
@@ -18,7 +19,8 @@ Veromesh adds the organizational ontology beside DataHub without forking it.
           │ Jena Fuseki           │ │ PostgreSQL   │ │ DataHub v1.8.0 (unmodified)       │
           │ writer + read replicas│ │ decision log │ │  GMS + frontend + actions         │
           │ (Kafka) · model,      │ │ (append-only,│ │  + veromesh-ontology-model plugin │
-          │ sources, bindings     │ │  hash chain) │ │  glossary · bindings · products   │
+          │ sources, bindings     │ │  hash chain);│ │  glossary · bindings · products   │
+          │                       │ │ usage reports│ │                                   │
           └───────────────────────┘ └──────────────┘ └──────────────────────────────────┘
 ```
 
@@ -33,6 +35,7 @@ Veromesh adds the organizational ontology beside DataHub without forking it.
 | The organizational model and where each fact came from | Fuseki: one named graph per source, an effective graph, attestations | Precedence between sources and owner attestation need per-source claims |
 | Decisions about agents' actions, overrides and outcomes | PostgreSQL, the service's own database (`veromesh_decision_log`) | Append-only with a hash chain; auditors need it tamper-evident |
 | Data products' organizational context in the catalog | DataHub data product custom properties (`veromesh.*`) | People see owner roles and consumers where they browse data |
+| Usage reports and the licence | PostgreSQL, the decision log's database (`veromesh_usage_*`); the licence from a Secret or loaded in Administration | Reports are append-only, signed by the install and chained; the licence is signed by VeroMesh and checked offline (`service/README.md`, "Usage report", "Licence") |
 | Sign-in | The customer's OpenID Connect provider | No user store of our own; roles come from the token |
 | Backups | A nightly CronJob: the graph as N-Quads and the decision log as `pg_dump`, encrypted with age to the customer's keys, to object storage (`deploy/helm/README.md`, "Backups and restore") | Only the customer can read or restore them; a restore goes through the writer, so the replicas follow |
 | Encryption in transit | Istio ambient mesh (`mesh.enabled`): mutual TLS between pods, certificates from cert-manager signed by the customer's OpenBao (`deploy/mesh/README.md`) | One place for every certificate; Fuseki reachable only by the service's and the backup job's identities |
@@ -74,4 +77,5 @@ An edit, a decision check or a read takes time that depends on what it touches, 
 3. **Auth.** Done for the API: tokens from any OpenID Connect provider, Entra ID first, with five roles (`service/README.md`, "Sign-in"). Readers and agents get need-to-know answers: roles and limits, not personal details. Attestations and corrections are recorded as the signed-in person. An agent's sign-in is linked to its Agent in the model by its client ID (`GET /api/v1/me`). Decisions are recorded in an append-only, hash-chained log (`service/README.md`, "Decision log"). The decision check (`POST /api/v1/decisions/check`) answers allow, consult or refuse for an agent's action and writes to that log. Agents reach it through MCP at `/mcp` (docs/copilot-studio.md). People answer and overrule decisions, agents report outcomes, and the first measures come from the log (`service/README.md`, "After a decision"). People answer on the steward screen (`/steward`). Next: DataHub calls made as the caller rather than with a service token.
 4. **Ontology versioning.** Store `owl:versionInfo` on bindings and add a diff/impact endpoint ("which assets are affected if this class changes").
 5. **Production deploy.** Done as charts: DataHub's official Helm charts (Apache-2.0) plus a Veromesh chart for the service and Fuseki, with Fuseki replicated through Kafka (one writer, read replicas; see deploy/helm/README.md), nightly backups encrypted to the customer's keys with a tested restore, encryption at rest with the customer's keys (storage classes, managed databases), and encryption in transit through Istio's ambient mesh with certificates from OpenBao. Field-level encryption of personal data is in the backlog (issue #35). Not yet installed anywhere but kind in CI and local Docker; the first cloud install (Azure, beside the assessment) is what the Copilot Studio test waits for (issue #19).
-6. **Enforcement.** The decision check is advisory: an agent could skip it. A gateway in front of target systems, and optionally refusing agents with no current approved AI use case, come next.
+6. **Licensing.** Done in the product: a licence signed by VeroMesh and checked offline (warnings, grace, then read-only that never stops decision checks, the decision log or attestations), a signed monthly usage report of identities in scope, and the Administration area (`/admin`). Next: VeroMesh's own licensing system, which issues licences and receives reports (issue #56).
+7. **Enforcement.** The decision check is advisory: an agent could skip it. A gateway in front of target systems, and optionally refusing agents with no current approved AI use case, come next.

@@ -2,7 +2,7 @@
 
 The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
-What it does today (main, 21 November 2026):
+What it does today (main, 22 November 2026):
 
 - **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
 - **Kept true:** loaded from spreadsheets, CSV and connectors, one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
@@ -12,10 +12,11 @@ What it does today (main, 21 November 2026):
 - **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions, measures and the data element inventory.
 - **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
 - **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
-- **Enterprise scale:** measured on Fuseki with the PostgreSQL decision log at 100,000 people, one copy of the service on 4 CPUs: a decision check in 5 ms, 213 to 275 checks a second with up to 16 agents asking at once, none slower than 311 ms while edits arrive every second, and a nightly re-sync in 26 s ([docs/testing.md](docs/testing.md#capacity-on-fuseki)). The same runs on the Azure reference machines, up to 500,000 people, are ready to start ([deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)).
+- **Enterprise scale:** measured on the Azure reference machines with Fuseki and the PostgreSQL decision log. At 500,000 people (E16s v6, Premium SSD v2) a decision check takes 4 ms and an edit 226 ms, a nightly re-sync 104 s and the first load 46 minutes. One copy of the service answers 412 checks a second; two copies, each following the other's changes from records in the store, answer 544 while the model is not being edited and 425 with an edit every second. Fuseki needs low-latency storage ([docs/testing.md](docs/testing.md#capacity-on-fuseki), [deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)).
+- **Licensing and usage:** a licence signed by VeroMesh and checked offline, with warnings, 30 days of grace, then read-only (decision checks, the decision log and attestations keep working); a signed, chained monthly usage report of identities in scope, sent to VeroMesh by SMTP, sendmail or Microsoft 365; and an Administration area (`/admin`) for both ([service/README.md](service/README.md)).
 - **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
-Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, VeroMesh's own licensing system (issue #56), and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
 
 DataHub runs **unmodified** from its official images; Veromesh extends it with a custom-model plugin and its APIs. See [docs/architecture.md](docs/architecture.md).
 
