@@ -27,9 +27,11 @@ from __future__ import annotations
 import bisect
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
+import time
 import weakref
 from collections import Counter
 from dataclasses import dataclass, field
@@ -42,8 +44,9 @@ from . import clock, validation
 from . import entities as E
 from . import provenance as P
 from .compactgraph import CompactMemory, compact_graph, decode, encode
-from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached
+from .modelcache import ONTOLOGY_HASH, ONTOLOGY_SUBJECT, VERSION_GRAPH, VersionedStore, cached, set_follower
 
+_log = logging.getLogger("veromesh.incremental")
 _LOCK = threading.RLock()
 STATS: Counter = Counter()  # "fast" and "full": which path planned each changeset (for tests and the bench)
 
@@ -940,10 +943,23 @@ def follow(store, base: str | None = None) -> State | None:
             version, change = got
             chain.append(change)
         if version != have:
+            why = f"no record for version {version}" if len(chain) < FOLLOW_MAX else "too far behind"
+            _log.warning(
+                "following %s from %s to %s: %s after %d records; reading the model",
+                base,
+                have,
+                now,
+                why,
+                len(chain),
+            )
+            STATS["follow-missing" if len(chain) < FOLLOW_MAX else "follow-too-far"] += 1
             chain = []
+    else:
+        STATS["follow-nothing-held"] += 1
     if not chain:
         store.prime(("no-follow", base), now, True)
         return None
+    t0 = time.perf_counter()
     st = held[1]
     readers = store.entries_at(have)
     lists = {t: readers.get(("entities", t, base, None)) for t in E.TYPES}
@@ -956,15 +972,64 @@ def follow(store, base: str | None = None) -> State | None:
             keys += k
             nodes |= n
     except Exception:  # noqa: BLE001 — a record this copy cannot apply: read the model instead
+        _log.exception("following %s to %s: a record could not be applied; reading the model", base, now)
+        STATS["follow-failed"] += 1
         with store._lock:
             store._cache.pop(key, None)
         store.prime(("no-follow", base), now, True)
         return None
-    for k, v in _reader_primes(store, st, lists, believed, readers, keys, nodes).items():
+    t1 = time.perf_counter()
+    primes = _reader_primes(store, st, lists, believed, readers, keys, nodes)
+    t2 = time.perf_counter()
+    with store._lock:
+        # Checks that began at the version followed from (they pin it) still find its values,
+        # as after this process's own write; not the planner's state, which moved on.
+        store._previous = (
+            have,
+            {k: v for k, v in readers.items() if not (isinstance(k, tuple) and k[:1] == ("incremental",))},
+        )
+    for k, v in primes.items():
         store.prime(k, now, v)
     store.prime(key, now, st)
     STATS["followed"] += len(chain)
+    _log.debug(
+        "followed %d change(s) to %s: replay %.0f ms, readers %.0f ms (%s)",
+        len(chain),
+        now,
+        (t1 - t0) * 1000,
+        (t2 - t1) * 1000,
+        ", ".join(sorted(str(k[0]) for k in primes)),
+    )
     return st
+
+
+_FOLLOWING = threading.local()
+
+
+def _follow_before_reading(store, version: str) -> bool:
+    """modelcache's follower: on a reader's miss at ``version``, follow other copies'
+    changes to it once (True when values were carried forward)."""
+    if not enabled() or getattr(_FOLLOWING, "on", False):
+        return False
+    with store._lock:
+        bases = [k[1] for k in store._cache if isinstance(k, tuple) and k[:1] == ("incremental",)]
+    if len(bases) != 1:
+        return False  # nothing held to follow from (a copy that never planned or checked)
+    if store.peek_at(("incremental", bases[0]), version) is not None:
+        store.followed = version
+        return False
+    if not _LOCK.acquire(timeout=P.PLANNER_WAIT):
+        return False
+    _FOLLOWING.on = True
+    try:
+        if store.followed == version:  # another reader followed while this one waited
+            return True
+        st = follow(store, bases[0])
+        store.followed = version
+        return st is not None
+    finally:
+        _FOLLOWING.on = False
+        _LOCK.release()
 
 
 _WARMED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # store -> bases a state was built for
@@ -990,7 +1055,11 @@ def warm(store, base: str) -> None:
     try:
         if follow(store, base) is None and store.peek_at(key, now) is None:
             tried.add(base)
+            t0 = time.perf_counter()
             store.prime(key, now, _build(store, base))
+            store.followed = now
+            STATS["built"] += 1
+            _log.info("planner state for %s built in %.1f s", base, time.perf_counter() - t0)
     finally:
         _LOCK.release()
 
@@ -1130,3 +1199,6 @@ class _Null:
 
     def __exit__(self, *exc):
         return False
+
+
+set_follower(_follow_before_reading)

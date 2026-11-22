@@ -479,3 +479,26 @@ def shared_store(inner):
     from veromesh.modelcache import VersionedStore
 
     return VersionedStore(inner)
+
+
+def test_a_reader_in_a_replica_finds_its_list_carried_forward(monkeypatch):
+    """Copy two has read the people list; copy one adds a person. Copy two's next read
+    at the new version follows first and finds the list carried forward with the new
+    person, instead of rebuilding it from the model."""
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0
+    C.apply(one, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    incremental.warm(two, BASE)
+    before = C.list_entities(two, "people", BASE)
+    C.apply(one, source="hr", items=[person("Newcomer")], base=BASE, ontology_dir=ONT)
+    rebuilt = []
+    real = C.entity_rows
+    monkeypatch.setattr(C, "entity_rows", lambda *a: rebuilt.append(a[1]) or real(*a))
+    followed = incremental.STATS["followed"]
+    after = C.list_entities(two, "people", BASE)
+    assert {e["id"] for e in after} == {e["id"] for e in before} | {"Newcomer"}
+    assert incremental.STATS["followed"] == followed + 1 and "people" not in rebuilt

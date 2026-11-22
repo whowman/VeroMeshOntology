@@ -43,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import orggen  # noqa: E402
-from veromesh import changesets, decide, decisions, gcsetup  # noqa: E402
+from veromesh import changesets, decide, decisions, gcsetup, incremental  # noqa: E402
 from veromesh import provenance as P  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
@@ -323,6 +323,7 @@ def _measure(
             changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
 
     check_once(store, log, pool[0])  # warm
+    stats_before = dict(incremental.STATS)
     threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in slots]
     if edit_every:
         threads.append(threading.Thread(target=editor, name="editor", daemon=True))
@@ -338,7 +339,13 @@ def _measure(
         for t in threads:
             t.join()
         elapsed = time.perf_counter() - start
+    planner = {
+        k: incremental.STATS[k] - stats_before.get(k, 0)
+        for k in incremental.STATS
+        if k != "fast" and k != "full" and incremental.STATS[k] != stats_before.get(k, 0)
+    }
     return {
+        "planner": planner,
         "latencies": latencies,
         "elapsed": elapsed,
         "edits": edits[0],
@@ -378,7 +385,12 @@ def _combine(parts: list[dict], concurrency: int, edit_every: float | None) -> d
     check, the worst pause of any copy, and each copy on its own."""
     every = [x for p in parts for x in p["latencies"]]
     per_copy = [
-        {**_stats(p["latencies"], p["elapsed"]), "rss_mb": p.get("rss_mb", 0), "gc_max_ms": p["gc_max_ms"]}
+        {
+            **_stats(p["latencies"], p["elapsed"]),
+            "rss_mb": p.get("rss_mb", 0),
+            "gc_max_ms": p["gc_max_ms"],
+            "planner": p.get("planner", {}),
+        }
         for p in parts
     ]
     out = {
@@ -400,6 +412,14 @@ def serve_copy(store_spec: str, log_spec: str) -> int:
     """``capacity.py copy``: one more copy of the service for ``throughput``. Reads what
     to ask (one JSON line), warms its model, says ready, starts on go, prints its result
     and waits for the next run, until quit or the end of its input."""
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO, format="copy %(process)d %(levelname)s %(name)s: %(message)s", stream=sys.stderr
+    )
+    logging.getLogger("veromesh.incremental").setLevel(
+        logging.DEBUG
+    )  # each change followed, and how long it took
     store = make_store(store_spec)
     log = decisions.make_log(log_spec)
     warm = False
@@ -459,6 +479,7 @@ def throughput_table(runs: list[dict]) -> str:
             lines.append(
                 f"      copy {j + 1}: {c['checks_per_s']} checks/s, p99 {c['p99_ms']} ms,"
                 f" max {c['max_ms']} ms, {c['rss_mb']:.0f} MB, gc max {c['gc_max_ms']} ms"
+                + (f", planner {c['planner']}" if c.get("planner") else "")
             )
     return "\n".join(lines)
 
