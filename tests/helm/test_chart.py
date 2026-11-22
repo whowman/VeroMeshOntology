@@ -187,6 +187,7 @@ def test_default_install_resources():
         "NetworkPolicy/veromesh-fuseki",
         "Pod/veromesh-test",
         "PodDisruptionBudget/veromesh-fuseki-replica",
+        "Secret/veromesh-api-usage-key",
         "Service/veromesh-api",
         "Service/veromesh-fuseki",
         "Service/veromesh-fuseki-headless",
