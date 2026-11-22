@@ -44,6 +44,12 @@
       "422"
     ]
   },
+  "GET /api/v1/attestations/verify": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/authorities/{rid}/confirmation": {
     "params": [
       "rid (path)"
