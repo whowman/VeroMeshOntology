@@ -93,9 +93,10 @@ def run(
     seconds: float = 5.0,
     edits_every: float | None = None,
     copies: int = 1,
+    read_fallback: str | None = None,
 ) -> dict:
     gcsetup.after_startup()  # as the service does once it has started
-    store = make_store(store_spec)
+    store = make_store(store_spec, read_fallback=read_fallback)
     batches = orggen.organization(domains, people)
     counts = orggen.counts(batches)
     log = decisions.make_log(log_spec)
@@ -288,6 +289,10 @@ def main(argv: list[str] | None = None) -> int:
         help="also measure with an edit every this many seconds",
     )
     ap.add_argument(
+        "--read-fallback",
+        help="a read replica's dataset URL, read while the writer is down (a replicated Fuseki)",
+    )
+    ap.add_argument(
         "--copies",
         type=int,
         default=1,
@@ -313,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    r = run(domains, people, a.store, a.repeat, a.log, conc, a.seconds, a.edits_every, a.copies)
+    r = run(
+        domains, people, a.store, a.repeat, a.log, conc, a.seconds, a.edits_every, a.copies, a.read_fallback
+    )
     r["size"] = size
     print(report(r))
     if a.copies > 1:  # every copy must have answered, and none may have failed a check
