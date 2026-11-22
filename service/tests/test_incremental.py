@@ -374,3 +374,46 @@ def test_an_edit_builds_the_lists_readers_use_even_when_none_is_cached():
     assert held is not None, "the edit carried no people list forward"
     assert held == C.entity_rows(P._effective_graph(store), "people", BASE)
     assert any(e.get("id") == "Zed" for _, e in held)
+
+
+def test_a_check_in_one_replica_follows_an_edit_made_in_another(monkeypatch):
+    """Two copies of the service over one store (what capacity.py --copies runs): an
+    authority narrowed through one changes the other's decision once its version ages out."""
+    import time
+    from datetime import date
+
+    from veromesh import decide
+    from veromesh import decisions as D
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0.1
+    monkeypatch.setenv("VEROMESH_INCREMENTAL", "on")
+    C.apply(one, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+
+    agent = item("agents", "InvoiceAssistant")["entity"]
+
+    def ask() -> dict:
+        return decide.check(
+            two,
+            BASE,
+            D.MemoryLog(),
+            agent="InvoiceAssistant",
+            action="ApproveSupplierInvoice",
+            amount=3000,
+            currency="USD",
+            subject=agent["signInClientId"],
+            on=date(2026, 11, 16),
+            require_attested=False,
+        )
+
+    before = ask()
+    assert not any("above its limit" in r for r in before["reasons"])
+    narrowed = item("authorities", "AssistantApprovalAuthority", limitAmount="1000")
+    C.apply(one, source="hr", items=[narrowed], base=BASE, ontology_dir=ONT)
+    time.sleep(0.15)
+    after = ask()
+    assert after["outcome"] == "refuse"
+    assert any("above its limit of 1,000 USD" in r for r in after["reasons"])

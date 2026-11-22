@@ -36,6 +36,9 @@ on:
       throughput:
         description: "bench: concurrencies for checks per second"
         default: "1,4,16"
+      copies:
+        description: "bench: copies of the service to spread the agents over (more than 1 needs fuseki and postgresql)"
+        default: "1"
       grow_step:
         description: "grow: domains of 1,000 people loaded between measurements"
         default: "10"
@@ -103,6 +106,7 @@ jobs:
           STORE: ${{ inputs.store }}
           LOG: ${{ inputs.log }}
           THROUGHPUT: ${{ inputs.throughput }}
+          COPIES: ${{ inputs.copies }}
           GROW_STEP: ${{ inputs.grow_step }}
           STOP_RSS_GB: ${{ inputs.stop_rss_gb }}
           DIAGNOSE: ${{ inputs.diagnose }}
@@ -128,7 +132,7 @@ jobs:
               --stop-rss-gb "$STOP_RSS_GB" --out capacity-results/grow.json
           else
             python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear \
-              --throughput "$THROUGHPUT" --edits-every 1 --out "capacity-results/bench-$SIZE.json"
+              --throughput "$THROUGHPUT" --edits-every 1 --copies "$COPIES" --out "capacity-results/bench-$SIZE.json"
           fi
       - name: Where the interpreter lock was held
         if: always() && inputs.diagnose != '0'

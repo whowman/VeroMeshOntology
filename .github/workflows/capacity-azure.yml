@@ -42,6 +42,11 @@ on:
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
+      copies:
+        description: "bench: copies of the service to spread the agents over (2: separate processes on the one Fuseki and PostgreSQL)"
+        type: choice
+        options: ["1", "2", "3"]
+        default: "1"
       hours:
         description: "the most the run may take on the machine before it is stopped"
         default: "6"
@@ -154,10 +159,11 @@ jobs:
           HEAP: ${{ inputs.fuseki_heap }}
           HOURS: ${{ inputs.hours }}
           STORAGE: ${{ inputs.storage }}
+          COPIES: ${{ inputs.copies }}
         run: |
           # The script that runs on the machine, with this run's settings in front.
           {
-            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE"
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\nCOPIES=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE" "$COPIES"
             cat deploy/azure-capacity/vm-run.sh
           } > run.sh
           az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \
@@ -177,7 +183,7 @@ jobs:
             --query instanceView.error -o tsv)
           [ -n "$err" ] && printf '\nErrors:\n%s\n' "$err"
           {
-            echo "### $SIZE, storage ${{ inputs.storage }}, ${{ inputs.disk_gb }} GB OS disk: $MODE ${SIZES}"
+            echo "### $SIZE, storage ${{ inputs.storage }}, ${{ inputs.disk_gb }} GB OS disk, copies ${{ inputs.copies }}: $MODE ${SIZES}"
             echo '```'
             cat results.txt
             echo '```'

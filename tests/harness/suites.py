@@ -162,12 +162,16 @@ SUITES: list[Suite] = [
         name="perf-fuseki",
         component="service",
         tier="integration",
-        needs=frozenset({"fuseki"}),
-        description="Performance on a real Fuseki: the small synthetic organization (about 2,000 people), timings only",
+        needs=frozenset({"fuseki", "postgres"}),
+        description="Performance on a real Fuseki: the small synthetic organization (about 2,000 people), timings only;"
+        " and two copies of the service on one Fuseki and PostgreSQL log, following each other's edits",
         covers=("tests/perf",),
         steps=(
             "PYTHONPATH=service/src python tests/perf/bench.py --size small --store fuseki:{fuseki} --clear"
             " --out {results}/perf-fuseki-small.json",
+            "PYTHONPATH=service/src python tests/perf/bench.py --size smoke --store fuseki:{fuseki} --clear"
+            " --log {postgres} --copies 2 --throughput 4 --seconds 2 --edits-every 0.5"
+            " --out {results}/perf-fuseki-two-copies.json",
         ),
     ),
     Suite(
