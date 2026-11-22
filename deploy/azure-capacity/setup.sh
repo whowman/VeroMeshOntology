@@ -42,7 +42,7 @@ FAMILY_E="Standard Esv6 Family vCPUs"
 say() { printf '\n== %s\n' "$*"; }
 
 quota() {
-  say "vCPU quota in $LOCATION (needed: Dsv6 $NEED_D, Esv6 $NEED_E, all regional $((NEED_E + 4)))"
+  say "vCPU quota in $LOCATION (free vCPU needed: Dsv6 $NEED_D, Esv6 $NEED_E, all regional $NEED_E)"
   local short=0
   # Match on the display name, ignoring case: Azure spells the families' internal names
   # inconsistently (standardDSv5Family, standardDsv6Family, ...).
@@ -52,7 +52,7 @@ quota() {
     case "$name" in
       "$FAMILY_D") need=$NEED_D ;;
       "$FAMILY_E") need=$NEED_E ;;
-      "Total Regional vCPUs") need=$((NEED_E + 4)) ;;  # the largest machine, beside a 4-vCPU AKS
+      "Total Regional vCPUs") need=$NEED_E ;;  # the largest machine, beside whatever already runs there
     esac
     shopt -u nocasematch
     [ "$need" -lt 0 ] && continue
@@ -75,6 +75,15 @@ raise() {
   say "Asking for $NEED_E vCPU of $FAMILY_E ($esv6)"
   az quota update --resource-name "$esv6" --scope "$scope" --limit-object value="$NEED_E" \
     --resource-type dedicated --query "properties.limit.value" -o tsv
+  # The regional total must leave room for the largest machine beside what already runs there.
+  local used limit
+  read -r used limit < <(az vm list-usage -l "$LOCATION" --query "[?localName=='Total Regional vCPUs'] | [0].[currentValue, limit]" -o tsv)
+  if [ $((limit - used)) -lt "$NEED_E" ]; then
+    sleep 20  # the family increase above can still be updating the regional total
+    say "Asking for $((used + NEED_E)) vCPU in all for the region"
+    az quota update --resource-name cores --scope "$scope" --limit-object value=$((used + NEED_E)) \
+      --resource-type dedicated --query "properties.limit.value" -o tsv
+  fi
   quota
 }
 

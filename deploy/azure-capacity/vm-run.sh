@@ -29,6 +29,10 @@ fail() {
   exit 1
 }
 step() { echo "[$(date -u +%H:%M:%S)] $*" >>"$LOG"; }
+# Any command that fails outside a "|| fail" stops the run with the end of the log, so a
+# failure is never silent (Azure would return only "Failed").
+set -E
+trap 'fail "line $LINENO: $BASH_COMMAND"' ERR
 
 {
   step "machine"
@@ -54,33 +58,43 @@ step "packages"
 data_device() {
   case "$STORAGE" in
     local-nvme) lsblk -dnpo NAME,MODEL | awk '/Direct Disk/ {print $1; exit}' ;;
-    premium-ssd-v2)  # the managed disk with no partitions and nothing mounted: not the OS disk
-      for d in $(lsblk -dnpo NAME,MODEL | awk '/NVMe Accelerator/ {print $1}'); do
-        [ "$(lsblk -nro NAME "$d" | wc -l)" = 1 ] && [ -z "$(lsblk -nro MOUNTPOINT "$d" | tr -d '[:space:]')" ] && { echo "$d"; return; }
+    premium-ssd-v2)  # the attached disk: not the local drive, no partitions, nothing mounted
+      local d
+      for d in $(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" {print $1}'); do
+        lsblk -dno MODEL "$d" | grep -q "Direct Disk" && continue
+        [ "$(lsblk -nro NAME "$d" | wc -l)" = 1 ] || continue
+        [ -z "$(lsblk -nro MOUNTPOINT "$d" | tr -d '[:space:]')" ] || continue
+        echo "$d"
+        return
       done ;;
   esac
 }
 DATA_ON="network disk (the OS disk, premium SSD)"
 if [ "$STORAGE" != os-disk ]; then
   step "storage: $STORAGE"
-  {
-    lsblk -dnpo NAME,MODEL,SIZE,MOUNTPOINT
-    for _ in $(seq 30); do dev=$(data_device); [ -n "$dev" ] && break; sleep 2; done  # an attached disk can take a moment
-    [ -n "$dev" ]
+  (
+    lsblk -dnpo NAME,MODEL,SIZE,TYPE,MOUNTPOINT
+    dev=""
+    for _ in $(seq 60); do dev=$(data_device); [ -n "$dev" ] && break; sleep 2; done  # an attached disk can take a moment
+    [ -n "$dev" ] || { echo "no disk found for $STORAGE"; exit 1; }
+    echo "using $dev"
+    # Each step checked: "set -e" does not apply in a block whose failure "|| fail" handles.
     mnt=$(lsblk -nro MOUNTPOINT "$dev" | awk 'NF {print; exit}')
     if [ -z "$mnt" ]; then
-      mkfs.ext4 -F -q "$dev"
+      mkfs.ext4 -F -q "$dev" || exit 1
       mnt=/mnt/data
-      mkdir -p "$mnt"
-      mount -o noatime,discard "$dev" "$mnt"
+      mkdir -p "$mnt" || exit 1
+      mount -o noatime,discard "$dev" "$mnt" || exit 1
     fi
-    systemctl stop docker docker.socket
-    mkdir -p "$mnt/docker"
-    printf '{"data-root": "%s/docker"}\n' "$mnt" > /etc/docker/daemon.json
-    systemctl start docker
-    docker info --format '{{.DockerRootDir}}'
-  } >>"$LOG" 2>&1 || fail "putting Docker's data on the $STORAGE disk (does this machine have one?)"
-  dev=$(data_device)
+    mountpoint -q "$mnt" || { echo "$mnt is not mounted"; exit 1; }
+    systemctl stop docker docker.socket || exit 1
+    mkdir -p "$mnt/docker" || exit 1
+    printf '{"data-root": "%s/docker"}\n' "$mnt" > /etc/docker/daemon.json || exit 1
+    systemctl start docker || exit 1
+    docker info --format '{{.DockerRootDir}}' | grep -q "$mnt/docker" || { echo "Docker did not move to $mnt"; exit 1; }
+    echo "$dev" > /run/veromesh-data-device
+  ) >>"$LOG" 2>&1 || fail "putting Docker's data on the $STORAGE disk (does this machine have one?)"
+  dev=$(cat /run/veromesh-data-device)
   DATA_ON="$STORAGE ($(lsblk -dnpo NAME,MODEL,SIZE "$dev" | tr -s ' '))"
 fi
 

@@ -54,7 +54,9 @@ At the end it checks the vCPU quota, and prints the five values for GitHub.
 **Quota.** One machine runs at a time, so each family needs room for its largest machine:
 - Dsv6: 8 vCPU, for the D8s v6. The subscription has 10.
 - Esv6: 16 vCPU, for the E16s v6 (500,000 people). The subscription has 10.
-- Total regional vCPUs: 20, the largest machine beside the 4 the assessment's AKS uses.
+- Total regional vCPUs: 16 free, room for the largest machine beside whatever already runs in the region (in West US 2 the assessment's AKS uses 4).
+
+**Zones.** Premium SSD v2 (`storage: premium-ssd-v2`) needs a machine in an availability zone. This subscription may not use zones in West US 2 (`NotAvailableForSubscription`; check with `az vm list-skus -l <region> --size Standard_D4s_v6 --all`), so the runs moved to West US 3: `RESOURCE_GROUP=veromesh-capacity-wus3 LOCATION=westus3 ./setup.sh`, then the new client ID, resource group and location in the GitHub environment.
 
 If `setup.sh` reports "TOO LOW", run `./setup.sh raise`, which asks Azure for the Esv6 increase, or raise it in the portal under **Quotas → Compute**. In the portal, choose the region and set the usage filter to show all, since families with nothing in use are hidden by default. It's free and usually approved in minutes. The D runs and the E8s run fit the quota as it is, so they can go ahead meanwhile.
 
