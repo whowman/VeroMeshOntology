@@ -54,7 +54,9 @@ At the end it checks the vCPU quota, and prints the five values for GitHub.
 **Quota.** One machine runs at a time, so each family needs room for its largest machine:
 - Dsv6: 8 vCPU, for the D8s v6. The subscription has 10.
 - Esv6: 16 vCPU, for the E16s v6 (500,000 people). The subscription has 10.
-- Total regional vCPUs: 20, the largest machine beside the 4 the assessment's AKS uses.
+- Total regional vCPUs: 16 free, room for the largest machine beside whatever already runs in the region (in West US 2 the assessment's AKS uses 4).
+
+**Zones.** Premium SSD v2 (`storage: premium-ssd-v2`) needs a machine in an availability zone. This subscription may not use zones in West US 2 (`NotAvailableForSubscription`; check with `az vm list-skus -l <region> --size Standard_D4s_v6 --all`), so the runs moved to West US 3: `RESOURCE_GROUP=veromesh-capacity-wus3 LOCATION=westus3 ./setup.sh`, then the new client ID, resource group and location in the GitHub environment.
 
 If `setup.sh` reports "TOO LOW", run `./setup.sh raise`, which asks Azure for the Esv6 increase, or raise it in the portal under **Quotas → Compute**. In the portal, choose the region and set the usage filter to show all, since families with nothing in use are hidden by default. It's free and usually approved in minutes. The D runs and the E8s run fit the quota as it is, so they can go ahead meanwhile.
 
@@ -76,6 +78,8 @@ They are identifiers, not secrets: without the federated credential, nobody can 
 | `mode` | `bench` times each size. `grow` loads 20,000 people at a time, measuring after each step, until the service holds 60% of the machine's memory |
 | `sizes` | For `bench`, the sizes in order: `medium` (20,080 people), `large` (100,200), `xl` (500,000; E machines only) |
 | `throughput` | Concurrencies for checks per second, default `1,4,16` |
+| `disk_gb` | The machine's premium disk, which Fuseki writes to: `128` (P10, 500 operations a second), `512` (P20, 2,300) or `1024` (P30, 5,000). Premium disks get faster with size. The first D4s v6 run, on 128 GB, wrote 2–4 times slower than a GitHub runner; a larger disk costs about $0.03 (512) or $0.17 (1024) an hour more |
+| `storage` | Where Fuseki and PostgreSQL keep their data. `os-disk` is the machine's network-attached premium disk. `local-nvme` is the local NVMe drive of a size that has one (`Standard_D4ds_v6`); it's wiped when the machine stops, so it's for measuring only. `premium-ssd-v2` is an attached 128 GB Premium SSD v2 disk (low latency, durable), with the machine placed in availability zone 1, which that disk needs. Every Fuseki commit waits for the disk: on a D4s v6 an edit took 380–440 ms on the OS disk and 68–83 ms on the local drive |
 | `fuseki_heap` | Fuseki's Java heap. `auto` is a quarter of the machine's memory |
 | `hours` | The most the run may take on the machine (1–6). It is stopped after that, and the machine is still deleted |
 | `keep_machine` | Leave the machine running at the end, to look around. Delete it afterwards with `teardown.sh machines` |
