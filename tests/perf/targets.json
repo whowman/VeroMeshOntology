@@ -247,6 +247,35 @@
       "memory_peak_mb": 15339,
       "load_last_domain_s": 10.86
     },
-    "_azure_date": "2026-11-21, Azure reference machines (deploy/azure-capacity), PostgreSQL decision log on the same machine, one copy of the service"
+    "_azure_date": "2026-11-21, Azure reference machines (deploy/azure-capacity), PostgreSQL decision log on the same machine, one copy of the service",
+    "azure_xl_two_copies": {
+      "_note": "Azure Standard_E16s_v6 (16 vCPU, 128 GB), Fuseki 31g heap, Premium SSD v2, westus3, two copies of the service on one Fuseki and PostgreSQL, run 45058518832 (main 6b4d318: replicas follow each other's changes, PR #53 and #55). With edits: one edit a second attempted; under load each took about 2.6 s, so 0.38 landed a second",
+      "people": 501000,
+      "triples": 3086000,
+      "load_total_s": 2788.04,
+      "edit_s": 0.226,
+      "check_s": 0.004,
+      "check_after_edit_s": 0.006,
+      "read_people_s": 0.493,
+      "resync_s": 103.63,
+      "memory_mb_per_copy": 12113,
+      "checks_per_s": {
+        "1": 218.1,
+        "4": 352.0,
+        "16": 495.3,
+        "32": 544.3,
+        "32_with_edits": 424.7
+      },
+      "p99_ms": {
+        "16": 46.4,
+        "32": 86.1,
+        "32_with_edits": 340.2
+      },
+      "max_check_ms_with_edits": 494.1,
+      "second_copy": {
+        "followed_with_edits": 1,
+        "rebuilt": 0
+      }
+    }
   }
 }
