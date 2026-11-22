@@ -93,6 +93,9 @@ class VersionedStore:
         self._local = threading.local()
         self._flights: dict[Any, _Flight] = {}
         self._pending: dict[Any, tuple[str, Any]] = {}  # a batch's primes, until its version lands
+        # The last version this process followed, wrote or tried to follow (incremental.follow):
+        # a reader missing a value at another version first lets the planner catch up.
+        self.followed: str | None = None
 
     def _batch(self) -> Batch | None:
         return getattr(self._local, "batch", None)
@@ -157,6 +160,7 @@ class VersionedStore:
                         },
                     )
                 self._newest = b.version
+                self.followed = b.version  # this process's own write: nothing to follow
                 self._writes += 1
                 self._seen = (b.version, time.monotonic())  # this process's write: seen at once
                 self._cache.clear()
@@ -299,7 +303,9 @@ class VersionedStore:
         )["results"]["bindings"]
         v = rows[0]["v"]["value"] if rows else "0"
         with self._lock:
-            if self._writes == writes:  # no write of ours landed meanwhile: this read is current
+            # No write of ours landed meanwhile, and no read asked later has answered first
+            # (two reads racing: the one asked later is the newer, whatever order they end in).
+            if self._writes == writes and (self._seen is None or t >= self._seen[1]):
                 self._newest = v
                 self._seen = (v, t)  # as of when it was asked for
         return v
@@ -336,6 +342,17 @@ class _Flight:
         self.failed = False
 
 
+# Called on a miss at a version this process has not followed yet (incremental sets it):
+# it brings the planner's state and the readers' values forward from the records other
+# copies wrote, so the reader finds its value carried forward instead of rebuilding it.
+_FOLLOWER: Callable[[Any, str], bool] | None = None
+
+
+def set_follower(fn: Callable[[Any, str], bool] | None) -> None:
+    global _FOLLOWER
+    _FOLLOWER = fn
+
+
 def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     """``compute()``, reused until the model changes. Stores without versions are not cached.
 
@@ -354,6 +371,16 @@ def cached(store: Any, key: Any, compute: Callable[[], T]) -> T:
     prev = store._previous
     if prev is not None and prev[0] == version and key in prev[1]:
         return prev[1][key]  # a reader that began before this process's last write
+    follower = _FOLLOWER
+    if (
+        follower is not None
+        and store.followed != version
+        and not (isinstance(key, tuple) and key[:1] in (("incremental",), ("no-follow",)))
+        and follower(store, version)
+    ):
+        hit = store._cache.get(key)
+        if hit is not None and hit[0] == version:
+            return hit[1]
     with store._lock:
         flight = store._flights.get((key, version))
         leader = flight is None

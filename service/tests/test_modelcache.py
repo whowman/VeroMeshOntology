@@ -215,3 +215,33 @@ def test_a_reader_pinned_before_a_write_keeps_its_values():
     finally:
         store._local.pinned = None
     assert cached(store, "n", lambda: count(store)) == 3
+
+
+def test_a_slow_version_read_never_replaces_a_newer_one():
+    """Two readers ask for the version at almost the same time; the one asked first
+    answers last, with the older version. The newer one stays (a copy that only reads
+    must not fall back to a version it has already followed past)."""
+    import threading
+    import time
+
+    gate = threading.Event()
+
+    class Racing(MemoryStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.answers = iter(["old", "new"])
+
+        def query(self, sparql):
+            v = next(self.answers)
+            if v == "old":
+                gate.wait(5)  # answers after the later question
+            return {"results": {"bindings": [{"v": {"value": v}}]}}
+
+    store = VersionedStore(Racing())
+    slow = threading.Thread(target=store._read_version)
+    slow.start()
+    time.sleep(0.05)
+    assert store._read_version() == "new"
+    gate.set()
+    slow.join()
+    assert store._seen[0] == "new" and store._newest == "new"
