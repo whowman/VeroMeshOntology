@@ -39,6 +39,11 @@ on:
         type: choice
         options: [os-disk, local-nvme, premium-ssd-v2]
         default: os-disk
+      fuseki:
+        description: "single: one Fuseki; replicated: a writer and two read replicas through Kafka, then the replication measurements"
+        type: choice
+        options: [single, replicated]
+        default: single
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
@@ -160,10 +165,11 @@ jobs:
           HOURS: ${{ inputs.hours }}
           STORAGE: ${{ inputs.storage }}
           COPIES: ${{ inputs.copies }}
+          FUSEKI: ${{ inputs.fuseki }}
         run: |
           # The script that runs on the machine, with this run's settings in front.
           {
-            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\nCOPIES=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE" "$COPIES"
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\nCOPIES=%q\nFUSEKI=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE" "$COPIES" "$FUSEKI"
             cat deploy/azure-capacity/vm-run.sh
           } > run.sh
           az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \

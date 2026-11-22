@@ -131,7 +131,8 @@ case "${1:-}" in
     ;;
   replica) replica "$2" ;;
   stop)
-    docker rm -f fuseki kafka $(docker ps -aq --filter "name=fuseki-r") >/dev/null 2>&1 || true
+    mapfile -t replicas < <(docker ps -aq --filter "name=fuseki-r")
+    docker rm -f fuseki kafka "${replicas[@]}" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
     ;;
   *)
