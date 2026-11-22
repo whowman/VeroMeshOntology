@@ -4,6 +4,8 @@
 # dependency aliases defined inside create_app() at runtime.
 
 import logging
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
@@ -31,6 +33,7 @@ from . import (
     entities,
     followup,
     gcsetup,
+    incremental,
     licence,
     mcp_server,
     suggest,
@@ -161,6 +164,8 @@ def create_app(
             )
         validation.start_worker(s.ontology_dir)  # so the first edit does not wait for it
         gcsetup.after_startup()  # libraries loaded: full collections need not visit them again
+        if s.warm_on_start:
+            threading.Thread(target=warm_planner, args=(app, s), name="veromesh-warm", daemon=True).start()
         job = usage.Job(lambda: usage_of(app), s.usage_interval_s).start() if s.usage_job else None
         try:
             async with app.state.mcp.session_manager.run():
@@ -181,6 +186,24 @@ def create_app(
     app.state.settings = settings
     app.state.decision_log = decision_log
     app.state.usage = None
+    app.state.planner = "not started"
+
+    def warm_planner(a: FastAPI, c: Settings) -> None:
+        """Build the planner state edits and checks share, so the first of them after a
+        start does not build it (about 30 s at 20,000 people, minutes at 500,000). An edit
+        that arrives meanwhile waits for this build rather than starting another."""
+        a.state.planner = "warming"
+        t0 = time.perf_counter()
+        try:
+            if a.state.service is None:
+                a.state.service = build_service(c)
+            incremental.warm(a.state.service.store, c.instance_base)
+        except Exception:  # the first edit or check builds it instead
+            a.state.planner = "not warmed"
+            log.exception("Could not build the planner state at startup")
+            return
+        a.state.planner = "ready"
+        log.info("Planner state ready %.1f s after startup", time.perf_counter() - t0)
 
     def usage_of(a: FastAPI) -> usage.Usage:
         """The install's usage reports (built on first use, kept with the app)."""
@@ -325,7 +348,9 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        # planner: whether this copy has built the state edits and checks use (warming,
+        # ready). It does not change the status: requests are served while it builds.
+        return {"status": "ok", "version": __version__, "planner": app.state.planner}
 
     @app.get("/ontologies", dependencies=need(auth.READ))
     def list_ontologies(s: Svc) -> list[str]:

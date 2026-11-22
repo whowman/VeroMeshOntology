@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # IRI prefix for model instances imported from workbooks (one per customer install).
     instance_base: str = "urn:veromesh:org:"
 
+    # Build the planner state in the background at startup, so the first edit or check
+    # after a start does not (VEROMESH_WARM_ON_START=false to leave it to the first one).
+    warm_on_start: bool = True
+
     # Folder with the meta-model, validation rules and examples. Defaults to the
     # repository's ontology/ folder; the Docker image sets /app/ontology.
     ontology_dir: str = str(Path(__file__).resolve().parents[3] / "ontology")
