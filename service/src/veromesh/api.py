@@ -706,7 +706,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     ) -> list[dict]:
         """Decision log entries in the order they were recorded: decisions (allow, consult, refuse),
-        and the overrides and outcomes that refer to them. Page with afterSeq."""
+        the overrides and outcomes that refer to them, and attestations. Page with afterSeq."""
         return dl.find(
             agent=agent,
             principal=principal,
@@ -848,6 +848,13 @@ def create_app(
         """Walk the whole hash chain: ok, or the first entry that was changed, removed or inserted."""
         return dl.verify().as_dict()
 
+    @app.get("/api/v1/attestations/verify", dependencies=need(auth.STEWARD), tags=["governance"])
+    def attestations_verify(s: Svc, dl: Log) -> dict:
+        """Check the attestations the model relies on against the decision log's hash chain:
+        ok, or the attestations altered, written around the service (unrecorded), or removed
+        from the model (missing)."""
+        return prov.verify_attestations(s.store, dl)
+
     @app.get("/api/v1/decisions/inbox", dependencies=need(auth.READ), tags=["decisions"])
     def decisions_inbox(
         s: Svc, c: Cfg, dl: Log, who: Who, person: str | None = None, days: int = 7
@@ -973,7 +980,7 @@ def create_app(
         status_code=201,
         tags=["governance"],
     )
-    def entity_attest(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
+    def entity_attest(s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
         """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values.
         The attester is the signed-in person, who must fill the role they act in. Stewards may attest
         anything; anyone else, only entities whose owner or steward role they act in."""
@@ -992,6 +999,7 @@ def create_app(
             note=body.note,
             signed_in=signed_in,
             owner_only=owner_only,
+            log=dl,
         )
 
     @app.post(
@@ -1000,7 +1008,7 @@ def create_app(
         status_code=201,
         tags=["governance"],
     )
-    def entity_correct(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: CorrectionIn):
+    def entity_correct(s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, body: CorrectionIn):
         """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested
         by the signed-in person."""
         attester, signed_in = attester_for(s, c, who, body.attester)
@@ -1016,6 +1024,7 @@ def create_app(
                 role=body.role,
                 note=body.note,
                 signed_in=signed_in,
+                log=dl,
             )
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})

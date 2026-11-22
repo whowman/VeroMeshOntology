@@ -43,7 +43,7 @@ flowchart LR
 
 One claim per entity per source, not per field or per triple: it matches how sources deliver data (a worker record, a CMDB item) and keeps the store small. Field-level detail lives in the values, so attestation and conflicts can still be per field.
 
-**Attestation.** A person, acting in a role, confirms or disputes a claim, for all of its fields or a listed subset. An attestation pins the **hash of the values it confirmed**: if the source later changes those values, the attestation no longer matches and the fact is back to unconfirmed, with no rule to maintain. Each attestation carries who, in which role, when, a verdict (`attested` or `disputed`), an optional note, and an expiry.
+**Attestation.** A person, acting in a role, confirms or disputes a claim, for all of its fields or a listed subset. An attestation pins the **hash of the values it confirmed**: if the source later changes those values, the attestation no longer matches and the fact is back to unconfirmed, with no rule to maintain. Each attestation carries who, in which role, when, a verdict (`attested` or `disputed`), an optional note, and an expiry. It is also appended to the decision log's hash chain before the model sees it, so the attestations the model relies on can be checked against a tamper-evident record (`GET /api/v1/attestations/verify`; `service/README.md`, "Attestations on the chain").
 
 **Status of a fact**, derived rather than stored:
 
