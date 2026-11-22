@@ -417,3 +417,65 @@ def test_a_check_in_one_replica_follows_an_edit_made_in_another(monkeypatch):
     after = ask()
     assert after["outcome"] == "refuse"
     assert any("above its limit of 1,000 USD" in r for r in after["reasons"])
+
+
+def test_a_replica_follows_every_change_without_reading_the_model(monkeypatch):
+    """Copy two follows copy one's changes from the records they leave, and after every
+    step holds the state reading the whole model gives. Changes that leave no record
+    (replace loads, deletes, the full path) make it build its state again."""
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0
+    builds = []
+    real_build = incremental._build
+
+    def counted(store, base):
+        if store is two:
+            builds.append(1)
+        return real_build(store, base)
+
+    monkeypatch.setattr(incremental, "_build", counted)
+    followed = incremental.STATS["followed"]
+    for source, mode, items in STEPS:
+        run(one, monkeypatch, True, source, mode, items, validate_first=False)
+        incremental.warm(two, BASE)
+        fresh = real_build(shared_store(shared), BASE)
+        kept = two.peek(("incremental", BASE))
+        if fresh is not None:
+            assert kept is not None
+            same_state(kept, fresh)
+    assert incremental.STATS["followed"] - followed >= 10  # most changes were followed
+    assert len(builds) < len(STEPS) / 2
+
+
+def test_a_change_with_no_record_makes_a_replica_read_the_model_again(monkeypatch):
+    """A write that leaves no record (here a plain update) cannot be followed: the copy
+    builds its state again, and it is right."""
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0
+    monkeypatch.setenv("VEROMESH_INCREMENTAL", "on")
+    C.apply(one, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    incremental.warm(two, BASE)
+    C.apply(one, source="hr", items=[person("Recorded")], base=BASE, ontology_dir=ONT)
+    one.update('INSERT DATA { GRAPH <https://example.com/other> { <a:s> <a:p> "unrecorded" } }')
+    C.apply(one, source="hr", items=[person("AfterIt")], base=BASE, ontology_dir=ONT)
+    followed = incremental.STATS["followed"]
+    incremental.warm(two, BASE)
+    assert incremental.STATS["followed"] == followed  # the chain is broken: nothing replayed
+    kept = two.peek(("incremental", BASE))
+    same_state(kept, incremental._build(shared_store(shared), BASE))
+    assert {"Recorded", "AfterIt"} <= {e["id"] for e in C.list_entities(two, "people", BASE)}
+
+
+def shared_store(inner):
+    """A fresh copy's view of the shared store (nothing cached)."""
+    from veromesh.modelcache import VersionedStore
+
+    return VersionedStore(inner)

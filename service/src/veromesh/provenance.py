@@ -958,6 +958,8 @@ def _planner(store: RDFStore):
                     break
             if found is not None:
                 break
+        if found is None:  # another copy changed the model: follow it if it left a record
+            found = incremental.follow(store)
         yield found
     finally:
         incremental._LOCK.release()

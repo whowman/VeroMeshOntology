@@ -34,6 +34,9 @@ from contextlib import contextmanager
 from typing import Any, TypeVar
 
 VERSION_GRAPH = "https://veromesh.ai/graph/version"
+# What each small commit changed, keyed by the version it wrote, so another copy of the
+# service can follow it without reading the whole model again (incremental.follow).
+FOLLOW_GRAPH = "https://veromesh.ai/graph/follow"
 _MODEL = "urn:veromesh:model"
 _VERSION = "https://veromesh.ai/ontology/core#modelVersion"
 
@@ -65,6 +68,9 @@ class Batch:
         # Values the writer knows the new version will have (set inside the batch);
         # installed before the version changes, so no reader finds the cache empty.
         self.primes: dict[Any, Any] = {}
+        # Deferred batches only: more writes made from the new version's ID, sent in the
+        # same request as the version change (incremental.commit records what it changed).
+        self.follow: Callable[[str], list[str]] | None = None
 
 
 class VersionedStore:
@@ -124,6 +130,8 @@ class VersionedStore:
                         WHERE {{ OPTIONAL {{ GRAPH <{VERSION_GRAPH}> {{ <{_MODEL}> <{_VERSION}> ?old }} }}
                                  FILTER(COALESCE(STR(?old), "0") = "{b.expect}") }}"""
                 )
+                if b.follow is not None and b.defer and not b.sent:
+                    b.ops.extend(b.follow(new))
                 self._send(b)
                 b.clean = self._read_version() == new
                 if b.clean:
@@ -194,6 +202,11 @@ class VersionedStore:
         with self._lock:
             return {k: v for k, (ver, v) in self._cache.items() if ver == version}
 
+    def held(self, key: Any) -> tuple[str, Any] | None:
+        """(version, value) cached for ``key``, at whatever version it was cached."""
+        with self._lock:
+            return self._cache.get(key)
+
     def peek(self, key: Any) -> Any:
         """The cached value for ``key`` if it is current, else None (nothing is computed)."""
         hit = self._cache.get(key)
@@ -204,7 +217,7 @@ class VersionedStore:
         return self.inner.query(sparql)
 
     def list_graphs(self) -> list[str]:
-        return [g for g in self.inner.list_graphs() if g != VERSION_GRAPH]
+        return [g for g in self.inner.list_graphs() if g not in (VERSION_GRAPH, FOLLOW_GRAPH)]
 
     # Writes bump the version.
     def update(self, sparql: str) -> None:

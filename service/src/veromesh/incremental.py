@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import json
 import os
 import re
 import threading
+import weakref
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
@@ -347,6 +349,9 @@ def state(store, base: str, version: str | None = None) -> State | None:
             kept = store.peek_at(("incremental", base), version)
             if kept is not None:
                 return kept
+        followed = follow(store, base)
+        if followed is not None:
+            return followed
         return cached(store, ("incremental", base), lambda: _build(store, base))
     return _build(store, base)
 
@@ -801,32 +806,25 @@ def commit(
         # What readers will find at the new version, carried forward rather than rebuilt:
         # installed just before the version changes, so no check finds the cache empty.
         if b is not None and effective_changed is not None:
-            from .changesets import entity_rows
-
-            for t, rows in lists.items():
-                if rows is not None:
-                    new_rows, gone, came = _patch(rows, st.today.graph, t, base, effective_changed)
-                    b.primes[("entities", t, base, None)] = new_rows
-                    b.primes.update(_shared_primes(readers, t, base, new_rows, gone, came))
-                elif t in store.wanted_lists:
-                    # Readers use this list but none is cached at this version (a reader was
-                    # still building it, or an edit landed meanwhile): build it here, from the
-                    # state as committed, so no reader rebuilds it while every other waits.
-                    b.primes[("entities", t, base, None)] = entity_rows(st.today.graph, t, base)
-            if believed is not None:  # a changeset writes no attestations: they carry over
-                now = dict(st.today.resolved)
-                b.primes[("current", st.day)] = (now, believed[1])
-                before = readers.get(("current-index", st.day))
-                if before is not None:
-                    people = [k for k in edit.keys if k[0] == "people"]
-                    b.primes[("current-index", st.day)] = (
-                        now,
-                        before[1],
-                        _refill(before[2], believed[0], now, people),
-                    )
+            b.primes.update(_reader_primes(store, st, lists, believed, readers, edit.keys, effective_changed))
 
         result = {**report, "committed": True, "facts": size, "version": cs, "claims": claims}
         _set_status(store, cs, "committed", result, extra=f'<{VM.committedAt}> "{at}"^^<{XSD.dateTime}>')
+        if b is not None and small:
+            # What this commit changed, for other copies of the service (``follow``),
+            # written with the new version in the same request.
+            record = {
+                "source": source,
+                "graph": graph_iri,
+                "removed": _nt(edit.removed),
+                "added": _nt(edit.added),
+                "keys": [list(k) for k in edit.keys],
+                "written": list(changes["written"]),
+                "superseded": sorted(changes["superseded"]),
+                "changeset": cs,
+                "ontology": st.ontology,
+            }
+            b.follow = lambda new: _follow_ops(new, version, record)
     if versioned and small:
         # The claims as the store gives them back (it may normalise times), now written.
         for c in P.read_written(store, changes, st.cats):
@@ -834,6 +832,221 @@ def commit(
     if b is not None and b.clean:
         store.prime(("incremental", base), b.version, st)
     return result
+
+
+def _reader_primes(
+    store, st: State, lists: dict, believed, readers: dict, keys, effective_changed: set
+) -> dict:
+    """What readers cached at the old version become once ``keys`` changed (and with them
+    the effective model's ``effective_changed`` nodes): entity lists patched, today's
+    beliefs and the role index refilled. A list readers use but none had cached is
+    built from the state, so no reader rebuilds it while every other waits."""
+    from .changesets import entity_rows
+
+    base = st.base
+    primes: dict = {}
+    for t, rows in lists.items():
+        if rows is not None:
+            new_rows, gone, came = _patch(rows, st.today.graph, t, base, effective_changed)
+            primes[("entities", t, base, None)] = new_rows
+            primes.update(_shared_primes(readers, t, base, new_rows, gone, came))
+        elif t in store.wanted_lists:
+            primes[("entities", t, base, None)] = entity_rows(st.today.graph, t, base)
+    if believed is not None:  # a changeset writes no attestations: they carry over
+        now = dict(st.today.resolved)
+        primes[("current", st.day)] = (now, believed[1])
+        before = readers.get(("current-index", st.day))
+        if before is not None:
+            people = [k for k in keys if k[0] == "people"]
+            primes[("current-index", st.day)] = (now, before[1], _refill(before[2], believed[0], now, people))
+    return primes
+
+
+# --------------------------------------------------------------------------- following other copies
+
+# A record is kept this long; a copy that falls further behind reads the model again.
+FOLLOW_KEEP_S = 900
+# The most records a copy replays to catch up; past that it reads the model again.
+FOLLOW_MAX = 256
+
+
+def _sparql_string(text: str) -> str:
+    return (
+        '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r") + '"'
+    )
+
+
+def _follow_ops(new: str, after: str, record: dict) -> list[str]:
+    """The writes that record ``record`` as what version ``new`` changed after ``after``,
+    and drop records older than FOLLOW_KEEP_S."""
+    from datetime import UTC, datetime, timedelta
+
+    from .modelcache import FOLLOW_GRAPH
+
+    at = datetime.now(UTC)
+    cutoff = (at - timedelta(seconds=FOLLOW_KEEP_S)).isoformat()
+    vm = "https://veromesh.ai/ontology/core#"
+    return [
+        f"""INSERT DATA {{ GRAPH <{FOLLOW_GRAPH}> {{ <urn:veromesh:version:{new}> <{vm}followsVersion> {_sparql_string(after)} ;
+              <{vm}change> {_sparql_string(json.dumps(record, separators=(",", ":")))} ;
+              <{vm}recordedAt> "{at.isoformat()}"^^<{XSD.dateTime}> }} }}""",
+        f"""DELETE {{ GRAPH <{FOLLOW_GRAPH}> {{ ?r ?p ?o }} }}
+            WHERE {{ GRAPH <{FOLLOW_GRAPH}> {{ ?r <{vm}recordedAt> ?t ; ?p ?o }} FILTER (?t < "{cutoff}"^^<{XSD.dateTime}>) }}""",
+    ]
+
+
+def _record(store, version: str) -> tuple[str, dict] | None:
+    """(the version before, what changed) as recorded for ``version``, or None."""
+    from .modelcache import FOLLOW_GRAPH
+
+    vm = "https://veromesh.ai/ontology/core#"
+    rows = store.inner.query(
+        f"SELECT ?after ?change WHERE {{ GRAPH <{FOLLOW_GRAPH}> {{ <urn:veromesh:version:{version}>"
+        f" <{vm}followsVersion> ?after ; <{vm}change> ?change }} }}"
+    )["results"]["bindings"]
+    if len(rows) != 1:
+        return None
+    return rows[0]["after"]["value"], json.loads(rows[0]["change"]["value"])
+
+
+def follow(store, base: str | None = None) -> State | None:
+    """The state at the store's version, carried forward from the one this copy holds by
+    replaying what other copies recorded since (no read of the model), or None when that
+    cannot be done: no state held, a version with no record (a large load, a full-path
+    commit, an attestation, a record already dropped), or too far behind. The caller
+    then reads the model as before. Call with _LOCK held."""
+    if not isinstance(store, VersionedStore) or not enabled():
+        return None
+    if base is None:
+        bases = [k[1] for k in list(store._cache) if isinstance(k, tuple) and k[:1] == ("incremental",)]
+        if len(bases) != 1:
+            return None
+        base = bases[0]
+    key = ("incremental", base)
+    now = store.version()
+    kept = store.peek_at(key, now)
+    if kept is not None:
+        return kept
+    if store.peek_at(("no-follow", base), now):
+        return None  # tried at this version already
+    held = store.held(key)
+    chain: list[dict] = []
+    if held is not None and held[1] is not None:
+        have, version = held[0], now
+        while version != have and len(chain) < FOLLOW_MAX:
+            got = _record(store, version)
+            if got is None:
+                break
+            version, change = got
+            chain.append(change)
+        if version != have:
+            chain = []
+    if not chain:
+        store.prime(("no-follow", base), now, True)
+        return None
+    st = held[1]
+    readers = store.entries_at(have)
+    lists = {t: readers.get(("entities", t, base, None)) for t in E.TYPES}
+    believed = readers.get(("current", st.day))
+    keys: list[Key] = []
+    nodes: set = set()
+    try:
+        for change in reversed(chain):
+            k, n = _replay(store, st, change)
+            keys += k
+            nodes |= n
+    except Exception:  # noqa: BLE001 — a record this copy cannot apply: read the model instead
+        with store._lock:
+            store._cache.pop(key, None)
+        store.prime(("no-follow", base), now, True)
+        return None
+    for k, v in _reader_primes(store, st, lists, believed, readers, keys, nodes).items():
+        store.prime(k, now, v)
+    store.prime(key, now, st)
+    STATS["followed"] += len(chain)
+    return st
+
+
+_WARMED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # store -> bases a state was built for
+
+
+def warm(store, base: str) -> None:
+    """Make sure this copy holds a planner state at the store's version, so its checks
+    use it rather than reading the model: follow what other copies changed, or build
+    the state (once for a copy that only answers checks, and again when a change left no
+    record to follow). Skipped while a change holds the planner (the check waits for it)."""
+    if not isinstance(store, VersionedStore) or not enabled():
+        return
+    key = ("incremental", base)
+    now = store.version()
+    held = store.held(key)
+    if held is not None and held[0] == now:
+        return
+    tried = _WARMED.setdefault(store, set())
+    if base in tried and (held is None or held[1] is None):
+        return  # built before and the fast path could not be used, or dropped: leave it
+    if not _LOCK.acquire(timeout=0):
+        return
+    try:
+        if follow(store, base) is None and store.peek_at(key, now) is None:
+            tried.add(base)
+            store.prime(key, now, _build(store, base))
+    finally:
+        _LOCK.release()
+
+
+def _replay(store, st: State, change: dict) -> tuple[list[Key], set]:
+    """Apply one recorded change to ``st`` as its commit applied it to the writer's state;
+    the claims it wrote are read back from the store."""
+    removed = _parse_nt(change["removed"])
+    added = _parse_nt(change["added"])
+    source = change["source"]
+    edit = Edit(
+        target_iri=change["graph"],
+        removed=removed,
+        added=added,
+        keys=[],
+        values={},
+        model_removed=[],
+        model_added=[],
+        model_new={},
+    )
+    _apply_graph(st.graphs.setdefault(edit.target_iri, compact_graph()), removed, added)
+    _retype(st, edit)
+    keys = [tuple(k) for k in change["keys"]]
+    superseded = set(change["superseded"])
+    for k in keys:
+        old = st.claims.get(k, {}).get(source)
+        if old is not None and old.iri in superseded:
+            del st.claims[k][source]
+    written = {"written": change["written"], "changeset": change.get("changeset")}
+    for c in P.read_written(store, written, st.cats):
+        if c.invalidated_at is None:
+            st.claims.setdefault(c.key, {})[source] = c
+    st.model.update(
+        {
+            k: P.resolve(list(st.claims.get(k, {}).values()), st.atts.get(k, []), ignore_validity=True).get(k)
+            for k in sorted(keys)
+        }
+    )
+    lost, gained = st.today.update(
+        _share(
+            st.model.resolved,
+            {
+                k: P.resolve(list(st.claims.get(k, {}).values()), st.atts.get(k, []), st.day).get(k)
+                for k in sorted(keys)
+            },
+        )
+    )
+    if change.get("ontology"):
+        st.ontology = change["ontology"]
+    return keys, _nodes(lost + gained)
+
+
+def _parse_nt(text: str) -> list:
+    if not text.strip():
+        return []
+    return list(Graph().parse(data=text, format="nt"))
 
 
 def _shared_primes(readers: dict, type_: str, base: str, rows, gone, came) -> dict:

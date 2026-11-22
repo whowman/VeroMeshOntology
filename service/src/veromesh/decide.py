@@ -34,7 +34,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from . import changesets, clock, followup
+from . import changesets, clock, followup, incremental
 from . import provenance as prov
 from .decisions import DecisionLog
 from .rdf_store import RDFStore
@@ -142,6 +142,7 @@ def check(
     require_attested: bool = True,
 ) -> dict:
     """Decide, append the decision to the log, and return the log entry plus who to inform."""
+    incremental.warm(store, base)  # follow what other copies changed, without reading the model
     pin = store.pinned() if hasattr(store, "pinned") else contextlib.nullcontext()
     with pin:  # one version read for the whole check, not one per cached read
         return _check(store, base, log, agent, action, subject, amount, currency, on, note, require_attested)
