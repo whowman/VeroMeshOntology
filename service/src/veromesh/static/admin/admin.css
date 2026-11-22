@@ -1,0 +1,11 @@
+/* Administration: what the steward screen's styles do not cover. */
+.ids { display: grid; gap: 8px; }
+.id-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.id-row .label { color: var(--text2); font-size: 13px; }
+.id-row code { overflow-wrap: anywhere; color: var(--text); }
+.upload { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; color: var(--text2); font-size: 14px; }
+.upload label { display: flex; flex-direction: column; gap: 6px; }
+.value.ok { color: var(--teal); }
+.value.warn { color: var(--warn); }
+.value.bad { color: var(--danger); }
+#licence-tiles .value { font-size: 26px; white-space: nowrap; }

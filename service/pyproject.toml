@@ -26,6 +26,7 @@ dependencies = [
 
 [project.scripts]
 veromesh-usage = "veromesh.usage:main"  # verify a usage report; make or run the usage job by hand
+veromesh-licence = "veromesh.licence:main"  # make the signing key, issue and verify licences
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "pip-licenses>=5"]

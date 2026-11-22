@@ -874,5 +874,10 @@ def test_usage_reports_are_signed_with_a_kept_key_and_named_for_the_customer():
         prod["VEROMESH_LICENSED_TIER"]["value"] == "large"
         and prod["VEROMESH_CUSTOMER_NAME"]["value"] == "Acme"
     )
+    assert prod["VEROMESH_LICENCE"]["valueFrom"]["secretKeyRef"] == {
+        "name": "veromesh-licence",
+        "key": "licence.json",
+    }
+    assert "VEROMESH_LICENCE" not in env  # none by default: loaded on the Administration page
     smtp = prod["VEROMESH_USAGE_SMTP_PASSWORD"]["valueFrom"]["secretKeyRef"]
     assert smtp == {"name": "veromesh-usage-mail", "key": "smtp-password", "optional": True}

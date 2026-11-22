@@ -170,6 +170,13 @@ spec:
                 secretKeyRef:
                   name: {{ $usageKey | quote }}
                   key: {{ if .signingKey.existingSecret }}{{ .signingKey.key | quote }}{{ else }}signing-key.pem{{ end }}
+            {{- if $.Values.api.licence.existingSecret }}
+            - name: VEROMESH_LICENCE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.api.licence.existingSecret | quote }}
+                  key: {{ $.Values.api.licence.key | quote }}
+            {{- end }}
             {{- if .mailSecret }}
             - name: VEROMESH_USAGE_SMTP_PASSWORD
               valueFrom:

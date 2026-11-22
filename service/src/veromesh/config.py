@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # Mail secrets (the rest of the mail settings is set on the Usage page or through the API).
     usage_smtp_password: str | None = None
     usage_m365_client_secret: str | None = None
+    # The licence (licence.py): a signed licence document (JSON), from a Secret. Licences
+    # can also be uploaded by an administrator (Administration > Licence).
+    licence: str | None = None
     usage_job: bool = True  # count every hour and make the reports in the background
     usage_interval_s: float = 3600.0
 

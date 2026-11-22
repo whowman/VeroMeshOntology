@@ -562,6 +562,7 @@ class Usage:
         self.log = decision_log
         self.settings = settings
         self.model = model
+        self.licensing = None  # licence.Licensing, when the install has one (the tier comes from it)
 
     # ---- install, tier, key, settings
 
@@ -576,7 +577,9 @@ class Usage:
         }
 
     def tier(self) -> dict | None:
-        name = (self.settings.licensed_tier or "").strip().lower()
+        """The licensed tier: from the licence in force, else VEROMESH_LICENSED_TIER."""
+        from_licence = self.licensing.tier() if self.licensing is not None else None
+        name = from_licence or (self.settings.licensed_tier or "").strip().lower()
         if not name:
             return None
         if name not in TIERS:
@@ -715,6 +718,7 @@ class Usage:
             "from": start.isoformat(),
             "until": end.isoformat(),
             "tier": tier,
+            "licence": self._licence_line(),
             "identities": {
                 "monthEnd": {**last["identities"], "date": last["date"]} if last else None,
                 "peak": {**peak["identities"], "date": peak["date"]} if peak else None,
@@ -738,6 +742,17 @@ class Usage:
             "previousReport": before[-1]["hash"] if before else None,
             "createdAt": datetime.now(UTC).isoformat(),
             "notes": NOTES,
+        }
+
+    def _licence_line(self) -> dict | None:
+        if self.licensing is None:
+            return None
+        st = self.licensing.status()
+        lic = st["licence"]
+        return {
+            "id": lic["id"] if lic else None,
+            "stage": st["stage"],
+            "validUntil": lic["validUntil"] if lic else None,
         }
 
     def make_due(self, now: datetime | None = None) -> list[str]:

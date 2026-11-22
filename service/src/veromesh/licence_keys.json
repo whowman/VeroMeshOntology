@@ -1,0 +1,4 @@
+{
+  "_note": "VeroMesh's licence public keys (base64 Ed25519), by name. The private keys are in VeroMesh's Azure Key Vault, never here. Add a key with a pull request: veromesh-licence keygen prints its public key.",
+  "keys": {}
+}

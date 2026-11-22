@@ -80,3 +80,8 @@ input[type=checkbox] { accent-color: var(--teal); }
 .settings .meta, .settings .buttons { grid-column: 1 / -1; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 td.nowrap { white-space: nowrap; }
+.banner { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); font-size: 14px; }
+.banner.warn { border-color: var(--warn); color: var(--warn); background: rgba(232, 168, 74, .08); }
+.banner.bad { border-color: var(--danger); color: var(--danger); background: rgba(232, 96, 74, .08); }
+.nav-link { color: var(--teal); text-decoration: none; font-size: 14px; margin-right: 16px; }
+.nav-link:hover { text-decoration: underline; }

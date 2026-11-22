@@ -31,6 +31,7 @@ from . import (
     entities,
     followup,
     gcsetup,
+    licence,
     mcp_server,
     suggest,
     usage,
@@ -193,8 +194,27 @@ def create_app(
             def model():
                 return a.state.service.store, c.instance_base
 
-            a.state.usage = usage.Usage(usage.make_store(c.decision_log), a.state.decision_log, c, model)
+            u = usage.Usage(usage.make_store(c.decision_log), a.state.decision_log, c, model)
+            u.licensing = licence.Licensing(u, c)
+            a.state.usage = u
         return a.state.usage
+
+    @app.middleware("http")
+    async def read_only_after_expiry(request: Request, call_next):
+        """After the licence's grace period (or 30 days unlicensed), writes that load or
+        change the model are refused; reads, decision checks, attestations and the rest go on."""
+        if licence.blocked(request.method, request.url.path):
+            try:
+                st = usage_of(request.app).licensing.status()
+            except Exception:  # noqa: BLE001 — licensing never takes the product down
+                log.exception("licence status unavailable; the request goes on")
+                st = {"readOnly": False}
+            if st["readOnly"]:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": f"licence expired: {st['message']}", "licence": st["stage"]},
+                )
+        return await call_next(request)
 
     branding.install(app, Path((settings or get_settings()).branding_dir))
     # Dates people reason about follow the customer's calendar (clock.py).
@@ -205,6 +225,14 @@ def create_app(
         StaticFiles(directory=Path(__file__).parent / "static" / "steward", html=True),
         name="steward",
     )
+    # Administration: the install's licence and usage reports (administrators; the page asks
+    # the API, which checks the role). Both screens share /common.
+    app.mount(
+        "/admin",
+        StaticFiles(directory=Path(__file__).parent / "static" / "admin", html=True),
+        name="admin",
+    )
+    app.mount("/common", StaticFiles(directory=Path(__file__).parent / "static" / "common"), name="common")
 
     def svc(request: Request) -> VeromeshService:
         if request.app.state.service is None:
@@ -742,6 +770,25 @@ def create_app(
         return usage_of(request.app)
 
     Use = Annotated[usage.Usage, Depends(use)]
+
+    @app.get("/api/v1/licence/status", dependencies=need(auth.READ), tags=["licence"])
+    def licence_status(u: Use) -> dict:
+        """Where the install stands (unlicensed, licensed, warning, grace, read-only) and the
+        message to show: for the banner on every screen."""
+        st = u.licensing.status()
+        return {k: v for k, v in st.items() if k != "licence"}
+
+    @app.get("/api/v1/licence", dependencies=need(auth.ADMIN), tags=["licence"])
+    def licence_overview(u: Use) -> dict:
+        """The install's ID and usage key (for ordering a licence), the licence in force and its
+        stage, and every licence held with why any is not used. Administrators only."""
+        return u.licensing.overview()
+
+    @app.put("/api/v1/licence", dependencies=need(auth.ADMIN), tags=["licence"])
+    def licence_load(u: Use, body: Annotated[dict, Body()]) -> dict:
+        """Load a licence (the signed document VeroMesh issued). It is checked against the keys
+        built into this release and this install's ID and usage key, and kept."""
+        return u.licensing.load(body)
 
     @app.get("/api/v1/usage", dependencies=need(auth.ADMIN), tags=["usage"])
     def usage_overview(u: Use) -> dict:

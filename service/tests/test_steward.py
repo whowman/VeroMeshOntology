@@ -19,8 +19,21 @@ def test_the_page_is_served_without_sign_in(ctx):
     client, _, _ = ctx
     r = client.get("/steward/")
     assert r.status_code == 200 and "VeroMesh · Steward" in r.text
-    assert client.get("/steward/app.js").status_code == 200
-    assert "innerHTML" not in client.get("/steward/app.js").text  # values are written as text, never HTML
+    for script in ("/steward/app.js", "/common/vm.js", "/admin/app.js"):
+        r = client.get(script)
+        assert r.status_code == 200, script
+        assert "innerHTML" not in r.text, script  # values are written as text, never HTML
+
+
+def test_the_administration_area_has_the_licence_and_usage_pages(ctx):
+    client, _, _ = ctx
+    page = client.get("/admin/").text
+    assert "VeroMesh · Administration" in page and 'data-tab="licence"' in page and 'id="usage-form"' in page
+    assert 'data-page="/admin/"' in page and "/common/vm.js" in page
+    js = client.get("/admin/app.js").text
+    assert "/api/v1/licence" in js and "/api/v1/usage" in js
+    steward = client.get("/steward/").text
+    assert 'href="/admin/"' in steward and 'data-tab="usage"' not in steward  # usage moved to Administration
 
 
 def test_sign_in_config_when_off(ctx):

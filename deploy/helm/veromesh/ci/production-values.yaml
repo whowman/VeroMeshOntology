@@ -25,6 +25,8 @@ api:
       existingSecret: veromesh-usage-key
       key: key.pem
     mailSecret: veromesh-usage-mail
+  licence:
+    existingSecret: veromesh-licence
   env:
     VEROMESH_GLOSSARY_ROOT_NAME: Acme Ontology
   ingress:
