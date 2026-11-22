@@ -77,6 +77,22 @@
           }
         },
         "timeZone": {"type": "string", "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$"},
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "installId": {"type": "string"},
+            "customerName": {"type": "string"},
+            "hosting": {"type": "string", "enum": ["self-hosted", "hosted"]},
+            "licensedTier": {"type": "string", "enum": ["", "small", "medium", "large", "extra-large"]},
+            "signingKey": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"existingSecret": {"type": "string"}, "key": {"type": "string", "minLength": 1}}
+            },
+            "mailSecret": {"type": "string"}
+          }
+        },
         "env": {
           "type": "object",
           "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},

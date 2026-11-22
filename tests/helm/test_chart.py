@@ -11,6 +11,7 @@ rest of the repository.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -209,9 +210,9 @@ def test_service_finds_fuseki_and_datahub():
     assert env["VEROMESH_RDF_STORE_READ_FALLBACK"]["value"] == "http://veromesh-fuseki-replicas:3030/veromesh"
     assert one(docs, "Service", "veromesh-fuseki-replicas")["spec"]["ports"][0]["port"] == 3030
     assert env["VEROMESH_DATAHUB_GMS_URL"]["value"] == "http://datahub-datahub-gms:8080"
-    # No token given: no Secret, no token variable
+    # No token given: no token Secret, no token variable (the one Secret is the usage key)
     assert "VEROMESH_DATAHUB_TOKEN" not in env
-    assert not by_kind(docs, "Secret")
+    assert [s["metadata"]["name"] for s in by_kind(docs, "Secret")] == ["veromesh-api-usage-key"]
     # Waits for Fuseki before starting
     assert api["initContainers"][0]["name"] == "wait-for-fuseki"
     assert "http://veromesh-fuseki:3030/$/ping" in api["initContainers"][0]["command"][-1]
@@ -326,7 +327,7 @@ def test_external_store():
 
 def test_inline_token_creates_a_secret():
     docs = render("inline-token-values.yaml")
-    secret = one(docs, "Secret")
+    secret = one(docs, "Secret", "veromesh-datahub")
     assert secret["metadata"]["name"] == "veromesh-datahub" and "token" in secret["data"]
     ref = env_of(one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0])[
         "VEROMESH_DATAHUB_TOKEN"
@@ -845,3 +846,32 @@ def test_prerequisites_overlay_matches_the_local_stack():
     rendered = yaml.safe_dump_all(docs)
     for setting in ("transaction.state.log.replication.factor=1", "transaction.state.log.min.isr=1"):
         assert setting in rendered, setting
+
+
+def test_usage_reports_are_signed_with_a_kept_key_and_named_for_the_customer():
+    docs = render()
+    key = one(docs, "Secret", "veromesh-api-usage-key")
+    assert key["metadata"]["annotations"]["helm.sh/resource-policy"] == "keep"  # same key after upgrades
+    pem = base64.b64decode(key["data"]["signing-key.pem"]).decode()
+    assert pem.startswith("-----BEGIN PRIVATE KEY-----")  # Ed25519, PKCS#8: what the service reads
+    env = env_of(one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0])
+    assert env["VEROMESH_USAGE_SIGNING_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "veromesh-api-usage-key",
+        "key": "signing-key.pem",
+    }
+    assert env["VEROMESH_HOSTING"]["value"] == "self-hosted" and "VEROMESH_INSTALL_ID" not in env
+    prod = env_of(
+        one(render("production-values.yaml", name="prod"), "Deployment")["spec"]["template"]["spec"][
+            "containers"
+        ][0]
+    )
+    assert prod["VEROMESH_USAGE_SIGNING_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "veromesh-usage-key",
+        "key": "key.pem",
+    }
+    assert (
+        prod["VEROMESH_LICENSED_TIER"]["value"] == "large"
+        and prod["VEROMESH_CUSTOMER_NAME"]["value"] == "Acme"
+    )
+    smtp = prod["VEROMESH_USAGE_SMTP_PASSWORD"]["valueFrom"]["secretKeyRef"]
+    assert smtp == {"name": "veromesh-usage-mail", "key": "smtp-password", "optional": True}
