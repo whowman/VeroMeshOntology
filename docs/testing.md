@@ -77,7 +77,19 @@ The capacity job (Actions → Capacity, `.github/workflows/capacity.yml`) runs t
 | Large | 100,200 | 178 / 275 / 213 | 230 a second, p99 258 ms | 5 ms | 130 ms | 26 s | 2.6 GB |
 | Large, before PR #44 | 100,200 | 26 / 28 / 28 | 3 a second, p99 15.8 s | 50 ms | 78 ms | 31 s | 6.3 GB |
 
-Runner timings vary by up to about 50% between runs. The Azure reference machines give steadier figures: `deploy/azure-capacity/README.md` sets them up and runs the same measurements there, up to 500,000 people. The longest pause the service's garbage collector made in these runs was 1.5 s (once), where it was 16 to 22 s.
+Runner timings vary by up to about 50% between runs. The Azure reference machines give steadier figures: `deploy/azure-capacity/README.md` sets them up and runs the same measurements there, up to 500,000 people.
+
+On Azure (21 November 2026, one copy of the service, the PostgreSQL decision log on the same machine; the figures are in `tests/perf/targets.json` under `azure_*`):
+
+| Machine, data on | People | Checks a second (1 / 4 / 16 agents) | 16 agents with edits | One check | One edit | Nightly re-sync | First load | Memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D4s v6, premium OS disk | 100,200 | 135 / 269 / 246 | 260 a second, p99 460 ms | 7 ms | 382 ms | 27 s | 15 min | 2.6 GB |
+| D4ds v6, local NVMe drive | 100,200 | 161 / 325 / 374 | 314 a second, p99 196 ms | 9 ms | 68 ms | 22 s | 6 min | 2.6 GB |
+| E16s v6, Premium SSD v2 | 501,000 | 213 / 361 / 412 | 331 a second, p99 308 ms | 4 ms | 236 ms | 106 s | 48 min | 12.1 GB |
+
+Fuseki needs low-latency storage: an edit waits on Fuseki's writes, and on the premium OS disk it took five to six times as long as on the local drive (a 1 TB OS disk, with ten times the IOPS, made no difference, so it is latency, not throughput). The local drive is fastest but is lost when the machine is stopped or moved, so it suits only a copy that can be rebuilt; Premium SSD v2 keeps the data and needs an availability zone. At 500,000 people every goal set for Large is met except two: reading all people takes 6.1 s (0.6 s once cached) and the nightly re-sync 106 s. One copy answers up to 412 checks a second; the Extra large tier's 500 needs a second copy, not yet measured (issue #46).
+
+The longest pause the service's garbage collector made in these runs was 1.5 s (once), where it was 16 to 22 s.
 
 With `diagnose` set (seconds), the job also profiles 300 checks, prints the stack of any check slower than that, and takes a py-spy dump every half second from outside the process; `tests/perf/gil_holds.py` reports any thread that held Python's interpreter lock for that long while others ran. Mode `grow` loads step after step until the machine is exhausted.
 
