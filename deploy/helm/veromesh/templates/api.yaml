@@ -12,6 +12,29 @@ data:
   token: {{ .Values.api.datahub.token | b64enc | quote }}
 ---
 {{- end }}
+{{- $usageKey := include "veromesh.usageKeySecret" . }}
+{{- if not .Values.api.usage.signingKey.existingSecret }}
+{{- $kept := lookup "v1" "Secret" .Release.Namespace $usageKey }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $usageKey }}
+  labels:
+    {{- include "veromesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    # The key that signs this install's usage reports: kept when the release is
+    # upgraded or uninstalled, so every report stays signed by the same key.
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if and $kept (index $kept.data "signing-key.pem") }}
+  signing-key.pem: {{ index $kept.data "signing-key.pem" }}
+  {{- else }}
+  signing-key.pem: {{ genPrivateKey "ed25519" | b64enc }}
+  {{- end }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -131,6 +154,37 @@ spec:
             {{- end }}
             - name: VEROMESH_TIME_ZONE
               value: {{ .Values.api.timeZone | default "UTC" | quote }}
+            {{- with .Values.api.usage }}
+            {{- if .installId }}
+            - name: VEROMESH_INSTALL_ID
+              value: {{ .installId | quote }}
+            {{- end }}
+            - name: VEROMESH_CUSTOMER_NAME
+              value: {{ .customerName | quote }}
+            - name: VEROMESH_HOSTING
+              value: {{ .hosting | default "self-hosted" | quote }}
+            - name: VEROMESH_LICENSED_TIER
+              value: {{ .licensedTier | quote }}
+            - name: VEROMESH_USAGE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $usageKey | quote }}
+                  key: {{ if .signingKey.existingSecret }}{{ .signingKey.key | quote }}{{ else }}signing-key.pem{{ end }}
+            {{- if .mailSecret }}
+            - name: VEROMESH_USAGE_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .mailSecret | quote }}
+                  key: smtp-password
+                  optional: true
+            - name: VEROMESH_USAGE_M365_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .mailSecret | quote }}
+                  key: m365-client-secret
+                  optional: true
+            {{- end }}
+            {{- end }}
             {{- with .Values.api.decisionLog }}
             {{- if .existingSecret }}
             - name: VEROMESH_DECISION_LOG

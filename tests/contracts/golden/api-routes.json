@@ -194,6 +194,34 @@
       "200"
     ]
   },
+  "GET /api/v1/usage": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/usage/reports": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/usage/reports/{month}": {
+    "params": [
+      "download? (query)",
+      "month (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/usage/settings": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/{type_}": {
     "params": [
       "source? (query)",
@@ -526,6 +554,27 @@
       "200"
     ]
   },
+  "POST /api/v1/usage/reports/{month}/send": {
+    "params": [
+      "month (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/usage/run": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "POST /api/v1/usage/settings/test": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "POST /api/v1/{type_}": {
     "body": {
       "application/json": "object"
@@ -673,6 +722,16 @@
     "params": [
       "name (path)"
     ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/usage/settings": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [],
     "status": [
       "200",
       "422"

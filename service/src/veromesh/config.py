@@ -78,6 +78,23 @@ class Settings(BaseSettings):
     # Timestamps are stored in UTC either way (clock.py).
     time_zone: str = "UTC"
 
+    # The usage report (usage.py): made by every install each month, signed and kept
+    # beside the decision log, sent to VeroMesh when a mail adapter is set up.
+    install_id: str | None = None  # default: one generated and kept on first use
+    customer_name: str = ""
+    hosting: str = "self-hosted"  # or "hosted" (VeroMesh runs it)
+    # The licensed tier until the licence file is built: small, medium, large or
+    # extra-large (empty: not set; the report then shows no share of tier).
+    licensed_tier: str = ""
+    # The install's Ed25519 signing key (PEM, PKCS#8), from a secret. Without one, a key
+    # is generated on first use and kept in the usage tables.
+    usage_signing_key: str | None = None
+    # Mail secrets (the rest of the mail settings is set on the Usage page or through the API).
+    usage_smtp_password: str | None = None
+    usage_m365_client_secret: str | None = None
+    usage_job: bool = True  # count every hour and make the reports in the background
+    usage_interval_s: float = 3600.0
+
 
 @lru_cache
 def get_settings() -> Settings:

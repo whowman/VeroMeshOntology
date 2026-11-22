@@ -85,6 +85,10 @@ With DataHub installed as release `datahub` in the same namespace, the default `
 | `fuseki.replication.kafka.bootstrapServers` | `prerequisites-kafka:9092` | DataHub's prerequisites Kafka; or your own |
 | `fuseki.replication.kafka.topic` | `veromesh.graph` | the change log; one per install |
 | `fuseki.replication.kafka.existingSecret` | empty | Secret with `kafka.properties` (TLS, SASL settings) |
+| `api.usage.licensedTier` | empty | `small`, `medium`, `large` or `extra-large`: the usage report's share of tier (service/README.md, "Usage report") |
+| `api.usage.customerName` / `installId` / `hosting` | empty / generated / `self-hosted` | who the usage report is from |
+| `api.usage.signingKey.existingSecret` | empty: the chart makes one | the install's Ed25519 key for signing usage reports; the chart's Secret (`<release>-api-usage-key`) is kept across upgrades and uninstalls |
+| `api.usage.mailSecret` | empty | a Secret with `smtp-password` and/or `m365-client-secret` for sending reports; the rest is set on the steward screen's Usage page |
 | `backup.encryption.recipients` | none: required | the customer's public keys (`age-keygen`, or SSH); backups are encrypted to them |
 | `backup.schedule` / `backup.keep` | `17 2 * * *` / `30` | nightly in `api.timeZone`; backups kept |
 | `backup.rclone.existingSecret` / `remote` | none: this or a volume is required | off-site: a Secret with `rclone.conf`, and e.g. `azure:veromesh-backups/prod` |

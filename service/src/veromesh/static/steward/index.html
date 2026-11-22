@@ -27,6 +27,7 @@
   <button role="tab" data-tab="log" data-steward>Decisions</button>
   <button role="tab" data-tab="measures" data-steward>Measures</button>
   <button role="tab" data-tab="coverage" data-steward>Data elements <span id="suggest-count" class="count"></span></button>
+  <button role="tab" data-tab="usage" data-admin hidden>Usage</button>
 </nav>
 
 <main>
@@ -66,6 +67,42 @@
     <div id="cov-table"></div>
     <h2 class="section">Suggested columns</h2>
     <div id="suggestions"></div>
+  </section>
+  <section id="tab-usage" class="tab" hidden>
+    <p class="lead">What this install counts, and the signed monthly reports it keeps. Only identities in scope are charged; everything else is shown. Usage over the tier limits nothing.</p>
+    <div id="usage-tiles" class="tiles"></div>
+    <h2 class="section">Monthly reports</h2>
+    <div id="usage-reports"></div>
+    <h2 class="section">Settings</h2>
+    <form id="usage-form" class="settings">
+      <label>Month boundary (time zone) <input type="text" id="u-tz" placeholder="America/New_York"></label>
+      <label>Send reports by
+        <select id="u-adapter">
+          <option value="off">Off (keep them here)</option>
+          <option value="smtp">SMTP</option>
+          <option value="sendmail">Sendmail on this machine</option>
+          <option value="m365">Microsoft 365</option>
+        </select>
+      </label>
+      <label>To <input type="text" id="u-to"></label>
+      <label data-adapters="smtp sendmail">From <input type="text" id="u-from" placeholder="veromesh@your-company.com"></label>
+      <label data-adapters="smtp">SMTP server <input type="text" id="u-host"></label>
+      <label data-adapters="smtp">Port <input type="text" id="u-port"></label>
+      <label data-adapters="smtp">Security
+        <select id="u-security"><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="none">None</option></select>
+      </label>
+      <label data-adapters="smtp">User name <input type="text" id="u-user"></label>
+      <label data-adapters="sendmail">Sendmail program <input type="text" id="u-path"></label>
+      <label data-adapters="m365">Tenant ID <input type="text" id="u-tenant"></label>
+      <label data-adapters="m365">Client ID <input type="text" id="u-client"></label>
+      <label data-adapters="m365">Send as mailbox <input type="text" id="u-mailbox"></label>
+      <p id="u-secrets" class="meta"></p>
+      <div class="buttons">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="u-test" class="secondary">Send a test message</button>
+        <button type="button" id="u-run" class="secondary">Count and make reports now</button>
+      </div>
+    </form>
   </section>
 </main>
 

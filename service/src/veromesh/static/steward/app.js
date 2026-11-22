@@ -18,7 +18,7 @@ const store = {
   kept(k) { try { return localStorage.getItem(k); } catch { return null; } },
 };
 
-const state = { config: null, me: null, person: null, roles: [], steward: false, names: {} };
+const state = { config: null, me: null, person: null, roles: [], steward: false, admin: false, names: {} };
 
 // ------------------------------------------------------------------ messages
 
@@ -375,9 +375,132 @@ function suggestionCard(s) {
   return node;
 }
 
+// ------------------------------------------------------------------ usage (administrators)
+
+const num = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString());
+const count = (n, one, many) => `${num(n)} ${Number(n) === 1 ? one : many}`;
+
+async function showUsage() {
+  const tiles = $("#usage-tiles");
+  try {
+    const o = await api("/api/v1/usage");
+    const cur = o.current;
+    const ids = cur.identities;
+    const peak = ids.peak;
+    const tile = (label, value, detail) => { const t = el("div", "tile"); t.append(el("div", "label", label), el("div", "value", value), el("div", "detail", detail)); return t; };
+    const share = ids.shareOfTier === null ? "–" : `${(Number(ids.shareOfTier) * 100).toFixed(1)}%`;
+    tiles.replaceChildren(
+      tile("Identities in scope", num(peak && peak.total), peak ? `${count(peak.people, "person", "people")} · ${count(peak.agents, "agent", "agents")} · ${count(peak.serviceAccounts, "service account", "service accounts")} · peak of ${cur.month} so far` : "Not counted yet"),
+      tile("Share of tier", share, o.tier ? `${o.tier.name}, ${num(o.tier.identities)} identities` : "No tier set (VEROMESH_LICENSED_TIER)"),
+      tile("Decision checks", num(cur.shown.decisionLog.decision || 0), `${count(cur.shown.decisionLog.override || 0, "override", "overrides")} · ${count(cur.shown.decisionLog.outcome || 0, "outcome", "outcomes")} in ${cur.month}`),
+      tile("Install", o.install.customer || o.install.id, `${o.install.hosting} · version ${o.install.version} · ${o.install.id}`),
+    );
+    showUsageReports(o.reports);
+    fillUsageForm(o.settings);
+  } catch (e) { tiles.replaceChildren(el("div", "empty", e.message)); }
+}
+
+function showUsageReports(reports) {
+  const box = $("#usage-reports");
+  if (!reports.length) { box.replaceChildren(el("div", "empty", "No report yet: a month gets its report once it has ended.")); return; }
+  const table = el("table");
+  const hr = el("tr");
+  for (const h of ["Month", "Made", "Hash", "Sent", ""]) hr.append(el("th", null, h));
+  table.append(hr);
+  for (const r of reports.slice().reverse()) {
+    const tr = el("tr");
+    tr.append(el("td", "nowrap", r.month), el("td", null, when(r.createdAt)), el("td", "mono", r.hash.slice(0, 16) + "…"));
+    const sent = el("td");
+    if (r.delivery && r.delivery.ok) sent.append(el("span", "chip ok", `Sent ${when(r.delivery.attemptedAt)}`));
+    else if (r.delivery) sent.append(el("span", "chip bad", "Not sent, will retry"), el("div", "meta", `${when(r.delivery.attemptedAt)}: ${r.delivery.detail}`));
+    else sent.append(el("span", "chip", "Not sent"));
+    tr.append(sent);
+    const act = el("td");
+    const dl = el("button", "link", "Download");
+    dl.type = "button";
+    dl.addEventListener("click", () => downloadReport(r.month));
+    const send = el("button", "link", "Send now");
+    send.type = "button";
+    send.addEventListener("click", async () => {
+      try { const s = await api(`/api/v1/usage/reports/${r.month}/send`, { method: "POST" }); say(s.ok ? `${r.month} sent: ${s.detail}` : `${r.month} not sent: ${s.detail}`, s.ok ? "ok" : "error"); showUsage(); }
+      catch (e) { say(e.message, "error"); }
+    });
+    act.append(dl, send);
+    tr.append(act);
+    table.append(tr);
+  }
+  box.replaceChildren(table);
+}
+
+async function downloadReport(month) {
+  try {
+    const doc = await api(`/api/v1/usage/reports/${month}`);
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `veromesh-usage-${doc.report.install.id}-${month}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (e) { say(e.message, "error"); }
+}
+
+function fillUsageForm(s) {
+  const m = s.mail;
+  $("#u-tz").value = s.timeZone;
+  $("#u-adapter").value = m.adapter;
+  $("#u-to").value = m.to;
+  $("#u-from").value = m.from;
+  $("#u-host").value = m.smtp.host;
+  $("#u-port").value = String(m.smtp.port);
+  $("#u-security").value = m.smtp.security;
+  $("#u-user").value = m.smtp.username;
+  $("#u-path").value = m.sendmail.path;
+  $("#u-tenant").value = m.m365.tenantId;
+  $("#u-client").value = m.m365.clientId;
+  $("#u-mailbox").value = m.m365.mailbox;
+  const set = (b) => (b ? "set" : "not set");
+  $("#u-secrets").textContent = `Secrets come from the install's environment, never this page: SMTP password ${set(s.secrets.smtpPassword)} (VEROMESH_USAGE_SMTP_PASSWORD), Microsoft 365 client secret ${set(s.secrets.m365ClientSecret)} (VEROMESH_USAGE_M365_CLIENT_SECRET).`;
+  showAdapterFields();
+}
+
+function showAdapterFields() {
+  const a = $("#u-adapter").value;
+  document.querySelectorAll("#usage-form [data-adapters]").forEach((l) => { l.hidden = !l.dataset.adapters.split(" ").includes(a); });
+}
+
+async function saveUsage(ev) {
+  ev.preventDefault();
+  const body = {
+    timeZone: $("#u-tz").value.trim(),
+    mail: {
+      adapter: $("#u-adapter").value,
+      to: $("#u-to").value.trim(),
+      from: $("#u-from").value.trim(),
+      smtp: { host: $("#u-host").value.trim(), port: $("#u-port").value.trim(), security: $("#u-security").value, username: $("#u-user").value.trim() },
+      sendmail: { path: $("#u-path").value.trim() },
+      m365: { tenantId: $("#u-tenant").value.trim(), clientId: $("#u-client").value.trim(), mailbox: $("#u-mailbox").value.trim() },
+    },
+  };
+  try { fillUsageForm(await api("/api/v1/usage/settings", { method: "PUT", body })); say("Usage settings saved.", "ok"); }
+  catch (e) { say(e.message, "error"); }
+}
+
+function wireUsage() {
+  $("#usage-form").addEventListener("submit", saveUsage);
+  $("#u-adapter").addEventListener("change", showAdapterFields);
+  $("#u-test").addEventListener("click", async () => {
+    try { const r = await api("/api/v1/usage/settings/test", { method: "POST" }); say(r.ok ? `Test sent: ${r.detail}` : `Test not sent: ${r.detail}`, r.ok ? "ok" : "error"); }
+    catch (e) { say(e.message, "error"); }
+  });
+  $("#u-run").addEventListener("click", async () => {
+    try { const r = await api("/api/v1/usage/run", { method: "POST" }); say(r.skipped || `Counted${r.made.length ? "; made " + r.made.join(", ") : ""}${r.sent.length ? "; sent " + r.sent.length : ""}.`, "ok"); showUsage(); }
+    catch (e) { say(e.message, "error"); }
+  });
+}
+
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage };
+const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage, usage: showUsage };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -433,6 +556,9 @@ async function start() {
       so.addEventListener("click", () => { store.del("vm.token"); store.del("vm.expires"); location.assign("/steward/"); });
     }
     document.querySelectorAll("[data-steward]").forEach((b) => { b.hidden = !state.steward; });
+    state.admin = dev() || (state.me && state.me.roles.includes("admin"));
+    document.querySelectorAll("[data-admin]").forEach((b) => { b.hidden = !state.admin; });
+    if (state.admin) wireUsage();
     document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => openTab(b.dataset.tab)));
     $("#facts-type").addEventListener("change", showFacts);
     $("#cov-product").addEventListener("change", showCoverage);

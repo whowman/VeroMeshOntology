@@ -18,6 +18,13 @@ api:
     rolePrefix: VeroMesh.
   decisionLog:
     existingSecret: veromesh-decision-log
+  usage:
+    customerName: Acme
+    licensedTier: large
+    signingKey:
+      existingSecret: veromesh-usage-key
+      key: key.pem
+    mailSecret: veromesh-usage-mail
   env:
     VEROMESH_GLOSSARY_ROOT_NAME: Acme Ontology
   ingress:

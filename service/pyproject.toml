@@ -24,6 +24,9 @@ dependencies = [
     "tzdata>=2024.1",           # Apache-2.0; time zones for VEROMESH_TIME_ZONE where the image has none
 ]
 
+[project.scripts]
+veromesh-usage = "veromesh.usage:main"  # verify a usage report; make or run the usage job by hand
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "pip-licenses>=5"]
 
