@@ -88,7 +88,8 @@ With DataHub installed as release `datahub` in the same namespace, the default `
 | `api.usage.licensedTier` | empty | `small`, `medium`, `large` or `extra-large`: the usage report's share of tier (service/README.md, "Usage report") |
 | `api.usage.customerName` / `installId` / `hosting` | empty / generated / `self-hosted` | who the usage report is from |
 | `api.usage.signingKey.existingSecret` | empty: the chart makes one | the install's Ed25519 key for signing usage reports; the chart's Secret (`<release>-api-usage-key`) is kept across upgrades and uninstalls |
-| `api.usage.mailSecret` | empty | a Secret with `smtp-password` and/or `m365-client-secret` for sending reports; the rest is set on the steward screen's Usage page |
+| `api.usage.mailSecret` | empty | a Secret with `smtp-password` and/or `m365-client-secret` for sending reports; the rest is set on the Administration area's Usage page |
+| `api.licence.existingSecret` / `key` | empty / `licence.json` | a Secret with the licence VeroMesh issued; unset, an administrator loads it on the Administration area's Licence page. Without a licence the install runs 30 days, then goes read-only (service/README.md, "Licence") |
 | `backup.encryption.recipients` | none: required | the customer's public keys (`age-keygen`, or SSH); backups are encrypted to them |
 | `backup.schedule` / `backup.keep` | `17 2 * * *` / `30` | nightly in `api.timeZone`; backups kept |
 | `backup.rclone.existingSecret` / `remote` | none: this or a volume is required | off-site: a Secret with `rclone.conf`, and e.g. `azure:veromesh-backups/prod` |

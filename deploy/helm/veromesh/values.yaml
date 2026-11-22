@@ -58,7 +58,8 @@ api:
     # Development and CI only: no sign-in, every request acts as an administrator.
     disabled: false
     # The steward screen (/steward) signs people in in the browser: a public (single-page
-    # application) registration's client ID, with redirect URI https://<host>/steward/, and the
+    # application) registration's client ID, with redirect URIs https://<host>/steward/ and
+    # https://<host>/admin/ (Administration), and the
     # scope it asks for (Entra ID: api://<the API's ID URI>/access_as_user).
     uiClientId: ""
     uiScope: "openid profile email"
@@ -79,7 +80,7 @@ api:
 
   # The usage report: every install makes one a month, signed with its own key and
   # kept beside the decision log; with a mail adapter set up (on the steward screen's
-  # Usage page) it is also sent to VeroMesh. See service/README.md, "Usage report".
+  # Usage page in Administration) it is also sent to VeroMesh. See service/README.md, "Usage report".
   usage:
     installId: ""          # empty: one is generated and kept on first use
     customerName: ""
@@ -93,6 +94,14 @@ api:
     # A Secret with the mail adapter's secrets, if it needs any: keys smtp-password
     # and/or m365-client-secret (the rest of the mail settings is set on the Usage page).
     mailSecret: ""
+
+  # The licence VeroMesh issued for this install (a signed JSON document), in a Secret
+  # you create from the file: kubectl create secret generic veromesh-licence
+  # --from-file=licence.json. Unset, an administrator loads it on the Administration
+  # page instead. Without any licence the install runs for 30 days, then goes read-only.
+  licence:
+    existingSecret: ""
+    key: licence.json
 
   # Extra environment variables for the service, as name: value.
   env: {}

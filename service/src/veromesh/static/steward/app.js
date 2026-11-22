@@ -1,97 +1,9 @@
-/* VeroMesh steward screen. Plain JavaScript, no build step. Every value from the API is written
-   with textContent, never as HTML. Sign-in: OpenID Connect authorization code with PKCE, in the
-   browser; the access token stays in this tab's sessionStorage. */
+/* VeroMesh steward screen. Plain JavaScript, no build step; sign-in, the API helper and the
+   licence banner are in /common/vm.js. Every value from the API is written with textContent. */
 "use strict";
 
-const $ = (sel) => document.querySelector(sel);
-const el = (tag, cls, text) => {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined && text !== null) e.textContent = String(text);
-  return e;
-};
-const store = {
-  get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* private window */ } },
-  del(k) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } },
-  keep(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
-  kept(k) { try { return localStorage.getItem(k); } catch { return null; } },
-};
+Object.assign(state, { me: null, person: null, roles: [], steward: false, admin: false, names: {} });
 
-const state = { config: null, me: null, person: null, roles: [], steward: false, admin: false, names: {} };
-
-// ------------------------------------------------------------------ messages
-
-function say(text, kind) {
-  const m = $("#message");
-  m.textContent = text;
-  m.className = "message " + (kind || "");
-  m.hidden = !text;
-  if (kind === "ok") setTimeout(() => { if (m.textContent === text) m.hidden = true; }, 5000);
-}
-
-// ------------------------------------------------------------------ sign-in (PKCE)
-
-const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const redirectUri = () => location.origin + "/steward/";
-
-async function signIn() {
-  const c = state.config;
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
-  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-  const st = b64url(crypto.getRandomValues(new Uint8Array(16)));
-  store.set("vm.verifier", verifier);
-  store.set("vm.state", st);
-  const q = new URLSearchParams({
-    response_type: "code", client_id: c.clientId, redirect_uri: redirectUri(), scope: c.scope,
-    state: st, code_challenge: challenge, code_challenge_method: "S256",
-  });
-  location.assign(c.authorizationEndpoint + "?" + q.toString());
-}
-
-async function finishSignIn(params) {
-  if (params.get("state") !== store.get("vm.state")) throw new Error("Sign-in answer does not match this tab; sign in again.");
-  const body = new URLSearchParams({
-    grant_type: "authorization_code", client_id: state.config.clientId, code: params.get("code"),
-    redirect_uri: redirectUri(), code_verifier: store.get("vm.verifier") || "",
-  });
-  const r = await fetch(state.config.tokenEndpoint, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-  const t = await r.json().catch(() => ({}));
-  if (!r.ok || !t.access_token) throw new Error("Sign-in failed: " + (t.error_description || t.error || r.status));
-  store.set("vm.token", t.access_token);
-  store.set("vm.expires", String(Date.now() + (Number(t.expires_in) || 3600) * 1000 - 60000));
-  store.del("vm.verifier");
-  store.del("vm.state");
-  history.replaceState(null, "", "/steward/");
-}
-
-function token() {
-  const t = store.get("vm.token");
-  return t && Number(store.get("vm.expires") || 0) > Date.now() ? t : null;
-}
-
-// ------------------------------------------------------------------ API
-
-async function api(path, opts = {}) {
-  const headers = Object.assign({}, opts.headers || {});
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-  const t = token();
-  if (t) headers.Authorization = "Bearer " + t;
-  const r = await fetch(path, { method: opts.method || "GET", headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
-  if (r.status === 401 && !state.config.disabled) {
-    store.del("vm.token");
-    await signIn();
-    return new Promise(() => {});
-  }
-  const data = await r.json().catch(() => null);
-  if (!r.ok) {
-    const d = data && data.detail;
-    throw new Error(typeof d === "string" ? d : `${r.status} ${r.statusText}`);
-  }
-  return data;
-}
-
-const dev = () => state.config && state.config.disabled;
 const withPerson = (path) => (dev() && state.person ? path + (path.includes("?") ? "&" : "?") + "person=" + encodeURIComponent(state.person) : path);
 
 // ------------------------------------------------------------------ names
@@ -102,7 +14,6 @@ async function loadNames() {
   types.forEach((t, i) => { for (const e of lists[i]) state.names[`${t}:${e.id}`] = e.name || e.id; });
 }
 const nameOf = (type, id) => (id ? state.names[`${type}:${id}`] || id : "");
-const when = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
 const money = (amount, cur) => (amount ? `${Number(amount).toLocaleString()} ${cur || ""}`.trim() : "");
 
 // ------------------------------------------------------------------ waiting for you
@@ -375,132 +286,9 @@ function suggestionCard(s) {
   return node;
 }
 
-// ------------------------------------------------------------------ usage (administrators)
-
-const num = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString());
-const count = (n, one, many) => `${num(n)} ${Number(n) === 1 ? one : many}`;
-
-async function showUsage() {
-  const tiles = $("#usage-tiles");
-  try {
-    const o = await api("/api/v1/usage");
-    const cur = o.current;
-    const ids = cur.identities;
-    const peak = ids.peak;
-    const tile = (label, value, detail) => { const t = el("div", "tile"); t.append(el("div", "label", label), el("div", "value", value), el("div", "detail", detail)); return t; };
-    const share = ids.shareOfTier === null ? "–" : `${(Number(ids.shareOfTier) * 100).toFixed(1)}%`;
-    tiles.replaceChildren(
-      tile("Identities in scope", num(peak && peak.total), peak ? `${count(peak.people, "person", "people")} · ${count(peak.agents, "agent", "agents")} · ${count(peak.serviceAccounts, "service account", "service accounts")} · peak of ${cur.month} so far` : "Not counted yet"),
-      tile("Share of tier", share, o.tier ? `${o.tier.name}, ${num(o.tier.identities)} identities` : "No tier set (VEROMESH_LICENSED_TIER)"),
-      tile("Decision checks", num(cur.shown.decisionLog.decision || 0), `${count(cur.shown.decisionLog.override || 0, "override", "overrides")} · ${count(cur.shown.decisionLog.outcome || 0, "outcome", "outcomes")} in ${cur.month}`),
-      tile("Install", o.install.customer || o.install.id, `${o.install.hosting} · version ${o.install.version} · ${o.install.id}`),
-    );
-    showUsageReports(o.reports);
-    fillUsageForm(o.settings);
-  } catch (e) { tiles.replaceChildren(el("div", "empty", e.message)); }
-}
-
-function showUsageReports(reports) {
-  const box = $("#usage-reports");
-  if (!reports.length) { box.replaceChildren(el("div", "empty", "No report yet: a month gets its report once it has ended.")); return; }
-  const table = el("table");
-  const hr = el("tr");
-  for (const h of ["Month", "Made", "Hash", "Sent", ""]) hr.append(el("th", null, h));
-  table.append(hr);
-  for (const r of reports.slice().reverse()) {
-    const tr = el("tr");
-    tr.append(el("td", "nowrap", r.month), el("td", null, when(r.createdAt)), el("td", "mono", r.hash.slice(0, 16) + "…"));
-    const sent = el("td");
-    if (r.delivery && r.delivery.ok) sent.append(el("span", "chip ok", `Sent ${when(r.delivery.attemptedAt)}`));
-    else if (r.delivery) sent.append(el("span", "chip bad", "Not sent, will retry"), el("div", "meta", `${when(r.delivery.attemptedAt)}: ${r.delivery.detail}`));
-    else sent.append(el("span", "chip", "Not sent"));
-    tr.append(sent);
-    const act = el("td");
-    const dl = el("button", "link", "Download");
-    dl.type = "button";
-    dl.addEventListener("click", () => downloadReport(r.month));
-    const send = el("button", "link", "Send now");
-    send.type = "button";
-    send.addEventListener("click", async () => {
-      try { const s = await api(`/api/v1/usage/reports/${r.month}/send`, { method: "POST" }); say(s.ok ? `${r.month} sent: ${s.detail}` : `${r.month} not sent: ${s.detail}`, s.ok ? "ok" : "error"); showUsage(); }
-      catch (e) { say(e.message, "error"); }
-    });
-    act.append(dl, send);
-    tr.append(act);
-    table.append(tr);
-  }
-  box.replaceChildren(table);
-}
-
-async function downloadReport(month) {
-  try {
-    const doc = await api(`/api/v1/usage/reports/${month}`);
-    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `veromesh-usage-${doc.report.install.id}-${month}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  } catch (e) { say(e.message, "error"); }
-}
-
-function fillUsageForm(s) {
-  const m = s.mail;
-  $("#u-tz").value = s.timeZone;
-  $("#u-adapter").value = m.adapter;
-  $("#u-to").value = m.to;
-  $("#u-from").value = m.from;
-  $("#u-host").value = m.smtp.host;
-  $("#u-port").value = String(m.smtp.port);
-  $("#u-security").value = m.smtp.security;
-  $("#u-user").value = m.smtp.username;
-  $("#u-path").value = m.sendmail.path;
-  $("#u-tenant").value = m.m365.tenantId;
-  $("#u-client").value = m.m365.clientId;
-  $("#u-mailbox").value = m.m365.mailbox;
-  const set = (b) => (b ? "set" : "not set");
-  $("#u-secrets").textContent = `Secrets come from the install's environment, never this page: SMTP password ${set(s.secrets.smtpPassword)} (VEROMESH_USAGE_SMTP_PASSWORD), Microsoft 365 client secret ${set(s.secrets.m365ClientSecret)} (VEROMESH_USAGE_M365_CLIENT_SECRET).`;
-  showAdapterFields();
-}
-
-function showAdapterFields() {
-  const a = $("#u-adapter").value;
-  document.querySelectorAll("#usage-form [data-adapters]").forEach((l) => { l.hidden = !l.dataset.adapters.split(" ").includes(a); });
-}
-
-async function saveUsage(ev) {
-  ev.preventDefault();
-  const body = {
-    timeZone: $("#u-tz").value.trim(),
-    mail: {
-      adapter: $("#u-adapter").value,
-      to: $("#u-to").value.trim(),
-      from: $("#u-from").value.trim(),
-      smtp: { host: $("#u-host").value.trim(), port: $("#u-port").value.trim(), security: $("#u-security").value, username: $("#u-user").value.trim() },
-      sendmail: { path: $("#u-path").value.trim() },
-      m365: { tenantId: $("#u-tenant").value.trim(), clientId: $("#u-client").value.trim(), mailbox: $("#u-mailbox").value.trim() },
-    },
-  };
-  try { fillUsageForm(await api("/api/v1/usage/settings", { method: "PUT", body })); say("Usage settings saved.", "ok"); }
-  catch (e) { say(e.message, "error"); }
-}
-
-function wireUsage() {
-  $("#usage-form").addEventListener("submit", saveUsage);
-  $("#u-adapter").addEventListener("change", showAdapterFields);
-  $("#u-test").addEventListener("click", async () => {
-    try { const r = await api("/api/v1/usage/settings/test", { method: "POST" }); say(r.ok ? `Test sent: ${r.detail}` : `Test not sent: ${r.detail}`, r.ok ? "ok" : "error"); }
-    catch (e) { say(e.message, "error"); }
-  });
-  $("#u-run").addEventListener("click", async () => {
-    try { const r = await api("/api/v1/usage/run", { method: "POST" }); say(r.skipped || `Counted${r.made.length ? "; made " + r.made.join(", ") : ""}${r.sent.length ? "; sent " + r.sent.length : ""}.`, "ok"); showUsage(); }
-    catch (e) { say(e.message, "error"); }
-  });
-}
-
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage, usage: showUsage };
+const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -558,7 +346,7 @@ async function start() {
     document.querySelectorAll("[data-steward]").forEach((b) => { b.hidden = !state.steward; });
     state.admin = dev() || (state.me && state.me.roles.includes("admin"));
     document.querySelectorAll("[data-admin]").forEach((b) => { b.hidden = !state.admin; });
-    if (state.admin) wireUsage();
+    licenceBanner();
     document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => openTab(b.dataset.tab)));
     $("#facts-type").addEventListener("change", showFacts);
     $("#cov-product").addEventListener("change", showCoverage);

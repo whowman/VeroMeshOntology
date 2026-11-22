@@ -170,6 +170,18 @@
       "200"
     ]
   },
+  "GET /api/v1/licence": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/licence/status": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/me": {
     "params": [],
     "status": [
@@ -694,6 +706,16 @@
       "application/json": {
         "query": "string"
       }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/licence": {
+    "body": {
+      "application/json": "object"
     },
     "params": [],
     "status": [

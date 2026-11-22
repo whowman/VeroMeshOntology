@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeroMesh · Administration</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/steward/app.css">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body data-page="/admin/">
+<header class="top">
+  <img class="logo" src="/brand/logos/veromesh-landscape.svg" alt="VeroMesh" onerror="this.replaceWith(document.createTextNode('VeroMesh'))">
+  <span class="product">Administration</span>
+  <span class="spacer"></span>
+  <a href="/steward/" class="nav-link">Steward screen</a>
+  <span id="who" class="who"></span>
+  <button id="signout" class="link" hidden>Sign out</button>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-tab="licence" aria-selected="true">Licence</button>
+  <button role="tab" data-tab="usage">Usage</button>
+</nav>
+
+<main>
+  <div id="licence-banner" class="banner" role="status" hidden></div>
+  <div id="message" class="message" role="status" hidden></div>
+
+  <section id="tab-licence" class="tab">
+    <p class="lead">The licence VeroMesh issued for this install, checked here against the keys built into this release. It sets the tier the usage report measures against; it never limits usage. After it ends and its grace period passes, the install goes read-only: nothing new is loaded or changed, and decision checks, the decision log, attestations and backups keep working.</p>
+    <div id="licence-tiles" class="tiles"></div>
+    <h2 class="section">This install</h2>
+    <p class="meta">To order or renew a licence, send VeroMesh the install ID and public key below. The private key stays on this install.</p>
+    <div id="install-ids" class="ids"></div>
+    <h2 class="section">Licences held</h2>
+    <div id="licences"></div>
+    <h2 class="section">Load a licence</h2>
+    <form id="licence-form" class="upload">
+      <label>The licence file VeroMesh sent (.json) <input type="file" id="licence-file" accept=".json,application/json"></label>
+      <div class="buttons"><button type="submit" class="primary">Load</button></div>
+    </form>
+  </section>
+
+  <section id="tab-usage" class="tab" hidden>
+    <p class="lead">What this install counts, and the signed monthly reports it keeps. Only identities in scope are charged; everything else is shown. Usage over the tier limits nothing.</p>
+    <div id="usage-tiles" class="tiles"></div>
+    <h2 class="section">Monthly reports</h2>
+    <div id="usage-reports"></div>
+    <h2 class="section">Settings</h2>
+    <form id="usage-form" class="settings">
+      <label>Month boundary (time zone) <input type="text" id="u-tz" placeholder="America/New_York"></label>
+      <label>Send reports by
+        <select id="u-adapter">
+          <option value="off">Off (keep them here)</option>
+          <option value="smtp">SMTP</option>
+          <option value="sendmail">Sendmail on this machine</option>
+          <option value="m365">Microsoft 365</option>
+        </select>
+      </label>
+      <label>To <input type="text" id="u-to"></label>
+      <label data-adapters="smtp sendmail">From <input type="text" id="u-from" placeholder="veromesh@your-company.com"></label>
+      <label data-adapters="smtp">SMTP server <input type="text" id="u-host"></label>
+      <label data-adapters="smtp">Port <input type="text" id="u-port"></label>
+      <label data-adapters="smtp">Security
+        <select id="u-security"><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="none">None</option></select>
+      </label>
+      <label data-adapters="smtp">User name <input type="text" id="u-user"></label>
+      <label data-adapters="sendmail">Sendmail program <input type="text" id="u-path"></label>
+      <label data-adapters="m365">Tenant ID <input type="text" id="u-tenant"></label>
+      <label data-adapters="m365">Client ID <input type="text" id="u-client"></label>
+      <label data-adapters="m365">Send as mailbox <input type="text" id="u-mailbox"></label>
+      <p id="u-secrets" class="meta"></p>
+      <div class="buttons">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="u-test" class="secondary">Send a test message</button>
+        <button type="button" id="u-run" class="secondary">Count and make reports now</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script src="/common/vm.js"></script>
+<script src="/admin/app.js"></script>
+</body>
+</html>
