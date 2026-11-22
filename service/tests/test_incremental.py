@@ -374,3 +374,108 @@ def test_an_edit_builds_the_lists_readers_use_even_when_none_is_cached():
     assert held is not None, "the edit carried no people list forward"
     assert held == C.entity_rows(P._effective_graph(store), "people", BASE)
     assert any(e.get("id") == "Zed" for _, e in held)
+
+
+def test_a_check_in_one_replica_follows_an_edit_made_in_another(monkeypatch):
+    """Two copies of the service over one store (what capacity.py --copies runs): an
+    authority narrowed through one changes the other's decision once its version ages out."""
+    import time
+    from datetime import date
+
+    from veromesh import decide
+    from veromesh import decisions as D
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0.1
+    monkeypatch.setenv("VEROMESH_INCREMENTAL", "on")
+    C.apply(one, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+
+    agent = item("agents", "InvoiceAssistant")["entity"]
+
+    def ask() -> dict:
+        return decide.check(
+            two,
+            BASE,
+            D.MemoryLog(),
+            agent="InvoiceAssistant",
+            action="ApproveSupplierInvoice",
+            amount=3000,
+            currency="USD",
+            subject=agent["signInClientId"],
+            on=date(2026, 11, 16),
+            require_attested=False,
+        )
+
+    before = ask()
+    assert not any("above its limit" in r for r in before["reasons"])
+    narrowed = item("authorities", "AssistantApprovalAuthority", limitAmount="1000")
+    C.apply(one, source="hr", items=[narrowed], base=BASE, ontology_dir=ONT)
+    time.sleep(0.15)
+    after = ask()
+    assert after["outcome"] == "refuse"
+    assert any("above its limit of 1,000 USD" in r for r in after["reasons"])
+
+
+def test_a_replica_follows_every_change_without_reading_the_model(monkeypatch):
+    """Copy two follows copy one's changes from the records they leave, and after every
+    step holds the state reading the whole model gives. Changes that leave no record
+    (replace loads, deletes, the full path) make it build its state again."""
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0
+    builds = []
+    real_build = incremental._build
+
+    def counted(store, base):
+        if store is two:
+            builds.append(1)
+        return real_build(store, base)
+
+    monkeypatch.setattr(incremental, "_build", counted)
+    followed = incremental.STATS["followed"]
+    for source, mode, items in STEPS:
+        run(one, monkeypatch, True, source, mode, items, validate_first=False)
+        incremental.warm(two, BASE)
+        fresh = real_build(shared_store(shared), BASE)
+        kept = two.peek(("incremental", BASE))
+        if fresh is not None:
+            assert kept is not None
+            same_state(kept, fresh)
+    assert incremental.STATS["followed"] - followed >= 10  # most changes were followed
+    assert len(builds) < len(STEPS) / 2
+
+
+def test_a_change_with_no_record_makes_a_replica_read_the_model_again(monkeypatch):
+    """A write that leaves no record (here a plain update) cannot be followed: the copy
+    builds its state again, and it is right."""
+    from veromesh.modelcache import VersionedStore
+    from veromesh.rdf_store import MemoryStore
+
+    shared = MemoryStore()
+    one, two = VersionedStore(shared), VersionedStore(shared)
+    two.max_age = 0
+    monkeypatch.setenv("VEROMESH_INCREMENTAL", "on")
+    C.apply(one, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    incremental.warm(two, BASE)
+    C.apply(one, source="hr", items=[person("Recorded")], base=BASE, ontology_dir=ONT)
+    one.update('INSERT DATA { GRAPH <https://example.com/other> { <a:s> <a:p> "unrecorded" } }')
+    C.apply(one, source="hr", items=[person("AfterIt")], base=BASE, ontology_dir=ONT)
+    followed = incremental.STATS["followed"]
+    incremental.warm(two, BASE)
+    assert incremental.STATS["followed"] == followed  # the chain is broken: nothing replayed
+    kept = two.peek(("incremental", BASE))
+    same_state(kept, incremental._build(shared_store(shared), BASE))
+    assert {"Recorded", "AfterIt"} <= {e["id"] for e in C.list_entities(two, "people", BASE)}
+
+
+def shared_store(inner):
+    """A fresh copy's view of the shared store (nothing cached)."""
+    from veromesh.modelcache import VersionedStore
+
+    return VersionedStore(inner)

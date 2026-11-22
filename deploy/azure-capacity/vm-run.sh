@@ -11,6 +11,7 @@
 #   STORAGE      where Docker's data (Fuseki's and PostgreSQL's storage) lives: os-disk (the
 #                machine's network-attached OS disk), local-nvme (its local NVMe drive, on a size
 #                with a "d", e.g. D4ds v6) or premium-ssd-v2 (an attached Premium SSD v2 disk)
+#   COPIES       bench: copies of the service the agents are spread over (default 1)
 #
 # Everything the steps print goes to /var/log/veromesh-capacity.log on the machine. Azure
 # returns only the end of what a run command prints, so this prints only the results:
@@ -20,7 +21,7 @@ set -euo pipefail
 LOG=/var/log/veromesh-capacity.log
 WORK=/opt/veromesh-capacity
 REPO=https://github.com/whowman/VeroMeshOntology.git
-: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${STORAGE:=os-disk}"
+: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${STORAGE:=os-disk}" "${COPIES:=1}"
 
 fail() {
   echo "FAILED at: $1"
@@ -154,7 +155,7 @@ else
   for size in $SIZES; do
     step "bench $size"
     $PY tests/perf/bench.py --size "$size" --store "$STORE" --log "$DLOG" --clear \
-      --throughput "$THROUGHPUT" --edits-every 1 --out "results/bench-$size.json" \
+      --throughput "$THROUGHPUT" --edits-every 1 --copies "$COPIES" --out "results/bench-$size.json" \
       >"results/bench-$size.txt" 2>>"$LOG" || fail "bench $size"
     echo
     echo "=== $size"

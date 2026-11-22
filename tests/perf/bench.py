@@ -20,7 +20,9 @@ example's own people, roles, agents and the rest):
 
 --throughput 1,4,16 adds decision checks per second at each concurrency (one
 process = one copy of the service), and --edits-every 1 adds a run with an edit
-landing each second meanwhile. Memory is reported with every run.
+landing each second meanwhile. Memory is reported with every run. --copies 2
+spreads the agents over two copies of the service (separate processes on the same
+store and decision log; needs a store and log other processes can reach).
 """
 
 from __future__ import annotations
@@ -90,6 +92,7 @@ def run(
     concurrency: list[int] | None = None,
     seconds: float = 5.0,
     edits_every: float | None = None,
+    copies: int = 1,
 ) -> dict:
     gcsetup.after_startup()  # as the service does once it has started
     store = make_store(store_spec)
@@ -183,7 +186,8 @@ def run(
 
         if os.environ.get("VEROMESH_BENCH_PROFILE"):
             profile_checks(store, fresh(), pool)
-        runs = [capacity.throughput(store, fresh(), pool, c, seconds) for c in concurrency]
+        many = {"copies": copies, "store_spec": store_spec, "log_spec": log_spec}
+        runs = [capacity.throughput(store, fresh(), pool, c, seconds, **many) for c in concurrency]
         if edits_every:
             runs.append(
                 capacity.throughput(
@@ -193,12 +197,15 @@ def run(
                     max(concurrency),
                     seconds,
                     edit_every=edits_every,
+                    **many,
                 )
             )
         growth = capacity.log_growth(store, pool)
+        capacity.stop_copies()
     return {
         "memory": capacity.memory(),
         "throughput": runs,
+        "copies": copies,
         "log_growth": growth,
         "log": log_spec.split(":")[0],
         "plans": dict(incremental.STATS),
@@ -227,7 +234,9 @@ def report(r: dict) -> str:
             f"  {'memory_mb':<26} {mem.get('rss_mb', 0):>10.0f}    (peak {mem.get('peak_rss_mb', 0):.0f})"
         )
     if r.get("throughput"):
-        lines.append(f"Decision checks under concurrent load (one copy; log: {r['log']}):")
+        copies = r.get("copies", 1)
+        how = "one copy" if copies == 1 else f"{copies} copies, the agents spread over them"
+        lines.append(f"Decision checks under concurrent load ({how}; log: {r['log']}):")
         lines.append(capacity.throughput_table(r["throughput"]))
     if r.get("log_growth"):
         lines.append(
@@ -279,6 +288,12 @@ def main(argv: list[str] | None = None) -> int:
         help="also measure with an edit every this many seconds",
     )
     ap.add_argument(
+        "--copies",
+        type=int,
+        default=1,
+        help="copies of the service to spread the agents over (more than 1: separate processes on the same store and log)",
+    )
+    ap.add_argument(
         "--clear",
         action="store_true",
         help="empty the store first (a throwaway Fuseki shared with other tests)",
@@ -292,9 +307,29 @@ def main(argv: list[str] | None = None) -> int:
     if a.clear:
         make_store(a.store).update("DROP ALL")
     conc = [int(c) for c in a.throughput.split(",")] if a.throughput else None
-    r = run(domains, people, a.store, a.repeat, a.log, conc, a.seconds, a.edits_every)
+    if a.copies > 1 and (a.store == "memory" or a.log == "memory"):
+        print(
+            "--copies needs a store and a decision log the other copies can reach (Fuseki, PostgreSQL)",
+            file=sys.stderr,
+        )
+        return 2
+    r = run(domains, people, a.store, a.repeat, a.log, conc, a.seconds, a.edits_every, a.copies)
     r["size"] = size
     print(report(r))
+    if a.copies > 1:  # every copy must have answered, and none may have failed a check
+        broken = [
+            f"{t['concurrency']} agents: copy {j + 1} answered {c['checks']} checks"
+            for t in r.get("throughput", [])
+            for j, c in enumerate(t.get("per_copy", []))
+            if c["checks"] == 0 and t["concurrency"] > j
+        ] + [
+            f"{t['concurrency']} agents: {t['errors']} checks failed"
+            for t in r.get("throughput", [])
+            if t["errors"]
+        ]
+        if broken:
+            print("Copies of the service did not all answer:\n  " + "\n  ".join(broken), file=sys.stderr)
+            return 1
     if a.out:
         Path(a.out).write_text(json.dumps(r, indent=2) + "\n")
     if a.check:

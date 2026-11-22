@@ -16,15 +16,23 @@ One process is one copy of the service: its threads share one interpreter, as a
 copy's request threads do, so checks per second here is what one copy answers.
 The checks go straight to the decision check (no HTTP in front), so a real copy
 answers somewhat fewer.
+
+With copies > 1 (bench.py --copies), throughput starts more copies as their own
+processes on the same store and decision log (python capacity.py copy, driven over
+a pipe), spreads the agents over all of them, and adds up what they answer. Edits
+land in this process only, so the other copies follow them the way a second
+replica of the service does: through the model version kept in the store.
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
 import gc
 import json
 import os
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -136,10 +144,120 @@ def throughput(
     concurrency: int,
     seconds: float,
     edit_every: float | None = None,
+    copies: int = 1,
+    store_spec: str | None = None,
+    log_spec: str | None = None,
 ) -> dict:
-    """``concurrency`` threads ask decision checks as fast as they are answered for
+    """``concurrency`` agents ask decision checks as fast as they are answered for
     ``seconds``; with ``edit_every``, an edit lands that often meanwhile (each one
-    makes the next checks rebuild their cached reads)."""
+    makes the next checks rebuild their cached reads). With ``copies`` > 1 the agents
+    are spread over that many copies of the service, this process and copies - 1
+    others started on ``store_spec`` and ``log_spec`` (see the module docstring)."""
+    if copies <= 1:
+        return _summary(_measure(store, log, pool, concurrency, seconds, edit_every), concurrency, 1)
+    if not store_spec or not log_spec:
+        raise ValueError("more than one copy needs the store and log specs to start the others")
+    others = _others(store_spec, log_spec, copies - 1)
+    for j, c in enumerate(others, start=1):
+        c.prepare(pool, concurrency, seconds, [k for k in range(concurrency) if k % copies == j])
+    for c in others:
+        c.wait_ready()
+    mine = [k for k in range(concurrency) if k % copies == 0]
+    here = _measure(
+        store,
+        log,
+        pool,
+        concurrency,
+        seconds,
+        edit_every,
+        slots=mine,
+        on_start=lambda: [c.go() for c in others],
+    )
+    return _combine([here] + [c.result() for c in others], concurrency, edit_every)
+
+
+_OTHERS: dict[tuple[str, str], list] = {}
+
+
+def _others(store_spec: str, log_spec: str, n: int) -> list:
+    """The other copies, started once and kept for every run (each reads the model
+    from the store once, as a replica does when it starts), stopped at exit."""
+    kept = _OTHERS.setdefault((store_spec, log_spec), [])
+    while len(kept) < n:
+        kept.append(_Copy(store_spec, log_spec))
+    return kept[:n]
+
+
+def stop_copies() -> None:
+    for kept in _OTHERS.values():
+        for c in kept:
+            c.close()
+    _OTHERS.clear()
+
+
+atexit.register(stop_copies)
+
+
+class _Copy:
+    """Another copy of the service: ``python capacity.py copy`` on the same store and
+    log, told over its stdin what to ask and when to start, answering on its stdout."""
+
+    def __init__(self, store_spec: str, log_spec: str) -> None:
+        self.proc = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "copy", "--store", store_spec, "--log", log_spec],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
+        )
+
+    def _send(self, line: str) -> None:
+        assert self.proc.stdin is not None
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+
+    def _read(self) -> str:
+        assert self.proc.stdout is not None
+        line = self.proc.stdout.readline()
+        if not line:
+            raise RuntimeError(f"a copy of the service ended early (exit {self.proc.wait()})")
+        return line.strip()
+
+    def prepare(self, pool: list[dict], concurrency: int, seconds: float, slots: list[int]) -> None:
+        self._send(json.dumps({"pool": pool, "concurrency": concurrency, "seconds": seconds, "slots": slots}))
+
+    def wait_ready(self) -> None:
+        if (line := self._read()) != "ready":
+            raise RuntimeError(f"a copy of the service said {line!r}, not ready")
+
+    def go(self) -> None:
+        self._send("go")
+
+    def result(self) -> dict:
+        return json.loads(self._read())
+
+    def close(self) -> None:
+        if self.proc.poll() is None:
+            try:
+                self._send("quit")
+                self.proc.wait(timeout=30)
+            except (OSError, subprocess.TimeoutExpired):
+                self.proc.kill()
+
+
+def _measure(
+    store,
+    log,
+    pool: list[dict],
+    concurrency: int,
+    seconds: float,
+    edit_every: float | None = None,
+    slots: list[int] | None = None,
+    on_start=None,
+) -> dict:
+    """The agents in ``slots`` (default all of 0..concurrency-1) asking checks in this
+    process: their latencies, errors, edits and pauses, before summing up."""
+    slots = list(range(concurrency)) if slots is None else slots
     latencies: list[float] = []
     errors = [0]
     lock = threading.Lock()
@@ -205,11 +323,13 @@ def throughput(
             changesets.apply(store, source="hr", items=[item], base=BASE, ontology_dir=ONTOLOGY)
 
     check_once(store, log, pool[0])  # warm
-    threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in range(concurrency)]
+    threads = [threading.Thread(target=worker, args=(k,), daemon=True) for k in slots]
     if edit_every:
         threads.append(threading.Thread(target=editor, name="editor", daemon=True))
     threads.append(threading.Thread(target=watchdog, name="watchdog", daemon=True))
     with GcPauses() as pauses:
+        if on_start:
+            on_start()
         start = time.perf_counter()
         for t in threads:
             t.start()
@@ -219,17 +339,88 @@ def throughput(
             t.join()
         elapsed = time.perf_counter() - start
     return {
-        "concurrency": concurrency,
-        "edits_per_s": round(edits[0] / elapsed, 2) if edit_every else 0,
+        "latencies": latencies,
+        "elapsed": elapsed,
+        "edits": edits[0],
+        "errors": errors[0],
+        **pauses.summary(),
+        **memory(),
+    }
+
+
+def _stats(latencies: list[float], elapsed: float) -> dict:
+    return {
         "checks": len(latencies),
-        "checks_per_s": round(len(latencies) / elapsed, 1),
+        "checks_per_s": round(len(latencies) / elapsed, 1) if elapsed else 0.0,
         "p50_ms": round(percentile(latencies, 50) * 1000, 1),
         "p95_ms": round(percentile(latencies, 95) * 1000, 1),
         "p99_ms": round(percentile(latencies, 99) * 1000, 1),
         "max_ms": round(max(latencies, default=0.0) * 1000, 1),
-        "errors": errors[0],
-        **pauses.summary(),
     }
+
+
+def _summary(m: dict, concurrency: int, copies: int) -> dict:
+    return {
+        "concurrency": concurrency,
+        "copies": copies,
+        "edits_per_s": round(m["edits"] / m["elapsed"], 2) if m["edits"] else 0,
+        **_stats(m["latencies"], m["elapsed"]),
+        "errors": m["errors"],
+        "gc_full": m["gc_full"],
+        "gc_max_ms": m["gc_max_ms"],
+        "gc_total_ms": m["gc_total_ms"],
+    }
+
+
+def _combine(parts: list[dict], concurrency: int, edit_every: float | None) -> dict:
+    """What several copies answered together: checks per second added up (each over
+    its own run, which start together and last as long), percentiles over every
+    check, the worst pause of any copy, and each copy on its own."""
+    every = [x for p in parts for x in p["latencies"]]
+    per_copy = [
+        {**_stats(p["latencies"], p["elapsed"]), "rss_mb": p.get("rss_mb", 0), "gc_max_ms": p["gc_max_ms"]}
+        for p in parts
+    ]
+    out = {
+        "concurrency": concurrency,
+        "copies": len(parts),
+        "edits_per_s": round(parts[0]["edits"] / parts[0]["elapsed"], 2) if edit_every else 0,
+        **_stats(every, 1.0),
+        "errors": sum(p["errors"] for p in parts),
+        "gc_full": sum(p["gc_full"] for p in parts),
+        "gc_max_ms": max(p["gc_max_ms"] for p in parts),
+        "gc_total_ms": round(sum(p["gc_total_ms"] for p in parts), 1),
+        "per_copy": per_copy,
+    }
+    out["checks_per_s"] = round(sum(c["checks_per_s"] for c in per_copy), 1)
+    return out
+
+
+def serve_copy(store_spec: str, log_spec: str) -> int:
+    """``capacity.py copy``: one more copy of the service for ``throughput``. Reads what
+    to ask (one JSON line), warms its model, says ready, starts on go, prints its result
+    and waits for the next run, until quit or the end of its input."""
+    store = make_store(store_spec)
+    log = decisions.make_log(log_spec)
+    warm = False
+    while (line := sys.stdin.readline().strip()) and line != "quit":
+        job = json.loads(line)
+        pool = job["pool"]
+        if not warm:  # the model is read from the store once; checks after that hit the cache
+            check_once(store, log, pool[0])
+            gcsetup.after_startup()
+            warm = True
+        print("ready", flush=True)
+
+        def wait_for_go() -> None:
+            if sys.stdin.readline().strip() != "go":
+                raise SystemExit(0)
+
+        m = _measure(
+            store, log, pool, job["concurrency"], job["seconds"], slots=job["slots"], on_start=wait_for_go
+        )
+        print(json.dumps(m), flush=True)
+    return 0
 
 
 def log_growth(store, pool: list[dict], sizes=(0, 1000, 5000)) -> list[dict]:
@@ -264,6 +455,11 @@ def throughput_table(runs: list[dict]) -> str:
             f"  {r['p99_ms']:>7}  {r.get('max_ms', 0):>7}  {r['edits_per_s']:>7}  {r['errors']:>6}"
             f"  {r.get('gc_full', 0):>7}  {r.get('gc_max_ms', 0):>9}  {r.get('gc_total_ms', 0):>11}"
         )
+        for j, c in enumerate(r.get("per_copy", [])):
+            lines.append(
+                f"      copy {j + 1}: {c['checks_per_s']} checks/s, p99 {c['p99_ms']} ms,"
+                f" max {c['max_ms']} ms, {c['rss_mb']:.0f} MB, gc max {c['gc_max_ms']} ms"
+            )
     return "\n".join(lines)
 
 
@@ -367,6 +563,13 @@ def grow(
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["copy"]:
+        cp = argparse.ArgumentParser(description="one more copy of the service, driven by throughput()")
+        cp.add_argument("--store", required=True)
+        cp.add_argument("--log", required=True)
+        c = cp.parse_args(argv[1:])
+        return serve_copy(c.store, c.log)
     ap = argparse.ArgumentParser(
         description="VeroMesh capacity: grow the organization until the machine runs out"
     )
