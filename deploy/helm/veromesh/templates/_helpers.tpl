@@ -134,3 +134,8 @@ http://{{ include "veromesh.fusekiName" . }}:3030/{{ .Values.fuseki.dataset }}
 {{ toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/* The Secret holding the install's usage-report signing key. */}}
+{{- define "veromesh.usageKeySecret" -}}
+{{- .Values.api.usage.signingKey.existingSecret | default (printf "%s-usage-key" (include "veromesh.apiName" .)) -}}
+{{- end }}

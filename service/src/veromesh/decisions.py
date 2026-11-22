@@ -145,6 +145,7 @@ class DecisionLog(Protocol):
     ) -> list[dict]: ...
     def verify(self) -> Verification: ...
     def last_seq_before(self, instant: datetime) -> int: ...
+    def count_by_day(self, since: datetime, until: datetime, time_zone: str) -> dict[str, dict[str, int]]: ...
 
 
 def _new_entry(fields: dict, seq: int, prev: str) -> dict:
@@ -211,6 +212,20 @@ class MemoryLog:
             i = bisect.bisect_left([e["recordedAt"] for e in self._entries], stamp)
             return self._entries[i - 1]["seq"] if i else 0
 
+    def count_by_day(self, since: datetime, until: datetime, time_zone: str) -> dict[str, dict[str, int]]:
+        """Entries recorded in [since, until), by day in ``time_zone`` and kind."""
+        from zoneinfo import ZoneInfo
+
+        tz, out = ZoneInfo(time_zone), {}
+        with self._lock:
+            entries = list(self._entries)
+        for e in entries:
+            at = datetime.fromisoformat(e["recordedAt"].replace("Z", "+00:00"))
+            if since <= at < until:
+                day = out.setdefault(at.astimezone(tz).date().isoformat(), {})
+                day[e["kind"]] = day.get(e["kind"], 0) + 1
+        return out
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS veromesh_decision_log (
@@ -261,27 +276,52 @@ class _Pending:
         self.error: BaseException | None = None
 
 
+def pg_params(url: str) -> dict:
+    """Connection settings for pg8000 from a postgresql:// URL (``sslmode`` honoured)."""
+    u = urlparse(url)
+    if u.scheme not in ("postgresql", "postgres"):
+        raise ValueError("The decision log URL must start with postgresql://")
+    params: dict[str, Any] = {
+        "user": unquote(u.username or ""),
+        "password": unquote(u.password or "") or None,
+        "host": u.hostname or "localhost",
+        "port": u.port or 5432,
+        "database": (u.path or "/").lstrip("/") or None,
+    }
+    query = dict(p.split("=", 1) for p in u.query.split("&") if "=" in p)
+    if query.get("sslmode") in ("require", "verify-ca", "verify-full"):
+        import ssl
+
+        ctx = ssl.create_default_context()
+        if query["sslmode"] == "require":
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        params["ssl_context"] = ctx
+    return params
+
+
+def pg_connect(params: dict):
+    """A pg8000 connection over a socket with TCP_NODELAY.
+
+    pg8000 leaves Nagle's algorithm on, and it sends a query in more than one write:
+    under load the second write waits for the server's delayed ACK, about 40 ms a
+    round trip."""
+    import pg8000.native  # BSD-3-Clause
+
+    params = {k: v for k, v in params.items() if v is not None}
+    sock = socket.create_connection((params.pop("host"), params.pop("port")))
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    try:
+        return pg8000.native.Connection(sock=sock, **params)
+    except Exception:
+        sock.close()
+        raise
+
+
 class PostgresLog:
     def __init__(self, url: str) -> None:
-        u = urlparse(url)
-        if u.scheme not in ("postgresql", "postgres"):
-            raise ValueError("The decision log URL must start with postgresql://")
-        self._params = {
-            "user": unquote(u.username or ""),
-            "password": unquote(u.password or "") or None,
-            "host": u.hostname or "localhost",
-            "port": u.port or 5432,
-            "database": (u.path or "/").lstrip("/") or None,
-        }
-        query = dict(p.split("=", 1) for p in u.query.split("&") if "=" in p)
-        if query.get("sslmode") in ("require", "verify-ca", "verify-full"):
-            import ssl
-
-            ctx = ssl.create_default_context()
-            if query["sslmode"] == "require":
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-            self._params["ssl_context"] = ctx
+        self._params = pg_params(url)
         self._lock = threading.Lock()
         self._conn = None
         self._ready = False
@@ -292,20 +332,7 @@ class PostgresLog:
 
     def _open(self):
         """A new connection, with the schema in place (the first time)."""
-        import pg8000.native  # BSD-3-Clause
-
-        # pg8000 leaves Nagle's algorithm on, and it sends a query in more than one
-        # write: under load the second write waits for the server's delayed ACK, about
-        # 40 ms a round trip. The socket is opened here with TCP_NODELAY instead.
-        params = {k: v for k, v in self._params.items() if v is not None}
-        sock = socket.create_connection((params.pop("host"), params.pop("port")))
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        try:
-            conn = pg8000.native.Connection(sock=sock, **params)
-        except Exception:
-            sock.close()
-            raise
+        conn = pg_connect(self._params)
         if not self._ready:
             conn.run("BEGIN")
             conn.run("SELECT pg_advisory_xact_lock(:k)", k=LOCK_KEY)
@@ -497,6 +524,23 @@ class PostgresLog:
             )
         )
         return int(rows[0][0])
+
+    def count_by_day(self, since: datetime, until: datetime, time_zone: str) -> dict[str, dict[str, int]]:
+        """Entries recorded in [since, until), by day in ``time_zone`` and kind (one grouped
+        query on the recorded_at index)."""
+        rows = self._run(
+            lambda c: c.run(
+                "SELECT to_char((recorded_at AT TIME ZONE :tz)::date, 'YYYY-MM-DD'), kind, count(*)"
+                " FROM veromesh_decision_log WHERE recorded_at >= :a AND recorded_at < :b GROUP BY 1, 2",
+                tz=time_zone,
+                a=since.astimezone(UTC),
+                b=until.astimezone(UTC),
+            )
+        )
+        out: dict[str, dict[str, int]] = {}
+        for day, kind, n in rows:
+            out.setdefault(day, {})[kind] = int(n)
+        return out
 
 
 def _entry(value) -> dict:

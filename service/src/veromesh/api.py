@@ -33,6 +33,7 @@ from . import (
     gcsetup,
     mcp_server,
     suggest,
+    usage,
     validation,
 )
 from . import provenance as prov
@@ -159,8 +160,13 @@ def create_app(
             )
         validation.start_worker(s.ontology_dir)  # so the first edit does not wait for it
         gcsetup.after_startup()  # libraries loaded: full collections need not visit them again
-        async with app.state.mcp.session_manager.run():
-            yield
+        job = usage.Job(lambda: usage_of(app), s.usage_interval_s).start() if s.usage_job else None
+        try:
+            async with app.state.mcp.session_manager.run():
+                yield
+        finally:
+            if job is not None:
+                job.stop()
 
     app = FastAPI(
         lifespan=lifespan,
@@ -173,6 +179,23 @@ def create_app(
     app.state.service = service
     app.state.settings = settings
     app.state.decision_log = decision_log
+    app.state.usage = None
+
+    def usage_of(a: FastAPI) -> usage.Usage:
+        """The install's usage reports (built on first use, kept with the app)."""
+        if a.state.usage is None:
+            c = a.state.settings or get_settings()
+            if a.state.decision_log is None:
+                a.state.decision_log = decisions.make_log(c.decision_log)
+            if a.state.service is None:
+                a.state.service = build_service(c)
+
+            def model():
+                return a.state.service.store, c.instance_base
+
+            a.state.usage = usage.Usage(usage.make_store(c.decision_log), a.state.decision_log, c, model)
+        return a.state.usage
+
     branding.install(app, Path((settings or get_settings()).branding_dir))
     # Dates people reason about follow the customer's calendar (clock.py).
     clock.configure((settings or get_settings()).time_zone)
@@ -714,6 +737,64 @@ def create_app(
             note=body.note,
             require_attested=c.decision_requires_attested,
         )
+
+    def use(request: Request) -> usage.Usage:
+        return usage_of(request.app)
+
+    Use = Annotated[usage.Usage, Depends(use)]
+
+    @app.get("/api/v1/usage", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_overview(u: Use) -> dict:
+        """The install, its tier, the usage settings, this month so far (not signed) and every
+        report made, with how its sending went. Administrators only."""
+        return u.overview()
+
+    @app.get("/api/v1/usage/reports", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_reports(u: Use) -> list[dict]:
+        """Every monthly report made (month, when, hash), oldest first."""
+        return u.store.reports()
+
+    @app.get("/api/v1/usage/reports/{month}", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_report(u: Use, month: str, download: bool = False):
+        """A month's signed report, as stored (``download=true``: as a file)."""
+        doc = u.store.report(month)
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"There is no usage report for {month}.")
+        headers = {}
+        if download:
+            name = f"veromesh-usage-{doc['report']['install']['id']}-{month}.json"
+            headers["Content-Disposition"] = f'attachment; filename="{name}"'
+        return JSONResponse(content=doc, headers=headers)
+
+    @app.post("/api/v1/usage/reports/{month}/send", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_send(u: Use, month: str) -> dict:
+        """Send a month's report now through the mail adapter, and record how it went."""
+        try:
+            return u.send(month)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/v1/usage/settings", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_settings(u: Use) -> dict:
+        """The report's time zone (the month boundary) and the mail adapter. Secrets are
+        never shown; ``secrets`` says which are set (they come from the environment)."""
+        return u.get_settings()
+
+    @app.put("/api/v1/usage/settings", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_put_settings(u: Use, body: Annotated[dict, Body()]) -> dict:
+        """Change ``timeZone`` (an IANA name) and ``mail`` (adapter off, smtp, sendmail or m365;
+        ``to``, ``from`` and the adapter's own settings). Only what is given changes."""
+        return u.put_settings(body)
+
+    @app.post("/api/v1/usage/settings/test", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_test_mail(u: Use) -> dict:
+        """Send a test message through the mail adapter."""
+        return u.send_test()
+
+    @app.post("/api/v1/usage/run", dependencies=need(auth.ADMIN), tags=["usage"])
+    def usage_run(u: Use) -> dict:
+        """Count now, make the reports that are due and send what waits (the hourly job, now)."""
+        return u.run()
 
     @app.get("/api/v1/decisions/verify", dependencies=need(auth.STEWARD), tags=["decisions"])
     def decisions_verify(dl: Log) -> dict:

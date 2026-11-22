@@ -77,6 +77,23 @@ api:
   # are stored in UTC either way.
   timeZone: UTC
 
+  # The usage report: every install makes one a month, signed with its own key and
+  # kept beside the decision log; with a mail adapter set up (on the steward screen's
+  # Usage page) it is also sent to VeroMesh. See service/README.md, "Usage report".
+  usage:
+    installId: ""          # empty: one is generated and kept on first use
+    customerName: ""
+    hosting: self-hosted   # or hosted (VeroMesh runs the install)
+    licensedTier: ""       # small, medium, large or extra-large, until the licence file
+    # The install's Ed25519 signing key (PEM, PKCS#8). Empty existingSecret: the chart
+    # makes one and keeps it across upgrades and uninstalls.
+    signingKey:
+      existingSecret: ""
+      key: signing-key.pem
+    # A Secret with the mail adapter's secrets, if it needs any: keys smtp-password
+    # and/or m365-client-secret (the rest of the mail settings is set on the Usage page).
+    mailSecret: ""
+
   # Extra environment variables for the service, as name: value.
   env: {}
 
