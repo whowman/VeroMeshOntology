@@ -61,7 +61,7 @@ def test_a_rejected_consultation_stops_the_agent(ctx):
 def test_the_principal_approves_above_the_limit(ctx):
     client, _, service = ctx
     attest_basis(client, service)
-    d = ask(client, 7000)
+    d = ask(client, 300_000)  # above every authority: refused, escalated
     assert (
         answer(client, d["id"], "rejected", person="DanaExample").status_code == 422
     )  # a refusal only gets approved
@@ -85,7 +85,7 @@ def test_measures(ctx):
     c1 = ask(client, 3000)
     c2 = ask(client, 4000)
     ask(client, 2500)  # left pending
-    refused = ask(client, 7000)
+    refused = ask(client, 300_000)  # above every authority: refused, escalated
     answer(client, allowed["id"], "rejected", person="DanaExample")
     answer(client, c1["id"], "approved", person="LeeExample")
     answer(client, c2["id"], "rejected", person="LeeExample")

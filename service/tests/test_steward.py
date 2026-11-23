@@ -62,7 +62,7 @@ def test_inbox_lists_what_waits_for_each_person(ctx):
     client, _, service = ctx
     attest_basis(client, service)
     consult = ask(client, 3000)
-    refused = ask(client, 7000)
+    refused = ask(client, 300_000)  # above every authority: refused, escalated
     allowed = ask(client, 800)
     lee = client.get(f"{API}/decisions/inbox", params={"person": "LeeExample"}).json()
     assert [(i["ask"], i["decision"]["id"], i["asRole"]) for i in lee] == [

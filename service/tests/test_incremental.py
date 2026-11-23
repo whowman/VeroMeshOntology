@@ -415,7 +415,7 @@ def test_a_check_in_one_replica_follows_an_edit_made_in_another(monkeypatch):
     C.apply(one, source="hr", items=[narrowed], base=BASE, ontology_dir=ONT)
     time.sleep(0.15)
     after = ask()
-    assert after["outcome"] == "refuse"
+    assert after["outcome"] == "consult"  # above the narrowed limit: the next authority up
     assert any("above its limit of 1,000 USD" in r for r in after["reasons"])
 
 
