@@ -35,7 +35,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import capacity  # noqa: E402
-from veromesh import changesets, decisions, incremental  # noqa: E402
+from veromesh import changesets, decisions, incremental, validation  # noqa: E402
 from veromesh.modelcache import VERSION_GRAPH  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
@@ -253,14 +253,19 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def warm():
+        """What the service does as it starts: the validation worker, then the planner state."""
         t0 = time.perf_counter()
+        validation.start_worker(capacity.ONTOLOGY)
+        t1 = time.perf_counter()
         incremental.warm(store, capacity.BASE)
-        return {"seconds": round(time.perf_counter() - t0, 1)}
+        return {"worker_s": round(t1 - t0, 1), "planner_s": round(time.perf_counter() - t1, 1)}
 
     step(
-        "planner_warm",
+        "startup",
         warm,
-        lambda w: f"Planner state built (as the service does at startup) in {w['seconds']} s",
+        lambda w: (
+            f"As the service starts: validation worker {w['worker_s']} s, planner state {w['planner_s']} s"
+        ),
     )
     step(
         "edit_lag",
