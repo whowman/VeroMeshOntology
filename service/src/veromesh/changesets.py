@@ -777,6 +777,7 @@ def _plan(store: RDFStore, meta: dict, items: list[Item], base: str, ontology_di
             report["warnings"].append(describe(sev, node, message))
     # Violations that were already there, among the entities this change could affect
     # (the whole model under full validation).
+    validation.tolerate_ended(report)
     report["preexistingViolations"] = sum(1 for sev, _, _ in before_findings if sev == "Violation")
     report["validated"] = "all" if focus is None else len(focus)
     for k in ("violations", "warnings"):
@@ -818,11 +819,34 @@ def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
         if fast is not None:
             st, _, (report, _, edit) = fast
             incremental.undo(st, edit)
-            _set_status(store, cs, "valid" if report["valid"] else "invalid", report)
-            return report
-    plan = _plan(store, meta, items, base, ontology_dir)
-    _set_status(store, cs, "valid" if plan.report["valid"] else "invalid", plan.report)
-    return plan.report
+        else:
+            report = _plan(store, meta, items, base, ontology_dir).report
+    if not report["valid"]:
+        report = _as_ended(store, cs, meta, report, base) or report  # what commit will do
+    _set_status(store, cs, "valid" if report["valid"] else "invalid", report)
+    return report
+
+
+def _as_ended(store: RDFStore, cs: str, meta: dict, report: dict, base: str) -> dict | None:
+    """The report commit will give when the only errors are dropped references: valid,
+    with a warning for each entity that will be kept as ended."""
+    found = _dropped(store, cs, meta, report, base)
+    if not found or report.get("violations"):
+        return None
+    out = {**report, "errors": [], "valid": True, "warnings": list(report.get("warnings") or [])}
+    for (t, i), (refs, _) in found.items():
+        who = ", ".join(f"{r['type']} '{r['id']}' ({r['field']})" for r in refs)
+        out["warnings"].append(
+            E.FieldError(
+                t,
+                i,
+                "id",
+                f"No longer in '{meta['source']}'; kept as ended because {who} still refers to it.",
+            ).as_dict()
+        )
+    out["summary"] = {**report["summary"], "errors": 0, "warnings": len(out["warnings"])}
+    out["ended"] = [{"type": t, "id": i, "referencedBy": refs} for (t, i), (refs, _) in found.items()]
+    return out
 
 
 _commit_locks: dict[str, threading.Lock] = {}
@@ -843,7 +867,103 @@ def commit(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
     # One commit per source at a time within this service; the version check below
     # catches anything that changed the source since the changeset was opened.
     with _source_lock(meta["source"]):
-        return _commit_locked(store, cs, meta, base=base, ontology_dir=ontology_dir)
+        try:
+            return _commit_locked(store, cs, meta, base=base, ontology_dir=ontology_dir)
+        except Conflict as refused:
+            found = _dropped(store, cs, meta, refused.report or {}, base)
+            if not found or (refused.report or {}).get("violations"):
+                raise
+            _write_ended(store, [stub for _, stub in found.values()], base, ontology_dir)
+            referrers = frozenset((r["type"], r["id"]) for refs, _ in found.values() for r in refs)
+            token = validation.ENDED_REFERRERS.set(referrers)
+            try:
+                report = _commit_locked(store, cs, meta, base=base, ontology_dir=ontology_dir)
+            finally:
+                validation.ENDED_REFERRERS.reset(token)
+            ended = _as_ended(store, cs, meta, {**refused.report, "valid": False}, base) or {}
+            report["ended"] = ended.get("ended", [])
+            report["warnings"] = list(report.get("warnings") or []) + [
+                w for w in ended.get("warnings", []) if "kept as ended" in w["message"]
+            ]
+            report["summary"]["warnings"] = len(report["warnings"])
+            _set_status(store, cs, "committed", report)
+            return report
+
+
+DROPPED = re.compile(r"^References '([^']*)', which no longer exists after this change\.$")
+STILL = re.compile(r"^Still referenced by (\S+) '([^']*)' \(([^)]*)\)\.$")
+
+
+def _dropped(store: RDFStore, cs: str, meta: dict, report: dict, base: str) -> dict:
+    """Entities a load drops while other sources still refer to them, when that is the only
+    reason it is refused: {(type, id): (referrers, minimal record)}; {} otherwise.
+
+    Such a load goes through (issue #67): each dropped entity is kept as a minimal record
+    (its type, name and the fields it must have, no references) in the ``ended`` source,
+    ranked below every other source and never hr, and each reference becomes a warning."""
+    errors = report.get("errors") or []
+    if not errors or meta["source"] == P.ENDED_SOURCE:
+        return {}
+    items = _load_items(store, cs)
+    upserted = {(it.type, it.id) for it in items if it.op != "delete"}
+    deleted = {(it.type, it.id) for it in items if it.op == "delete"}
+
+    def own(t: str, rid: str) -> bool:
+        """The referring entity is this source's own after the change: then the source
+        contradicts itself, and the load is refused as before."""
+        if (t, rid) in upserted:
+            return True
+        if meta["mode"] != "merge" or (t, rid) in deleted:
+            return False
+        iri, cls = E.iri_for(base, rid), E.TYPES[t].cls
+        res = store.query(f"ASK {{ GRAPH <{source_graph(meta['source'])}> {{ <{iri}> a <{cls}> }} }}")
+        return bool(res.get("boolean"))
+
+    dropped: dict[str, list[dict]] = {}
+    for e in errors:
+        m = DROPPED.match(e.get("message", ""))
+        if m and not own(e["type"], e["id"]):  # another source's entity refers to it
+            dropped.setdefault(m.group(1), []).append({"type": e["type"], "id": e["id"], "field": e["field"]})
+            continue
+        m = STILL.match(e.get("message", ""))
+        if m and e.get("field") == "id" and not own(m.group(1), m.group(2)):  # referred to elsewhere
+            dropped.setdefault(e["id"], []).append(
+                {"type": m.group(1), "id": m.group(2), "field": m.group(3)}
+            )
+            continue
+        return {}  # any other error: refused as before
+    out = {}
+    for rid, refs in dropped.items():
+        found = next(
+            ((t, sh, e) for t, sh in E.TYPES.items() if (e := shared_entities(store, t, base)[1].get(rid))),
+            None,
+        )
+        if found is None:
+            return {}
+        t, sheet, ent = found
+        stub = {"id": rid}
+        for col in sheet.cols:
+            key = E.field_key(col)
+            if key == "id" or not col.required:
+                continue
+            if col.kind == "ref" or ent.get(key) in (None, "", []):
+                return {}  # it cannot stand without a reference: refused as before
+            stub[key] = ent[key]
+        if ent.get("name"):
+            stub["name"] = ent["name"]
+        out[(t, rid)] = (refs, {"type": t, "entity": stub})
+    return out
+
+
+def _write_ended(store: RDFStore, stubs: list[dict], base: str, ontology_dir: str) -> None:
+    if P.ENDED_SOURCE not in P.categories(store):
+        P.register_source(
+            store,
+            P.ENDED_SOURCE,
+            "ended",
+            description="What a source dropped while another still refers to it",
+        )
+    apply(store, source=P.ENDED_SOURCE, items=stubs, base=base, ontology_dir=ontology_dir)
 
 
 def _commit_locked(store: RDFStore, cs: str, meta: dict, *, base: str, ontology_dir: str) -> dict:

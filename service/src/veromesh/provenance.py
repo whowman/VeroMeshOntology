@@ -47,7 +47,10 @@ SOURCE_BASE = "https://veromesh.ai/source/"
 CHANGESET_BASE = "https://veromesh.ai/changeset/"
 
 STEWARD_SOURCE = "steward"
-CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "spreadsheet", "steward")
+CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "spreadsheet", "steward", "ended")
+#: The system source that keeps a minimal record of what a source dropped while another
+#: source still refers to it (issue #67): ranked below every other source, never hr.
+ENDED_SOURCE = "ended"
 DEFAULT_CATEGORY = "spreadsheet"
 
 # ---------------------------------------------------------------------------- governance defaults

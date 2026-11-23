@@ -223,3 +223,85 @@ def test_lookups_find_what_a_scan_finds(ctx):
             )
         ]
         assert m.by(type_, field, *both) == scan
+
+
+# Employment decided by the authoritative source (issue #67, decided 23 November)
+
+DANA = {"id": "DanaExample", "name": "Dana Example", "employeeId": "E-1001", "rolesFilled": "ApManager"}
+LEE = {"id": "LeeExample", "name": "Lee Example", "employeeId": "E-0042", "rolesFilled": ["Controller"]}
+
+
+def load_source(client, name, category, people):
+    assert client.put(f"{API}/sources/{name}", json={"category": category}).status_code == 200
+    cs = client.post(f"{API}/changesets", json={"source": name}).json()["id"]
+    items = [{"type": "people", "entity": p} for p in people]
+    client.post(f"{API}/changesets/{cs}/items", json={"items": items})
+    r = client.post(f"{API}/changesets/{cs}/commit")
+    assert r.status_code == 200, r.text
+
+
+def test_a_principal_hr_no_longer_lists_is_not_employed(ctx):
+    client, _, service = ctx
+    attest_basis(client, service)
+    load_source(client, "workday", "hr", [LEE])  # HR lists Lee; Dana has left
+    d = ask(client, 800)
+    assert d["outcome"] == "refuse" and d["basis"]["principalStatus"] == "ended"
+    assert "Dana Example, is no longer employed" in d["reasons"][0]
+
+
+def test_a_principal_hr_lists_is_employed(ctx):
+    client, _, service = ctx
+    load_source(client, "workday", "hr", [DANA, LEE])
+    attest_basis(client, service)  # HR now supplies Dana's facts: owners confirm them
+    d = ask(client, 800)
+    assert d["outcome"] == "allow" and d["basis"]["principalStatus"] == "employed"
+
+
+def test_a_suspended_principal_s_agent_consults_the_next_authority_up(ctx):
+    client, _, service = ctx
+    load_source(client, "workday", "hr", [DANA, LEE])
+    load_source(client, "entra", "iam", [LEE])  # Dana's account is disabled: Entra ID leaves her out
+    attest_basis(client, service)
+    d = ask(client, 800)
+    assert d["basis"]["principalStatus"] == "no-access" and d["outcome"] == "consult"
+    # Dana's own authority (AP manager) is skipped: the controller is next.
+    assert d["basis"]["nextAuthority"] == "ControllerAuthority"
+    first = d["consult"][0]
+    assert first["role"] == "Controller" and "account is disabled" in first["why"][0]
+
+
+def test_with_no_hr_source_there_is_no_employment_rule(ctx):
+    client, _, service = ctx
+    attest_basis(client, service)
+    d = ask(client, 800)
+    assert d["outcome"] == "allow" and d["basis"]["principalStatus"] == "unknown"
+
+
+def test_a_contractor_only_entra_lists_is_employed(ctx):
+    from veromesh.decide import Model
+
+    client, _, service = ctx
+    load_source(client, "workday", "hr", [LEE])
+    load_source(client, "entra", "iam", [LEE, {"id": "kim.vo", "name": "Kim Vo"}])
+    m = Model(service.store, Settings().instance_base)
+    assert m.employment("kim.vo") == "contractor"  # no employee ID: Entra ID decides
+    assert m.employment("LeeExample") == "employed"
+    assert m.employment("DanaExample") == "ended"
+
+
+def test_a_source_dropping_someone_another_source_refers_to_is_not_refused(ctx):
+    """Entra ID drops Dana's account while the example (another source) still says the
+    Invoice Assistant acts for her: the load goes through, Dana is kept as ended, and the
+    agent is refused because HR no longer lists her (issue #67)."""
+    client, _, service = ctx
+    load_source(client, "workday", "hr", [LEE])  # Dana has left HR
+    load_source(client, "entra", "iam", [DANA, LEE])
+    cs = client.post(f"{API}/changesets", json={"source": "entra"}).json()["id"]
+    client.post(f"{API}/changesets/{cs}/items", json={"items": [{"type": "people", "entity": LEE}]})
+    # Dana is still in p2p (the example) and the hr source is Lee only: drop her from entra.
+    r = client.post(f"{API}/changesets/{cs}/commit")
+    assert r.status_code == 200, r.text
+    assert client.get(f"{API}/people/DanaExample").status_code == 200  # still there via the example
+    attest_basis(client, service)
+    d = ask(client, 800)
+    assert d["outcome"] == "refuse" and d["basis"]["principalStatus"] == "ended"

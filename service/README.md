@@ -77,7 +77,7 @@ A token without any of these roles gets 403.
 
 **Decision check.** `POST /api/v1/decisions/check` (`src/veromesh/decide.py`) answers, on the effective model:
 
-1. For whom: the agent's one principal.
+1. For whom: the agent's one principal, who must be employed. With a source of category `hr` registered, employment is HR's to decide: the principal is employed while an `hr` source lists them, or, with no employee ID, while an `iam` source does (a contractor; Entra ID is authoritative for contractors). Otherwise the check refuses, even if another source still lists them. Employed but with no account in any `iam` source (disabled): the agent's action consults the next authority up, skipping the principal's own authorities. `basis.principalStatus` says which (`employed`, `contractor`, `no-access`, `ended`, or `unknown` with no `hr` source). Issue #67; the design is in the source-weighting proposal.
 2. Set up for it: the agent is registered to perform the action.
 3. Authority: one the agent holds covers the action, is valid today, is in the amount's currency and within its limit, and so are the authorities it derives from. Above the agent's limit: consult the next authority up, the role whose authority for the action covers the amount with the smallest limit (a role with people in it first), and its co-approvers; only when no authority covers the amount, refuse and escalate to the principal (decided 23 November, issue #68).
 4. Attested facts only: every fact behind that authority is attested and current, or refuse.
