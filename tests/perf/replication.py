@@ -91,8 +91,14 @@ def edit_lag(store, writer: str, replicas: list[str], n: int, base: str, ontolog
     """``n`` edits, one a second: each edit's time, and how long until each replica has it."""
     lags: list[float] = []
     edits: list[float] = []
-    # The first edit of a fresh process builds its view of the model; time it on its own.
+    # The first edit of a fresh process: timed on its own, and profiled (where the time goes).
+    import cProfile
+    import io
+    import pstats
+
+    prof = cProfile.Profile()
     t = time.perf_counter()
+    prof.enable()
     changesets.apply(
         store,
         source="hr",
@@ -100,8 +106,19 @@ def edit_lag(store, writer: str, replicas: list[str], n: int, base: str, ontolog
         base=base,
         ontology_dir=ontology,
     )
+    prof.disable()
     first = time.perf_counter() - t
-    print(f"(planner after the first edit: {dict(incremental.STATS)})", flush=True)
+    text = io.StringIO()
+    pstats.Stats(prof, stream=text).sort_stats("cumulative").print_stats(18)
+    print(f"(planner after the first edit: {dict(incremental.STATS)}; where its time went:)", flush=True)
+    print(
+        "\n".join(
+            line
+            for line in text.getvalue().splitlines()
+            if "{" not in line or "veromesh" in line or "httpx" in line
+        )[:6000],
+        flush=True,
+    )
     for i in range(n):
         item = {"type": "people", "op": "upsert", "entity": {"id": "Person3-d0", "name": f"Replicated {i}"}}
         t = time.perf_counter()
