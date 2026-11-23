@@ -576,7 +576,10 @@ def write_attestation(
     base: str,
     note: str | None = None,
     at: str | None = None,
+    log=None,
 ) -> Attestation:
+    """Record an attestation: first on the decision log's hash chain (when a log is
+    given), then in the attestations graph the model reads."""
     at = at or now_ts()
     days = min(cadence_days(type_, k) for k in values) if values else DEFAULT_CADENCE_DAYS
     expires = (
@@ -595,6 +598,8 @@ def write_attestation(
         expires_at=expires,
         note=note,
     )
+    if log is not None:
+        log.append(attestation_entry(a))
     g = Graph()
     s = URIRef(a.iri)
     g.add((s, RDF.type, VMP.Attestation))
@@ -615,6 +620,82 @@ def write_attestation(
         g.add((s, VMP.note, Literal(note)))
     store.load_turtle(g.serialize(format="nt"), ATTESTATIONS_GRAPH, replace=False)
     return a
+
+
+def attestation_entry(a: Attestation) -> dict:
+    """The decision log entry for an attestation: everything the model relies on."""
+    return {
+        "kind": "attestation",
+        "outcome": a.verdict,
+        "subject": a.person,
+        "attestation": a.iri,
+        "entityType": a.type,
+        "entityId": a.id,
+        "source": a.source,
+        "role": a.role,
+        "fieldHashes": dict(sorted(a.hashes.items())),
+        "attestedAt": a.at,
+        "expiresAt": a.expires_at,
+        "note": a.note,
+    }
+
+
+def _same_instant(x: str | None, y: str | None) -> bool:
+    if x is None or y is None:
+        return x == y
+    return _dt(x) == _dt(y)
+
+
+def verify_attestations(store: RDFStore, log) -> dict:
+    """Check the attestations the model relies on against the decision log's chain:
+    the chain itself, then each attestation in the graph against its entry. Reports
+    attestations whose recorded values differ (altered), that are in the graph with
+    no entry (unrecorded: written around the service), and entries whose attestation
+    is no longer in the graph (missing)."""
+    chain = log.verify()
+    entries: dict[str, dict] = {}
+    after = 0
+    while True:
+        page = log.find(kind="attestation", after_seq=after, limit=1000)
+        if not page:
+            break
+        for e in page:
+            entries[e["attestation"]] = e
+        after = page[-1]["seq"]
+    altered, unrecorded = [], []
+    seen = set()
+    for a in _read_attestations(store, None):
+        e = entries.get(a.iri)
+        if e is None:
+            unrecorded.append(a.iri[len(ATTESTATION_BASE) :])
+            continue
+        seen.add(a.iri)
+        differs = [
+            name
+            for name, same in (
+                ("verdict", e["outcome"] == a.verdict),
+                ("person", e["subject"] == a.person),
+                ("role", e["role"] == a.role),
+                ("entity", (e["entityType"], e["entityId"]) == (a.type, a.id)),
+                ("source", e["source"] == a.source),
+                ("fields", e["fieldHashes"] == a.hashes),
+                ("at", _same_instant(e["attestedAt"], a.at)),
+                ("expiresAt", _same_instant(e.get("expiresAt"), a.expires_at)),
+            )
+            if not same
+        ]
+        if differs:
+            altered.append({"attestation": a.iri[len(ATTESTATION_BASE) :], "differs": differs})
+    missing = [iri[len(ATTESTATION_BASE) :] for iri in entries if iri not in seen]
+    return {
+        "ok": chain.ok and not (altered or unrecorded or missing),
+        "chain": chain.as_dict(),
+        "attestations": len(seen) + len(unrecorded),
+        "recorded": len(entries),
+        "altered": altered,
+        "unrecorded": unrecorded,
+        "missing": missing,
+    }
 
 
 def disputed(atts: list[Attestation], claim: Claim, key: str) -> bool:
@@ -1076,6 +1157,7 @@ def attest(
     note: str | None = None,
     signed_in: bool = False,
     owner_only: bool = False,
+    log=None,
 ) -> dict:
     """Confirm or dispute fields of an entity: by default the values VeroMesh currently
     believes (each field's winning source); with ``source``, that source's values."""
@@ -1115,6 +1197,7 @@ def attest(
             role=role,
             base=base,
             note=note,
+            log=log,
         )
         for src, vals in sorted(by_source.items())
     ]
@@ -1141,6 +1224,7 @@ def correct(
     role: str,
     note: str | None = None,
     signed_in: bool = False,
+    log=None,
 ) -> dict:
     """A steward correction: recorded as the 'steward' source's claim, validated like any
     change, and attested by the steward in the same step."""
@@ -1191,6 +1275,7 @@ def correct(
         role=role,
         base=base,
         note=note,
+        log=log,
     )
     return {"report": report, "attestation": a.summary() | {"fields": sorted(a.hashes)}, "warnings": warnings}
 

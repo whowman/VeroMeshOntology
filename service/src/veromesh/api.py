@@ -4,6 +4,8 @@
 # dependency aliases defined inside create_app() at runtime.
 
 import logging
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
@@ -31,6 +33,7 @@ from . import (
     entities,
     followup,
     gcsetup,
+    incremental,
     licence,
     mcp_server,
     suggest,
@@ -161,6 +164,8 @@ def create_app(
             )
         validation.start_worker(s.ontology_dir)  # so the first edit does not wait for it
         gcsetup.after_startup()  # libraries loaded: full collections need not visit them again
+        if s.warm_on_start:
+            threading.Thread(target=warm_planner, args=(app, s), name="veromesh-warm", daemon=True).start()
         job = usage.Job(lambda: usage_of(app), s.usage_interval_s).start() if s.usage_job else None
         try:
             async with app.state.mcp.session_manager.run():
@@ -181,6 +186,24 @@ def create_app(
     app.state.settings = settings
     app.state.decision_log = decision_log
     app.state.usage = None
+    app.state.planner = "not started"
+
+    def warm_planner(a: FastAPI, c: Settings) -> None:
+        """Build the planner state edits and checks share, so the first of them after a
+        start does not build it (about 30 s at 20,000 people, minutes at 500,000). An edit
+        that arrives meanwhile waits for this build rather than starting another."""
+        a.state.planner = "warming"
+        t0 = time.perf_counter()
+        try:
+            if a.state.service is None:
+                a.state.service = build_service(c)
+            incremental.warm(a.state.service.store, c.instance_base)
+        except Exception:  # the first edit or check builds it instead
+            a.state.planner = "not warmed"
+            log.exception("Could not build the planner state at startup")
+            return
+        a.state.planner = "ready"
+        log.info("Planner state ready %.1f s after startup", time.perf_counter() - t0)
 
     def usage_of(a: FastAPI) -> usage.Usage:
         """The install's usage reports (built on first use, kept with the app)."""
@@ -325,7 +348,9 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        # planner: whether this copy has built the state edits and checks use (warming,
+        # ready). It does not change the status: requests are served while it builds.
+        return {"status": "ok", "version": __version__, "planner": app.state.planner}
 
     @app.get("/ontologies", dependencies=need(auth.READ))
     def list_ontologies(s: Svc) -> list[str]:
@@ -706,7 +731,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     ) -> list[dict]:
         """Decision log entries in the order they were recorded: decisions (allow, consult, refuse),
-        and the overrides and outcomes that refer to them. Page with afterSeq."""
+        the overrides and outcomes that refer to them, and attestations. Page with afterSeq."""
         return dl.find(
             agent=agent,
             principal=principal,
@@ -848,6 +873,13 @@ def create_app(
         """Walk the whole hash chain: ok, or the first entry that was changed, removed or inserted."""
         return dl.verify().as_dict()
 
+    @app.get("/api/v1/attestations/verify", dependencies=need(auth.STEWARD), tags=["governance"])
+    def attestations_verify(s: Svc, dl: Log) -> dict:
+        """Check the attestations the model relies on against the decision log's hash chain:
+        ok, or the attestations altered, written around the service (unrecorded), or removed
+        from the model (missing)."""
+        return prov.verify_attestations(s.store, dl)
+
     @app.get("/api/v1/decisions/inbox", dependencies=need(auth.READ), tags=["decisions"])
     def decisions_inbox(
         s: Svc, c: Cfg, dl: Log, who: Who, person: str | None = None, days: int = 7
@@ -973,7 +1005,7 @@ def create_app(
         status_code=201,
         tags=["governance"],
     )
-    def entity_attest(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
+    def entity_attest(s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, body: AttestationIn) -> dict:
         """Confirm or dispute fields (default: all) of what VeroMesh believes, or of one source's values.
         The attester is the signed-in person, who must fill the role they act in. Stewards may attest
         anything; anyone else, only entities whose owner or steward role they act in."""
@@ -992,6 +1024,7 @@ def create_app(
             note=body.note,
             signed_in=signed_in,
             owner_only=owner_only,
+            log=dl,
         )
 
     @app.post(
@@ -1000,7 +1033,7 @@ def create_app(
         status_code=201,
         tags=["governance"],
     )
-    def entity_correct(s: Svc, c: Cfg, who: Who, type_: str, rid: str, body: CorrectionIn):
+    def entity_correct(s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, body: CorrectionIn):
         """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested
         by the signed-in person."""
         attester, signed_in = attester_for(s, c, who, body.attester)
@@ -1016,6 +1049,7 @@ def create_app(
                 role=body.role,
                 note=body.note,
                 signed_in=signed_in,
+                log=dl,
             )
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
