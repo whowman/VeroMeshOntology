@@ -59,12 +59,51 @@ To write, with screenshots of the steward screen:
 
 # Maintaining the model in the workbook (model editors)
 
-To write:
+The **VeroMesh model workbook** is the standard format in which an organization gives VeroMesh what its systems of record do not hold: who may decide what and up to what limit, which AI uses are approved, which actions move which KPIs, and the operating model around them. It is an Excel workbook with one sheet per kind of thing; every column is explained in the **Workbook Reference**, generated from the same rules VeroMesh checks against.
 
-1. Download a template or an export of a source (`veromesh-connect spreadsheet template` / `export`).
-2. Edit: one sheet per kind, IDs, references between sheets.
-3. Check it with a dry run, and read the findings (each points to a sheet, row and column).
-4. Import it.
+## What goes in the workbook, and what comes from systems
+
+Use the workbook for facts no system holds, and let connectors bring the rest:
+
+| Facts | Usually from | Workbook sheets |
+| --- | --- | --- |
+| People, managers, job roles | Workday or another HR system, through its connector | People and Roles only for roles HR does not hold (boards, committees) |
+| Accounts, groups, AI agents' sign-ins | Microsoft Entra ID, through its connector | Agents, for what Entra ID does not say: the actions an agent performs |
+| Approval limits and delegations | Often a delegation of authority policy, not a system | Authorities, Co-approvals, Policies |
+| Approved AI uses | The AI review board's register or minutes | AI use cases |
+| Consequential actions and what they affect | The process owners | Actions, Impacts, Processes |
+| Objectives, KPIs, capabilities | The operating model, the strategy office | Objectives, KPIs, Capabilities |
+| Systems, data products, data elements | The CMDB and the data catalog, once connected | Systems, Data products, Data elements, Column bindings |
+
+A workbook may cover only some sheets. Each workbook is loaded as its own **source** (for example `governance`), so the AI board's sheets and finance's sheets can be kept by different teams and loaded separately.
+
+## Filling it in
+
+1. **Get the template.** `veromesh-connect spreadsheet template -o model.xlsx` writes an empty workbook built from your installation's own rules, with a "How to use" sheet; `--example` fills it with a worked procure-to-pay example to copy from. To change a source that is already loaded, start from its export: `veromesh-connect spreadsheet export --source governance -o governance.xlsx`.
+2. **Fill the sheets in order.** Rows refer to each other by ID, so fill the things referred to first:
+    1. Roles (only those HR does not hold), Objectives, KPIs, Capabilities, Processes;
+    2. Policies, then Actions, then Impacts (which KPI or capability each action moves, and from what amount it is material);
+    3. Authorities (who may take which actions, up to what limit, from when to when), then Co-approvals (second sign-offs above an amount);
+    4. Agents (each acts for one person), then AI use cases (which agents may run, for which actions).
+3. **Follow the conventions.** IDs are short and stable: letters, digits, `.`, `_` or `-` (`APManager`, `ApproveSupplierInvoice`). Several values in one cell are separated by `;`. Dates are `YYYY-MM-DD`; amounts are plain numbers with the currency in its own column. Required columns are in dark blue; hover over a header for its meaning.
+4. **Refer to what VeroMesh already holds.** A reference may point at a person loaded from Workday or a role from Entra ID: use their ID in VeroMesh (an employee ID, or a role's ID). You do not need to copy them into the workbook.
+
+## Checking and loading it
+
+1. **Check it first:** `veromesh-connect spreadsheet import governance.xlsx --source governance --dry-run`. Nothing is written. Every finding names the sheet, row and column, for example *Authorities row 7, Limit amount: not a number*, or *Agents row 3, Acts for: No entity with ID 'E1234'*.
+2. **Fix and repeat** until it reports no errors or violations. Warnings (for example a person with no employee ID) do not block a load.
+3. **Load it** with the same command without `--dry-run`. The workbook becomes the whole of that source: a row removed from the workbook is removed from VeroMesh. Loading the same file again changes nothing.
+4. **Keep it current.** Change the workbook and load it again whenever a limit, a delegation or an approval changes. Owners then confirm what the workbook says on the steward screen, like any other fact.
+
+## Common findings
+
+| Finding | What it means | Fix |
+| --- | --- | --- |
+| No entity with ID '…' | The row refers to an ID that is in neither this workbook nor VeroMesh | Check the spelling, or load the source that holds it first |
+| Required value missing | A dark blue column is empty | Fill it in |
+| Only one value allowed | A single-value column has several, separated by `;` | Keep one |
+| Unknown column | A header does not match the template | Start from a fresh template, or correct the header |
+| Still referenced by … | A row you removed is used elsewhere (for example a person an agent acts for) | Change the rows that use it first |
 
 # Data elements and column bindings
 
@@ -89,5 +128,8 @@ To write:
 - **Microsoft Copilot Studio:** see `docs/copilot-studio.md`.
 
 # Glossary
+
+See also the **Workbook Reference** for every sheet and column of the model workbook.
+
 
 To write: the shared terms (attestation, authority, changeset, conflict, effective model, source, steward and so on).

@@ -18,7 +18,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "What achieving this objective means, in a sentence or two.",
         "key": "definition",
         "kind": "text",
         "label": "Definition",
@@ -61,7 +61,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "How the KPI is calculated, and what a good value looks like.",
         "key": "definition",
         "kind": "text",
         "label": "Definition",
@@ -88,7 +88,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the data products the KPI is calculated from. Separate several with ';'.",
         "key": "computedFromDataProducts",
         "kind": "ref",
         "label": "Computed from data products",
@@ -123,7 +123,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "What the capability covers, in business terms.",
         "key": "definition",
         "kind": "text",
         "label": "Definition",
@@ -142,7 +142,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the objectives this capability contributes to. Separate several with ';'.",
         "key": "servesObjectives",
         "kind": "ref",
         "label": "Serves objectives",
@@ -153,7 +153,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the broader capability this one is part of. Empty for a top-level capability.",
         "key": "parentCapability",
         "kind": "ref",
         "label": "Parent capability",
@@ -164,7 +164,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the processes that carry out this capability. Separate several with ';'.",
         "key": "realizedByProcesses",
         "kind": "ref",
         "label": "Realized by processes",
@@ -175,7 +175,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the data products this capability creates and answers for. Separate several with ';'.",
         "key": "producesDataProducts",
         "kind": "ref",
         "label": "Produces data products",
@@ -186,7 +186,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the data products this capability depends on. Separate several with ';'.",
         "key": "consumesDataProducts",
         "kind": "ref",
         "label": "Consumes data products",
@@ -232,7 +232,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the systems the process runs on. Separate several with ';'.",
         "key": "runsOnSystems",
         "kind": "ref",
         "label": "Runs on systems",
@@ -344,7 +344,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "What the role is accountable for, as its job description would say it.",
         "key": "definition",
         "kind": "text",
         "label": "Definition",
@@ -385,7 +385,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "Work email. Used to match the person to their sign-in.",
         "key": "email",
         "kind": "text",
         "label": "Email",
@@ -394,7 +394,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "IDs of the roles the person holds today. Separate several with ';'.",
         "key": "rolesFilled",
         "kind": "ref",
         "label": "Roles filled",
@@ -405,7 +405,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the person's manager.",
         "key": "reportsTo",
         "kind": "ref",
         "label": "Reports to",
@@ -454,7 +454,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the actions this authority lets the holder take. Separate several with ';'.",
         "key": "actionsCovered",
         "kind": "ref",
         "label": "Actions covered",
@@ -465,7 +465,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the capability the authority is limited to. Empty: wherever its actions apply.",
         "key": "withinCapability",
         "kind": "ref",
         "label": "Within capability",
@@ -476,7 +476,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "The largest amount the holder may decide for one action, in the currency given. Empty: no amount limit.",
         "key": "limitAmount",
         "kind": "decimal",
         "label": "Limit amount",
@@ -492,7 +492,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "First day the authority holds (YYYY-MM-DD). Empty: from now.",
         "key": "validFrom",
         "kind": "date",
         "label": "Valid from",
@@ -500,7 +500,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "Last day the authority holds (YYYY-MM-DD). Empty: until withdrawn.",
         "key": "validUntil",
         "kind": "date",
         "label": "Valid until",
@@ -559,7 +559,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the role whose second sign-off is needed.",
         "key": "approverRole",
         "kind": "ref",
         "label": "Approver role",
@@ -621,7 +621,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "IDs of the actions the agent is built to take. Separate several with ';'.",
         "key": "performsActions",
         "kind": "ref",
         "label": "Performs actions",
@@ -632,7 +632,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the data products the agent reads. Separate several with ';'.",
         "key": "consumesDataProducts",
         "kind": "ref",
         "label": "Consumes data products",
@@ -643,7 +643,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the systems the agent works in. Separate several with ';'.",
         "key": "runsOnSystems",
         "kind": "ref",
         "label": "Runs on systems",
@@ -689,7 +689,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "approved: may run. conditional: may run under the conditions given. suspended: must not run for now. retired: no longer in use.",
         "key": "status",
         "kind": "str_enum",
         "label": "Status",
@@ -703,7 +703,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the agents this approval applies to. Separate several with ';'.",
         "key": "coversAgents",
         "kind": "ref",
         "label": "Covers agents",
@@ -725,7 +725,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "Date of the board's decision (YYYY-MM-DD).",
         "key": "approvedOn",
         "kind": "date",
         "label": "Approved on",
@@ -773,7 +773,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "ID of the process the action belongs to.",
         "key": "partOfProcess",
         "kind": "ref",
         "label": "Part of process",
@@ -812,7 +812,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "ID of the action that can move the KPI or capability.",
         "key": "action",
         "kind": "ref",
         "label": "Action",
@@ -823,7 +823,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the KPI or capability the action can move.",
         "key": "impactOn",
         "kind": "ref",
         "label": "Impact on",
@@ -886,7 +886,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the role that looks after the product's quality and definitions day to day.",
         "key": "stewardRole",
         "kind": "ref",
         "label": "Steward role",
@@ -897,7 +897,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the systems the data product is stored in or served from. Separate several with ';'.",
         "key": "runsOnSystems",
         "kind": "ref",
         "label": "Runs on systems",
@@ -908,7 +908,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the data products built from this one (downstream). Separate several with ';'.",
         "key": "feedsDataProducts",
         "kind": "ref",
         "label": "Feeds data products",
@@ -919,7 +919,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "IDs of the business data elements the product holds. Separate several with ';'.",
         "key": "containsDataElements",
         "kind": "ref",
         "label": "Contains data elements",
@@ -930,7 +930,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "The highest sensitivity of the data it holds; it decides who may see it.",
         "key": "sensitivity",
         "kind": "iri_enum",
         "label": "Sensitivity",
@@ -976,7 +976,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "The system's ID in your CMDB, so the two records can be matched.",
         "key": "cmdbId",
         "kind": "text",
         "label": "CMDB ID",
@@ -984,7 +984,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "ID of the role accountable for what the system is used for.",
         "key": "businessOwner",
         "kind": "ref",
         "label": "Business owner",
@@ -995,7 +995,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the role accountable for running and changing it.",
         "key": "technicalOwner",
         "kind": "ref",
         "label": "Technical owner",
@@ -1006,7 +1006,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "How much the business depends on the system.",
         "key": "criticality",
         "kind": "str_enum",
         "label": "Criticality",
@@ -1020,7 +1020,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "Where the system is in its life.",
         "key": "lifecycle",
         "kind": "str_enum",
         "label": "Lifecycle",
@@ -1034,7 +1034,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "The highest sensitivity of the data the system holds.",
         "key": "sensitivity",
         "kind": "iri_enum",
         "label": "Sensitivity",
@@ -1083,7 +1083,7 @@
         "required": true
       },
       {
-        "help": "",
+        "help": "What the data element means in business terms, as your glossary states it.",
         "key": "definition",
         "kind": "text",
         "label": "Definition",
@@ -1114,7 +1114,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the role that maintains its definition and quality day to day.",
         "key": "stewardRole",
         "kind": "ref",
         "label": "Steward role",
@@ -1125,7 +1125,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "ID of the system that is the source of truth for it.",
         "key": "authoritativeSource",
         "kind": "ref",
         "label": "Authoritative source",
@@ -1136,7 +1136,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "How sensitive the data element is; it decides who may see it.",
         "key": "sensitivity",
         "kind": "iri_enum",
         "label": "Sensitivity",
@@ -1150,7 +1150,7 @@
         ]
       },
       {
-        "help": "",
+        "help": "Regulatory categories it falls into. Separate several with ';'.",
         "key": "dataCategories",
         "kind": "iri_enum",
         "label": "Data categories",
@@ -1196,7 +1196,7 @@
         "required": false
       },
       {
-        "help": "",
+        "help": "ID of the data element the column holds.",
         "key": "dataElement",
         "kind": "ref",
         "label": "Data element",
