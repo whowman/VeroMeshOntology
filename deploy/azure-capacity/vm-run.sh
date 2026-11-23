@@ -179,9 +179,12 @@ else
         --log "$DLOG" --out "results/replication-$size.json" \
         >"results/replication-$size.txt" 2>"results/replication-$size.err" || echo "(replication $size: a check did not pass)"
       cat "results/replication-$size.txt"
-      if [ -s "results/replication-$size.err" ]; then
-        echo "--- replication $size: errors (the last 60 lines)"
-        tail -n 60 "results/replication-$size.err"
+      # Reads falling back to a replica during the failover step are expected; leave them out.
+      grep -vE "reading from .* until it is back|RDF store back after|reading from http" \
+        "results/replication-$size.err" >"results/replication-$size.problems" || true
+      if [ -s "results/replication-$size.problems" ]; then
+        echo "--- replication $size: errors (the last 40 lines)"
+        tail -n 40 "results/replication-$size.problems"
       fi
       cat "results/replication-$size.err" >>"$LOG"
     fi
@@ -191,4 +194,13 @@ echo
 docker logs fuseki 2>&1 | grep -E "GC\([0-9]+\) Pause" | grep -oE "[0-9.]+ms$" | tr -d ms |
   awk '{ n++; t += $1; if ($1 > max) max = $1 } END { printf "Fuseki GC pauses: %d, longest %.0f ms, total %.1f s\n", n, max, t / 1000 }'
 df -h "$(docker info -f '{{.DockerRootDir}}')" | tail -1 | awk '{ print "Disk used: " $3 " of " $2 }'
+# Azure keeps only the end of the output, so the replication results come last as well.
+if [ "$FUSEKI" = replicated ] && [ "$MODE" != grow ]; then
+  for size in $SIZES; do
+    echo
+    echo "=== replication $size (repeated, so it survives truncation)"
+    # One line per measurement: leave out the first edit's profile.
+    grep -E '^[A-Z]|^[a-z_]+: FAILED' "results/replication-$size.txt" 2>/dev/null | grep -v '^Ordered by' || echo "(no results)"
+  done
+fi
 step "done"

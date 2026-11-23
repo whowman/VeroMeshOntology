@@ -168,6 +168,27 @@ def test_reads_fall_back_to_the_replicas_when_the_writer_is_unreachable():
     assert calls[-1] == ("replicas", "/veromesh/query")
 
 
+def test_an_outage_is_logged_once_and_its_end_once(caplog):
+    up = {"writer": False}
+
+    def primary(request):
+        if not up["writer"]:
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, json=RESULTS)
+
+    store, _ = fallback_store(primary)
+    with caplog.at_level("WARNING", logger="veromesh.rdf_store"):
+        for _ in range(50):
+            store.list_graphs()
+        up["writer"] = True
+        store.list_graphs()
+        store.list_graphs()
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 2
+    assert "unreachable" in lines[0] and "until it is back" in lines[0]
+    assert "back after" in lines[1] and "50 reads went to" in lines[1]
+
+
 def test_bad_queries_do_not_fall_back():
     store, calls = fallback_store(lambda r: httpx.Response(400, text="Parse error"))
     with pytest.raises(StoreRequestError):
