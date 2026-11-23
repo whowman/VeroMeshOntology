@@ -2,7 +2,9 @@
 
 Every entry is appended, never changed: a decision (allow, consult or refuse,
 with its reasons), and later entries that refer to it (a person's override,
-the outcome). Each entry carries the hash of the one before it, so removing or
+the outcome). Attestations (a person confirming or disputing facts about an
+entity) are appended to the same chain as they are made, so the attestations
+the model relies on can be checked against it (provenance.verify_attestations). Each entry carries the hash of the one before it, so removing or
 editing an entry anywhere breaks the chain from that point on, and
 ``verify()`` says where.
 
@@ -38,7 +40,8 @@ from urllib.parse import unquote, urlparse
 log = logging.getLogger("veromesh.decisions")
 
 GENESIS = "0" * 64
-KINDS = ("decision", "override", "outcome")
+KINDS = ("decision", "override", "outcome", "attestation")
+ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
 # Fields an entry may carry, beyond those the log assigns (id, seq, recordedAt, prevHash, hash).
 FIELDS = (
@@ -56,6 +59,15 @@ FIELDS = (
     "consult",
     "basis",
     "note",
+    # attestation entries: which attestation, about what, and the hashes of the values attested
+    "attestation",
+    "entityType",
+    "entityId",
+    "source",
+    "role",
+    "fieldHashes",
+    "attestedAt",
+    "expiresAt",
 )
 
 
@@ -79,7 +91,24 @@ def check(fields: dict) -> dict:
     kind = fields.get("kind")
     if kind not in KINDS:
         raise InvalidEntry(f"kind must be one of {', '.join(KINDS)}.")
-    if kind == "decision":
+    if kind == "attestation":
+        if fields.get("outcome") not in ATTESTATION_VERDICTS:
+            raise InvalidEntry(f"An attestation's outcome is one of {', '.join(ATTESTATION_VERDICTS)}.")
+        if fields.get("refersTo"):
+            raise InvalidEntry("An attestation refers to no decision.")
+        missing = [
+            k
+            for k in ("attestation", "entityType", "entityId", "source", "role", "attestedAt")
+            if not fields.get(k)
+        ]
+        if missing:
+            raise InvalidEntry(f"An attestation entry needs {', '.join(missing)}.")
+        h = fields.get("fieldHashes")
+        if not isinstance(h, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in h.items()
+        ):
+            raise InvalidEntry("fieldHashes must map each field attested to its value's hash.")
+    elif kind == "decision":
         if fields.get("outcome") not in DECISION_OUTCOMES:
             raise InvalidEntry(f"A decision's outcome is one of {', '.join(DECISION_OUTCOMES)}.")
         if fields.get("refersTo"):

@@ -161,7 +161,8 @@ def test_every_check_is_logged_in_one_chain(ctx):
     for a in (800, 3000, 7000):
         ask(client, a)
     v = log.verify()
-    assert v.ok and v.entries == 4
+    attested = log.find(kind="attestation")  # the facts attested are on the same chain
+    assert v.ok and attested and v.entries == 4 + len(attested)
     assert [e["outcome"] for e in log.find(kind="decision")] == ["refuse", "allow", "consult", "refuse"]
 
 
