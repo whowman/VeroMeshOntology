@@ -28,6 +28,8 @@ REPO=https://github.com/whowman/VeroMeshOntology.git
 
 fail() {
   echo "FAILED at: $1"
+  echo "--- disk space:"
+  df -h / "$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)" 2>/dev/null
   echo "--- the end of $LOG:"
   tail -c 3000 "$LOG"
   exit 1
@@ -183,4 +185,5 @@ fi
 echo
 docker logs fuseki 2>&1 | grep -E "GC\([0-9]+\) Pause" | grep -oE "[0-9.]+ms$" | tr -d ms |
   awk '{ n++; t += $1; if ($1 > max) max = $1 } END { printf "Fuseki GC pauses: %d, longest %.0f ms, total %.1f s\n", n, max, t / 1000 }'
+df -h "$(docker info -f '{{.DockerRootDir}}')" | tail -1 | awk '{ print "Disk used: " $3 " of " $2 }'
 step "done"
