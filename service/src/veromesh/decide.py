@@ -6,7 +6,11 @@ enforcement at a gateway comes later.
 
 The steps, all on the effective model (what VeroMesh believes now):
 
-1. **For whom.** The agent acts for exactly one person (its principal).
+1. **For whom.** The agent acts for exactly one person (its principal). With an
+   ``hr`` source registered, the principal must be employed: an hr source lists them,
+   or, with no employee ID, an ``iam`` source does (a contractor). Otherwise refuse.
+   Employed but with no account in any iam source (disabled): their agents consult the
+   next authority up, skipping the principal's own (issue #67, decided 23 November).
 2. **Set up for it.** The agent is registered to perform the action.
 3. **Authority.** An authority the agent holds covers the action, is valid on
    the day, is in the amount's currency and its limit is not exceeded; its
@@ -39,6 +43,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from . import changesets, clock, followup, incremental
+from . import entities as E
 from . import provenance as prov
 from .decisions import DecisionLog
 from .rdf_store import RDFStore
@@ -88,6 +93,39 @@ class Model:
     def people_in(self, role: str) -> list[dict]:
         return [{"id": p["id"], "name": p.get("name")} for p in self.by("people", "rolesFilled", role)]
 
+    def sources_holding(self, type_: str, rid: str) -> set[str]:
+        """The source systems that state this entity (one query, not a read of every claim)."""
+        iri = E.iri_for(self._base, rid)
+        cls = E.TYPES[type_].cls
+        res = self._store.query(
+            f"""SELECT DISTINCT ?g WHERE {{ GRAPH ?g {{ <{iri}> a <{cls}> }}
+                FILTER(STRSTARTS(STR(?g), "{changesets.SOURCE_GRAPH_BASE}")) }}"""
+        )
+        return {b["g"]["value"][len(changesets.SOURCE_GRAPH_BASE) :] for b in res["results"]["bindings"]}
+
+    def employment(self, pid: str) -> str:
+        """Whether a person is employed, decided by the authoritative source (issue #67).
+
+        With an ``hr`` source registered: ``employed`` while an hr source lists them;
+        ``contractor`` when only an ``iam`` source lists them and they have no employee
+        ID (Entra ID is authoritative for contractors; decided 23 November);
+        ``no-access`` when employed but an iam source exists and lists no enabled account
+        for them; ``ended`` otherwise. With no hr source: ``unknown`` (no rule applies)."""
+        cats = prov.categories(self._store)
+        hr = {s for s, c in cats.items() if c == "hr"}
+        if not hr:
+            return "unknown"
+        iam = {s for s, c in cats.items() if c == "iam"}
+        holding = self.sources_holding("people", pid)
+        person = self.get("people", pid) or {}
+        if holding & hr:
+            if iam and not holding & iam and person.get("employeeId"):
+                return "no-access"
+            return "employed"
+        if holding & iam and not person.get("employeeId"):
+            return "contractor"
+        return "ended"
+
     def owner_roles(self, type_: str, rid: str) -> list[str]:
         e = self.get(type_, rid) or {}
         return sorted({e[k] for k in OWNER_FIELDS if e.get(k)})
@@ -119,8 +157,6 @@ def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) 
     """The authority a role holds for ``action`` that covers ``amt`` on ``day``, with the
     smallest limit: the next authority up from the agent's. A role with people in it
     comes before a vacant one, so a decision does not wait on a post nobody fills."""
-    if amt is None:
-        return None
     found = []
     for a in m.by("authorities", "actionsCovered", action):
         holder = a.get("holder")
@@ -129,8 +165,12 @@ def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) 
         if any(_valid(x, day) for x in _chain(m, a)):
             continue
         limit = _dec(a.get("limitAmount"))
-        if limit is not None and ((a.get("currency") or "").upper() != cur or amt > limit):
-            continue
+        if (
+            amt is not None
+            and limit is not None
+            and ((a.get("currency") or "").upper() != cur or amt > limit)
+        ):
+            continue  # with no amount, any authority for the action covers it
         found.append((not m.people_in(holder), limit is None, limit or Decimal(0), a["id"], a))
     return min(found, key=lambda f: f[:4])[4] if found else None
 
@@ -195,8 +235,19 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
     if ag is None:
         raise prov_not_found(f"No agent '{agent}' in the model.")
     principal = ag.get("actsFor")
+    suspended = False
     if not principal or m.get("people", principal) is None:
         refuse.append(f"{m.name('agents', agent)} acts for nobody in the model.")
+    else:
+        status = m.employment(principal)
+        basis["principalStatus"] = status
+        if status == "ended":
+            refuse.append(
+                f"Its principal, {m.name('people', principal)}, is no longer employed: "
+                "no HR source lists them."
+            )
+        elif status == "no-access":
+            suspended = True  # employed, but their account is disabled: skip to the next authority up
     act = m.get("actions", action)
     if act is None:
         raise prov_not_found(f"No action '{action}' in the model.")
@@ -233,11 +284,21 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
         problems[a["id"]] = why
         if not why and used is None:
             used = a["id"]
+    # A suspended principal (employed, account disabled) cannot be the authority behind the
+    # agent: skip their own authorities and go to the next authority up (decided 23 November).
+    principal_auths: set[str] = set()
+    if suspended:
+        mine = (m.get("people", principal) or {}).get("rolesFilled") or []
+        mine = {mine} if isinstance(mine, str) else set(mine)
+        principal_auths = {
+            a["id"] for a in m.by("authorities", "actionsCovered", action) if a.get("holder") in mine
+        }
     if used is None and held and not refuse:
         a = held[0]
         over_limit = any("above its limit" in w for w in problems[a["id"]])
         only_limit = over_limit and all("above its limit" in w for w in problems[a["id"]])
-        nxt = _next_authority(m, action, amt, cur, day, skip={x["id"] for x in held}) if only_limit else None
+        skip = {x["id"] for x in held} | principal_auths
+        nxt = _next_authority(m, action, amt, cur, day, skip=skip) if only_limit and amt is not None else None
         if nxt is not None:
             why = (
                 f"{'; '.join(problems[a['id']])} (the agent's authority); within "
@@ -265,6 +326,28 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
                     "name": m.name("people", principal),
                     "why": "above the agent's limit, and no authority covers the amount",
                 }
+
+    if suspended and not refuse and "nextAuthority" not in basis:
+        nxt = _next_authority(m, action, amt, cur, day, skip={x["id"] for x in held} | principal_auths)
+        who = m.name("people", principal)
+        if nxt is not None:
+            consult.append(
+                _consult_entry(
+                    m,
+                    nxt["holder"],
+                    f"its principal, {who}, is employed but their account is disabled; "
+                    f"within '{nxt.get('name') or nxt['id']}'",
+                )
+            )
+            reasons.append(
+                f"Its principal, {who}, is employed but has no active account: "
+                f"consult the next authority up, {m.name('roles', nxt['holder'])}."
+            )
+            basis["nextAuthority"] = nxt["id"]
+        else:
+            refuse.append(
+                f"Its principal, {who}, is employed but has no active account, and no other authority covers this."
+            )
 
     if used:
         auth = m.get("authorities", used)
