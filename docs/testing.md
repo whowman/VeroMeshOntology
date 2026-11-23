@@ -20,7 +20,7 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | --- | --- | --- | --- |
 | quick | `lint` | all Python | ruff lint and formatting |
 | quick | `service` | `service/` | REST model API, changesets, validation, bindings, glossary (in-memory store) |
-| quick | `connectors` | `connectors/` | connector SDK, spreadsheet and CSV connectors, against the real API in-process |
+| quick | `connectors` | `connectors/` | connector SDK, spreadsheet, CSV, Workday and Entra ID connectors, against the real API in-process (Workday and Entra ID against fakes of their public APIs: paging, token renewal, failures, change feeds) |
 | quick | `ontology` | `ontology/` | SHACL validation rules fire as intended; every Turtle file parses |
 | quick | `branding` | `branding/` | DataHub theme generator (palette mapping, contrast) and asset injector |
 | quick | `contracts` | interfaces | golden snapshots (below) |
@@ -40,6 +40,8 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | e2e | `e2e` | the running stack | health and plugin loaded; DataHub serves the VeroMesh theme, logos and favicon; ontologies load and publish to the DataHub glossary; bindings reach Fuseki and DataHub and are removed again; the worked example loads through the spreadsheet connector, re-runs as a no-op, exports and re-imports, and a breaking delete is refused |
 | e2e | `stack-scripts` | developer scripts | `load-examples.sh` and `veromesh-connect.sh` work against the stack |
 | e2e | `persistence` | Fuseki volume | the model survives a Fuseki restart |
+
+**The simulated company.** The [VeroMesh test harness](https://github.com/whowman/VeroMeshTestHarness) generates a company and serves its systems (Workday, Entra ID, ServiceNow, Databricks, the ERP, the EMR, dbt, SharePoint, a semantic layer) through mocks of their public APIs, with each system's quirks recorded as an answer key. With it installed, `connectors/tests/test_against_harness.py` loads a 300-person company through the Workday and Entra ID connectors, plays a month of changes through both change feeds, and repeats the load with 30% of requests misbehaving (429, 500, 503, expired tokens, slow). Its `harness run` puts the harness's scenarios to VeroMesh's API and scores the answers by gate; on 23 November, with Workday and Entra ID loaded, everyone working and everyone with no HR record were right, and the other scenarios name the connector they wait for.
 
 `scripts/test.sh --list` prints the same table from the registry. You can run one suite or one component by name: `scripts/test.sh connectors`, `scripts/test.sh fuseki`, `scripts/test.sh stack`.
 
