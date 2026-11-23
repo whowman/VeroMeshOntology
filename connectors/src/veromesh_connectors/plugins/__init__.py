@@ -2,10 +2,14 @@
 
 from .csv_files import CsvConnector
 from .entra import EntraChangesConnector, EntraConnector, GraphClient
+from .oracle_erp import BasicAuth, OracleClient, OracleErpConnector
 from .spreadsheet import SpreadsheetConnector, build_workbook
 from .workday import WorkdayChangesConnector, WorkdayClient, WorkdayConnector
 
 __all__ = [
+    "BasicAuth",
+    "OracleClient",
+    "OracleErpConnector",
     "CsvConnector",
     "EntraChangesConnector",
     "EntraConnector",

@@ -10,6 +10,8 @@ company whose truth it knows, with each system's quirks recorded as defects.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 harness_truth = pytest.importorskip("harness.truth")
@@ -87,4 +89,51 @@ def test_misbehaving_systems_give_the_same_result(http, company):
     calm = harness_truth.generate("healthcare", 300, 7)
     assert {p["id"] for p in http.get("/api/v1/people").json()} >= {
         p.employee_id for p in calm.active_people() if p.worker_type == "employee"
+    }
+
+
+ERP = ["--url", "http://testserver/erp"]
+ERP_ROLES = {
+    "ORA_ACCOUNTS_PAYABLE_SPECIALIST_JOB": "APClerk",
+    "ORA_ACCOUNTS_PAYABLE_MANAGER_JOB": "APManager",
+    "ORA_FINANCIAL_APPROVER_JOB": "FinanceApprover",
+    "ORA_BUYER_JOB": "Buyer",
+    "ORA_PROCUREMENT_MANAGER_JOB": "ProcurementApprover",
+}
+
+
+def test_oracle_erp_accounts_and_approval_exceptions(http, company, tmp_path, monkeypatch):
+    truth, h = company
+    monkeypatch.setenv("ORACLE_USER", "integration.user")
+    monkeypatch.setenv("ORACLE_PASSWORD", "harness")
+    load(http, h)
+    book = tmp_path / "governance.xlsx"
+    book.write_bytes(h.get("/governance/workbook.xlsx").content)
+    assert main([*API, "spreadsheet", "import", str(book), "--source", "governance"], http=http) == 0
+    for name, cat in (("workday", "hr"), ("entra", "iam"), ("governance", "governance"), ("erp", "erp")):
+        assert http.put(f"/api/v1/sources/{name}", json={"category": cat}).status_code == 200
+    roles = tmp_path / "erp-roles.yaml"
+    roles.write_text("".join(f"{k}: {v}\n" for k, v in ERP_ROLES.items()))
+    assert main([*API, "erp", "import", *ERP, "--role-map", str(roles)], http=http, source_http=h) == 0
+
+    erp = {p["id"]: p for p in http.get("/api/v1/people", params={"source": "erp"}).json()}
+    known = {p["id"] for p in http.get("/api/v1/people", params={"source": "entra"}).json()}
+    assert erp and set(erp) <= known  # every ERP account matched to the person Entra ID holds
+    assert "employeeId" not in next(iter(erp.values()))  # the ERP is not the record of employment
+    by_eid = {p.employee_id: p for p in truth.people.values()}
+    ap = [pid for pid, p in erp.items() if "APManager" in (p.get("rolesFilled") or [])]
+    assert ap and all("APManager" in by_eid[pid].at(truth.today).roles for pid in ap if pid in by_eid)
+
+    since = (truth.start - timedelta(days=90)).isoformat()
+    assert main([*API, "erp", "exceptions", *ERP, "--since", since], http=http, source_http=h) == 0
+    key = h.get("/harness/answer-key").json()["defects"]
+
+    def got(kind, field):
+        return {
+            f["about"][field] for f in http.get("/api/v1/findings", params={"kind": kind}).json()["findings"]
+        }
+
+    assert got("self-approved-po", "po") == {d["about"]["po"] for d in key if d["kind"] == "self-approved-po"}
+    assert got("approved-over-limit", "invoice") == {
+        d["about"]["invoice"] for d in key if d["kind"] == "approved-over-limit"
     }

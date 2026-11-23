@@ -185,6 +185,18 @@
       "200"
     ]
   },
+  "GET /api/v1/findings": {
+    "params": [
+      "kind? (query)",
+      "ownerRole? (query)",
+      "severity? (query)",
+      "source? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/governance": {
     "params": [],
     "status": [
@@ -746,6 +758,20 @@
       "422"
     ]
   },
+  "PUT /api/v1/findings/reported/{source}": {
+    "body": {
+      "application/json": {
+        "array": "any"
+      }
+    },
+    "params": [
+      "source (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "PUT /api/v1/licence": {
     "body": {
       "application/json": "object"
@@ -760,6 +786,12 @@
     "body": {
       "application/json": {
         "category": "string",
+        "derivedFrom?": {
+          "anyOf": [
+            "object",
+            "null"
+          ]
+        },
         "description?": {
           "anyOf": [
             "string",

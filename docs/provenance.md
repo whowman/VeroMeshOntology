@@ -87,6 +87,19 @@ For each entity and field, VeroMesh picks one source's values:
 
 **Roles filled are combined** across live sources: HR's job roles and the identity system's or the workbook's approval roles both count, instead of one replacing the other. An organization changes any domain with `PUT /api/v1/domains/{name}` (administrators; only the keys given: `authoritative`, `evidence`, `contractors`, `union`, `fields`) and returns it to the default with `DELETE`. Each change is appended to the decision log's hash chain (kind `configuration`), and the effective model is rebuilt.
 
+**Derived sources.** A source can declare that it takes a domain from another (`PUT /api/v1/sources/{name}` with `derivedFrom`, for example an AP workflow whose limits are copied from Workday levels: `{"authority-in-force": "workday"}`). It is not independent evidence: where the two differ, the findings report **out of sync** to the derived source's owner.
+
+**Findings** (`GET /api/v1/findings`, filters `kind`, `severity`, `ownerRole`, `source`). What needs someone's attention, each routed to an owner role (the source's registered owner) and the people who fill it today:
+
+| Kind | Severity | When |
+| --- | --- | --- |
+| access-without-employment | high | No HR source lists the person, yet an `iam` or `erp` source still holds them (a leaver's account or ERP role). Contractors are not findings |
+| employed-without-access | info | HR lists them, and the identity system holds no enabled account |
+| out-of-sync | medium | Two sources that both decide a domain state different values (the AP workflow against the governance workbook), or a derived source no longer matches its origin. The value in force is the winner's |
+| ended-reference | medium | Someone their source dropped is still named by another entity (a leaver still named as a manager) |
+| domain-without-authority | info | Facts in a domain, and no registered source in a category that decides it |
+| reported by connectors | as reported | For example the ERP connector's purchase orders their buyer approved, and invoices approved above the approver's limit or without a co-approver (`PUT /api/v1/findings/reported/{source}`, each run replacing the last) |
+
 | Type | Default ranking, for fields no domain covers |
 | --- | --- |
 | People, reporting lines, roles filled | hr > iam > spreadsheet |

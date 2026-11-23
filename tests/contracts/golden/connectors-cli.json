@@ -56,6 +56,31 @@
       },
       "options": []
     },
+    "erp": {
+      "args": [],
+      "commands": {
+        "exceptions": {
+          "args": [],
+          "options": [
+            "--url",
+            "--since",
+            "--source",
+            "--dry-run"
+          ]
+        },
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--role-map",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "runs": {
       "args": [],
       "options": [

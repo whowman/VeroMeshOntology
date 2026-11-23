@@ -19,7 +19,7 @@ import time
 
 import httpx
 
-from .session import ApiError, ClientCredentials, StaticToken
+from .session import ApiError, StaticToken
 from .transport import Transport, TransportError
 
 #: Statuses on which a token is renewed (once) before the call is repeated.
@@ -83,7 +83,7 @@ class SourceApi:
         self,
         system: str,
         transport: Transport,
-        auth: StaticToken | ClientCredentials | RefreshToken | None = None,
+        auth=None,  # StaticToken, ClientCredentials, RefreshToken or a basic-auth object with header()
     ) -> None:
         self.system = system
         self.t = transport
@@ -98,7 +98,12 @@ class SourceApi:
                 token = self.auth.token(force=attempt > 0)
             except ApiError as exc:
                 raise SourceError(self.system, exc.status, exc.detail) from exc
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"} if token else {}
+            if token:
+                headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            elif hasattr(self.auth, "header"):  # basic authentication (Oracle Fusion)
+                headers = {"Authorization": self.auth.header(), "Accept": "application/json"}
+            else:
+                headers = {}
             full = url if url.startswith(("http://", "https://")) else f"{self.t.base_url}{url}"
             try:
                 r = self.t.request("GET", full, params=params, headers=headers)

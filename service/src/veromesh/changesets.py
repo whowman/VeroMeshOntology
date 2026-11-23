@@ -907,28 +907,32 @@ def _dropped(store: RDFStore, cs: str, meta: dict, report: dict, base: str) -> d
     if not errors or meta["source"] == P.ENDED_SOURCE:
         return {}
     items = _load_items(store, cs)
-    upserted = {(it.type, it.id) for it in items if it.op != "delete"}
+    upserted = {(it.type, it.id): it for it in items if it.op != "delete"}
     deleted = {(it.type, it.id) for it in items if it.op == "delete"}
 
-    def own(t: str, rid: str) -> bool:
-        """The referring entity is this source's own after the change: then the source
-        contradicts itself, and the load is refused as before."""
-        if (t, rid) in upserted:
-            return True
+    def own(t: str, rid: str, field: str, target: str) -> bool:
+        """This source itself names ``target`` in ``field`` of the referring entity after the
+        change: then it contradicts itself, and the load is refused as before. A reference
+        another source makes (HR drops a manager whom Entra ID still names) is not its own."""
+        it = upserted.get((t, rid))
+        if it is not None:
+            return target in E._values(it.entity.get(field))
         if meta["mode"] != "merge" or (t, rid) in deleted:
             return False
-        iri, cls = E.iri_for(base, rid), E.TYPES[t].cls
-        res = store.query(f"ASK {{ GRAPH <{source_graph(meta['source'])}> {{ <{iri}> a <{cls}> }} }}")
+        iri, tgt = E.iri_for(base, rid), E.iri_for(base, target)
+        res = store.query(
+            f"ASK {{ GRAPH <{source_graph(meta['source'])}> {{ {{ <{iri}> ?p <{tgt}> }} UNION {{ <{tgt}> ?p <{iri}> }} }} }}"
+        )
         return bool(res.get("boolean"))
 
     dropped: dict[str, list[dict]] = {}
     for e in errors:
         m = DROPPED.match(e.get("message", ""))
-        if m and not own(e["type"], e["id"]):  # another source's entity refers to it
+        if m and not own(e["type"], e["id"], e["field"], m.group(1)):  # another source refers to it
             dropped.setdefault(m.group(1), []).append({"type": e["type"], "id": e["id"], "field": e["field"]})
             continue
         m = STILL.match(e.get("message", ""))
-        if m and e.get("field") == "id" and not own(m.group(1), m.group(2)):  # referred to elsewhere
+        if m and e.get("field") == "id" and not own(m.group(1), m.group(2), m.group(3), e["id"]):
             dropped.setdefault(e["id"], []).append(
                 {"type": m.group(1), "id": m.group(2), "field": m.group(3)}
             )
