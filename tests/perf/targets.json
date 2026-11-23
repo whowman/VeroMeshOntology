@@ -276,6 +276,52 @@
         "followed_with_edits": 1,
         "rebuilt": 0
       }
+    },
+    "replication_ci_small": {
+      "_note": "Free CI runner, 20,000 people, one Fuseki writer and two read replicas through Kafka (tests/perf/replicated_fuseki.sh), run 45073845939; replica lag before the low-volume-threshold fix was 10 s on every edit",
+      "people": 20000,
+      "triples_each": 636030,
+      "edit_p50_ms": 106,
+      "edit_max_ms": 286,
+      "replica_lag_ms": {
+        "p50": 505,
+        "p95": 526,
+        "max": 6700
+      },
+      "failover": {
+        "writer_down_s": 14.4,
+        "checks_per_s_while_down": 341,
+        "failed_checks": 0,
+        "edit_while_down": "refused",
+        "writer_back_s": 5.6
+      },
+      "replica_rebuild_s": 33.8
+    },
+    "azure_xl_replicated": {
+      "_note": "Azure Standard_E16s_v6 (16 vCPU, 128 GB), Fuseki writer 31g heap and two read replicas through Kafka, Premium SSD v2 512 GB, westus3, run 45201871380 (replication-load 60bfe74, with PR #63). Gate 0's load test. The planner state builds in the background as the service starts",
+      "people": 501000,
+      "triples_each": 15438990,
+      "catch_up_after_load_s": 0.2,
+      "startup_planner_s": 258.7,
+      "first_edit_ms": 259.8,
+      "edit_p50_ms": 179.5,
+      "edit_max_ms": 265.0,
+      "replica_lag_ms": {
+        "p50": 520.7,
+        "p95": 559.4,
+        "max": 564.8
+      },
+      "failover": {
+        "writer_down_s": 14.0,
+        "checks_per_s_while_down": 379.3,
+        "failed_checks": 0,
+        "edit_while_down": "refused",
+        "writer_back_s": 3.9,
+        "replicas_at_writer_version_after_s": 0.0
+      },
+      "replica_rebuild_s": 342.0,
+      "longest_fuseki_gc_pause_ms": 29,
+      "disk_used_gb": 140
     }
   }
 }
