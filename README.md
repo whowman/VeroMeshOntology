@@ -2,21 +2,23 @@
 
 The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
-What it does today (main, 22 November 2026):
+What it does today (main, 23 November 2026):
 
 - **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
-- **Kept true:** loaded from spreadsheets, CSV, Workday and Microsoft Entra ID (full loads and change feeds), one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
+- **Kept true:** loaded from spreadsheets, CSV, Workday and Microsoft Entra ID (full loads and change feeds, through their public APIs; [docs/connectors.md](docs/connectors.md)), one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
 - **Sign-in and need to know:** tokens from any OpenID Connect provider (Entra ID first), five roles, and answers that leave out personal details for callers not allowed them.
-- **The agent decision check:** before acting, an agent asks and gets allow, consult (named owners) or refuse, with reasons, decided from attested facts only. Every answer goes into an append-only, hash-chained decision log; people approve or reject, agents report outcomes, and the first measures come from the log. Over REST and MCP (`/mcp`, [docs/copilot-studio.md](docs/copilot-studio.md)).
+- **The agent decision check:** before acting, an agent asks and gets allow, consult (named owners) or refuse, with reasons, decided from attested facts only. Every answer, and every attestation behind one, goes into an append-only, hash-chained decision log that a steward can verify at any time; people approve or reject, agents report outcomes, and the first measures come from the log. Over REST and MCP (`/mcp`, [docs/copilot-studio.md](docs/copilot-studio.md)).
 - **The data element inventory:** columns bound to business data elements (in bulk from spreadsheets or the API, or accepted from the catalog's own classifications), and coverage: which critical data elements are owned, sourced, classified, bound and attested.
 - **The steward screen** (`/steward`): what waits for you, facts to confirm, decisions, measures and the data element inventory.
 - **Into DataHub:** ontology classes as glossary terms, assets bound to classes, and each data product's owner roles, consumers and lineage on its catalog page.
-- **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators.
+- **Formal OWL/RDF** in Apache Jena Fuseki, replicated through Kafka, with read-only SPARQL for administrators. At 500,000 people the read replicas trail the writer by about half a second, decision checks carry on from them while the writer restarts (379 a second, none failed), and a new replica builds itself in under six minutes ([docs/testing.md](docs/testing.md#replication-under-load)).
 - **Enterprise scale:** measured on the Azure reference machines with Fuseki and the PostgreSQL decision log. At 500,000 people (E16s v6, Premium SSD v2) a decision check takes 4 ms and an edit 226 ms, a nightly re-sync 104 s and the first load 46 minutes. One copy of the service answers 412 checks a second; two copies, each following the other's changes from records in the store, answer 544 while the model is not being edited and 425 with an edit every second. Fuseki needs low-latency storage ([docs/testing.md](docs/testing.md#capacity-on-fuseki), [deploy/azure-capacity/README.md](deploy/azure-capacity/README.md)).
 - **Licensing and usage:** a licence signed by VeroMesh and checked offline, with warnings, 30 days of grace, then read-only (decision checks, the decision log and attestations keep working); a signed, chained monthly usage report of identities in scope, sent to VeroMesh by SMTP, sendmail or Microsoft 365; and an Administration area (`/admin`) for both ([service/README.md](service/README.md)).
 - **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
-Not yet: enforcement at a gateway (the check is advisory), ERP and CMDB connectors, VeroMesh's own licensing system (issue #56), and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: enforcement at a gateway (the check is advisory), ERP, CMDB and catalog connectors, VeroMesh's own licensing system (issue #56), and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
+
+Administrator and user guides: [docs/guides/](docs/guides/) (CI builds Word copies). Connectors are tested against the [VeroMesh test harness](https://github.com/whowman/VeroMeshTestHarness), a simulated company whose systems serve their public APIs.
 
 DataHub runs **unmodified** from its official images; Veromesh extends it with a custom-model plugin and its APIs. See [docs/architecture.md](docs/architecture.md).
 
