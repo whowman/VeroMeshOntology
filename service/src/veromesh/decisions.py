@@ -40,7 +40,7 @@ from urllib.parse import unquote, urlparse
 log = logging.getLogger("veromesh.decisions")
 
 GENESIS = "0" * 64
-KINDS = ("decision", "override", "outcome", "attestation")
+KINDS = ("decision", "override", "outcome", "attestation", "configuration")
 ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
 # Fields an entry may carry, beyond those the log assigns (id, seq, recordedAt, prevHash, hash).
@@ -68,6 +68,9 @@ FIELDS = (
     "fieldHashes",
     "attestedAt",
     "expiresAt",
+    # configuration entries: a setting that changes what agents may do, and its new value
+    "setting",
+    "value",
 )
 
 
@@ -108,6 +111,11 @@ def check(fields: dict) -> dict:
             isinstance(k, str) and isinstance(v, str) for k, v in h.items()
         ):
             raise InvalidEntry("fieldHashes must map each field attested to its value's hash.")
+    elif kind == "configuration":
+        if fields.get("refersTo"):
+            raise InvalidEntry("A configuration change refers to no decision.")
+        if not fields.get("setting") or not isinstance(fields.get("value"), dict):
+            raise InvalidEntry("A configuration entry needs setting and value (an object).")
     elif kind == "decision":
         if fields.get("outcome") not in DECISION_OUTCOMES:
             raise InvalidEntry(f"A decision's outcome is one of {', '.join(DECISION_OUTCOMES)}.")

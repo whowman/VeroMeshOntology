@@ -69,10 +69,25 @@ Standards: Claim is a `prov:Entity`, Attestation and Changeset are `prov:Activit
 For each entity and field, VeroMesh picks one source's values:
 
 1. Disputed claims are set aside.
-2. The highest-ranked source category for that type and field wins (defaults below; customers adjust them).
+2. The highest-ranked source category for that field wins. The field's **domain** decides the order: its authoritative categories, then its evidence, then the rest (`GET /api/v1/domains`). Fields no domain covers use the type's ranking below.
 3. A tie goes to the most recently observed claim.
 
-| Type | Default ranking |
+**Domains** (source weighting, decided 23 November 2026). Every field belongs to a domain, the question it answers. Each domain names the categories that decide it (authoritative) and those that support it (evidence). The defaults:
+
+| Domain | Question | Authoritative | Evidence | Covers |
+| --- | --- | --- | --- | --- |
+| employment | Is this person employed? | hr (contractors: iam) | iam, erp, cmdb, spreadsheet | A person's name, employee ID, email; whether they are employed (the decision check) |
+| organization | Whom do they report to, what job role? | hr | iam, spreadsheet | Reports to, roles filled (combined across sources), role names and definitions |
+| access | Can they sign in, and to what? | iam | hr, spreadsheet | An agent's sign-in and principal |
+| authority-granted | What does policy grant? | governance | hr, spreadsheet | Policies |
+| authority-in-force | What limit does the workflow enforce? | erp, then governance | iam, hr, spreadsheet | Authorities and co-approvals: the authority closest to the decision decides; a different granted value is a conflict (out of sync) |
+| ai-approval | Which agents may run, for what? | governance | spreadsheet | AI use cases; the actions an agent performs |
+| systems | Which systems exist, who owns them? | cmdb | catalog, spreadsheet | Systems |
+| data-meaning | What does this data mean? | catalog, steward | spreadsheet | Data elements' and products' definitions, owners, sensitivity |
+
+**Roles filled are combined** across live sources: HR's job roles and the identity system's or the workbook's approval roles both count, instead of one replacing the other. An organization changes any domain with `PUT /api/v1/domains/{name}` (administrators; only the keys given: `authoritative`, `evidence`, `contractors`, `union`, `fields`) and returns it to the default with `DELETE`. Each change is appended to the decision log's hash chain (kind `configuration`), and the effective model is rebuilt.
+
+| Type | Default ranking, for fields no domain covers |
 | --- | --- |
 | People, reporting lines, roles filled | hr > iam > spreadsheet |
 | Roles | hr > spreadsheet |
