@@ -502,3 +502,44 @@ def test_a_reader_in_a_replica_finds_its_list_carried_forward(monkeypatch):
     after = C.list_entities(two, "people", BASE)
     assert {e["id"] for e in after} == {e["id"] for e in before} | {"Newcomer"}
     assert incremental.STATS["followed"] == followed + 1 and "people" not in rebuilt
+
+
+def test_a_store_that_respells_values_does_not_force_a_rewrite(monkeypatch):
+    """Fuseki's TDB2 hands typed values back in its own spelling (xsd:decimal "1000" as
+    "1000.0"). The stored effective model is the same facts, so a fresh copy's first edit
+    changes only what it changes, not the whole effective graph."""
+    from decimal import Decimal
+
+    from rdflib import XSD, Literal
+
+    from veromesh.modelcache import VersionedStore
+
+    store = make_store("memory")
+    C.apply(store, source="hr", items=example_items(), base=BASE, ontology_dir=ONT)
+    read = P._effective_graph
+
+    def as_tdb2_returns_it(st):
+        out, changed = Graph(), 0
+        for s, p, o in read(st):
+            if isinstance(o, Literal) and o.datatype == XSD.decimal and "." not in str(o):
+                o, changed = Literal(f"{Decimal(str(o)):.1f}", datatype=XSD.decimal), changed + 1
+            out.add((s, p, o))
+        assert changed, "the worked example has decimals to respell"
+        return out
+
+    monkeypatch.setattr(P, "_effective_graph", as_tdb2_returns_it)
+    fresh = VersionedStore(store.inner)  # a freshly started copy: nothing held
+    st = incremental.state(fresh, BASE)
+    assert st is not None and st.stored_effective_ok
+
+    def whole_rewrite(*_a, **_k):
+        raise AssertionError("the whole effective graph was rewritten")
+
+    monkeypatch.setattr(P, "store_effective", whole_rewrite)
+    C.apply(
+        fresh,
+        source="hr",
+        items=[item("people", "DanaExample", name="Dana Again")],
+        base=BASE,
+        ontology_dir=ONT,
+    )

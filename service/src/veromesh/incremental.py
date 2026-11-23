@@ -37,7 +37,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 
-from rdflib import BNode, Graph, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import XSD
 
 from . import clock, validation
@@ -327,9 +327,23 @@ def _build(store, base: str) -> State | None:
         model=model,
         today=today,
         day=day,
-        stored_effective_ok=set(stored) == set(today.graph),
+        stored_effective_ok=_by_value(stored) == _by_value(today.graph),
         ontology=store.ontology_hash() if isinstance(store, VersionedStore) else None,
     )._index()
+
+
+def _by_value(g) -> set:
+    """A graph's triples with each typed literal compared by its value: a store may hand
+    back another spelling of the same value (Fuseki's TDB2 returns xsd:decimal "1000" as
+    "1000.0"), and that is the same fact, not a difference."""
+    out = set()
+    for s, p, o in g:
+        if isinstance(o, Literal) and o.datatype is not None:
+            v = o.toPython()
+            if not isinstance(v, Literal):  # a value rdflib understands
+                o = (o.datatype, v)
+        out.add((s, p, o))
+    return out
 
 
 def _index_state(self: State) -> State:
