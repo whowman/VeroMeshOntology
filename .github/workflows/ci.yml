@@ -33,6 +33,25 @@ jobs:
           python-version: "3.12"
       - run: scripts/test.sh quick --local --strict
 
+  guides:
+    # The Word copies of the administrator and user guides, built from docs/guides/*.md.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe names the version on the title page
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get install -y -q pandoc && pip install -q python-docx
+      - run: python scripts/guides/build_docx.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guides
+          path: |
+            .build/guides/admin-guide.docx
+            .build/guides/user-guide.docx
+
   integration:
     # Service and connector suites on a real Fuseki; container images; the
     # Fuseki writer module's own tests; backup and restore on a real Fuseki and PostgreSQL.
