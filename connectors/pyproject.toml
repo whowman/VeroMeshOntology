@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "veromesh-connectors"
-version = "0.2.0"
-description = "VeroMesh connector SDK and connectors (spreadsheet, CSV); clients of the VeroMesh REST API"
+version = "0.3.0"
+description = "VeroMesh connector SDK and connectors (spreadsheet, CSV, Workday, Microsoft Entra ID); clients of the VeroMesh REST API"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 dependencies = [

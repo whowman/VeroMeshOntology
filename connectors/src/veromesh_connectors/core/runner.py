@@ -186,18 +186,35 @@ class Runner:
         schema = self.api.schema()
         merge = RunOptions(source=opts.source, mode="merge", dry_run=opts.dry_run)
         results = []
+        # What the source holds, per type, read once per run when an event first deletes that type:
+        # deleting something already gone (removed by a full load, or a redelivered event) is a no-op.
+        held: dict[str, set[str]] = {}
+
+        def holds(type_: str, id_: str) -> bool:
+            if type_ not in held:
+                held[type_] = {str(e.get("id")) for e in self.api.entities(type_, opts.source)}
+            return id_ in held[type_]
+
         for event in connector.events(schema):
             items, errors = self._map_all(connector, event.records, schema)
+            deletes = [(t, i) for t, i in event.deletes if holds(t, i)]
             items += [
-                Item(type=t, entity={"id": i}, op="delete", ref=f"event {event.id}") for t, i in event.deletes
+                Item(type=t, entity={"id": i}, op="delete", ref=f"event {event.id}") for t, i in deletes
             ]
             if errors:
                 for e in errors:
                     self.out(f"  error     event {event.id}: {e}")
                 results.append(RunResult(False, messages=errors))
                 continue
+            if not items:
+                self.out(f"Event {event.id}: nothing to change (already applied).")
+                results.append(RunResult(True))
+                continue
             self.out(f"Event {event.id}: {len(items)} changes.")
-            results.append(
-                self._apply(connector, merge, items, file=None, key=f"{connector.name}:event:{event.id}")
-            )
+            result = self._apply(connector, merge, items, file=None, key=f"{connector.name}:event:{event.id}")
+            if result.ok and not opts.dry_run:
+                for it in items:
+                    if it.type in held:
+                        (held[it.type].discard if it.op == "delete" else held[it.type].add)(it.id)
+            results.append(result)
         return results

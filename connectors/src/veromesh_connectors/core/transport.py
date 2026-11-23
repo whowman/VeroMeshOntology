@@ -35,8 +35,12 @@ class Transport:
         ca_bundle: str | None = None,
         http: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        label: str = "the VeroMesh API",
+        retry_on: frozenset[int] | set[int] = RETRYABLE,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.label = label
+        self.retry_on = frozenset(retry_on)
         self.retries = retries
         self.backoff = backoff
         self._sleep = sleep
@@ -60,8 +64,8 @@ class Transport:
                     break
                 self._sleep(self._delay(attempt, None))
                 continue
-            if resp.status_code in RETRYABLE and attempt < self.retries:
+            if resp.status_code in self.retry_on and attempt < self.retries:
                 self._sleep(self._delay(attempt, resp))
                 continue
             return resp
-        raise TransportError(f"cannot reach the VeroMesh API at {self.base_url} ({last})")
+        raise TransportError(f"cannot reach {self.label} at {self.base_url} ({last})")

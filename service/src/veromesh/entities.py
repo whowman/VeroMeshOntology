@@ -597,12 +597,14 @@ class Converted:
     errors: list[FieldError] = field(default_factory=list)
 
 
-def _values(raw) -> list:
+def _values(raw, split: bool = True) -> list:
     if raw is None or raw == "":
         return []
     if isinstance(raw, list):
         return [v for v in raw if v is not None and v != ""]
     if isinstance(raw, str):
+        if not split:
+            return [raw.strip()] if raw.strip() else []
         return [p.strip() for p in MULTI_SPLIT.split(raw) if p.strip()]
     return [raw]
 
@@ -642,7 +644,8 @@ def to_triples(type_: str, entity: dict, base: str, resolve, *, partial: bool = 
     for key, col in fields.items():
         if col.kind == "id":
             continue
-        vals = _values(entity.get(key))
+        # Free text is one value even with a ';' in it; only lists and references split.
+        vals = _values(entity.get(key), split=col.multi or col.kind not in ("text", "label"))
         if not col.multi and len(vals) > 1:
             err(key, "Only one value allowed.")
             vals = vals[:1]

@@ -5,7 +5,7 @@ The organizational ontology (OWL/RDF): who owns what, who may decide what, and w
 What it does today (main, 22 November 2026):
 
 - **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
-- **Kept true:** loaded from spreadsheets, CSV and connectors, one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
+- **Kept true:** loaded from spreadsheets, CSV, Workday and Microsoft Entra ID (full loads and change feeds), one named graph per source with precedence between them, and owners attesting or disputing facts ([docs/provenance.md](docs/provenance.md)).
 - **Sign-in and need to know:** tokens from any OpenID Connect provider (Entra ID first), five roles, and answers that leave out personal details for callers not allowed them.
 - **The agent decision check:** before acting, an agent asks and gets allow, consult (named owners) or refuse, with reasons, decided from attested facts only. Every answer goes into an append-only, hash-chained decision log; people approve or reject, agents report outcomes, and the first measures come from the log. Over REST and MCP (`/mcp`, [docs/copilot-studio.md](docs/copilot-studio.md)).
 - **The data element inventory:** columns bound to business data elements (in bulk from spreadsheets or the API, or accepted from the catalog's own classifications), and coverage: which critical data elements are owned, sourced, classified, bound and attested.
@@ -16,7 +16,7 @@ What it does today (main, 22 November 2026):
 - **Licensing and usage:** a licence signed by VeroMesh and checked offline, with warnings, 30 days of grace, then read-only (decision checks, the decision log and attestations keep working); a signed, chained monthly usage report of identities in scope, sent to VeroMesh by SMTP, sendmail or Microsoft 365; and an Administration area (`/admin`) for both ([service/README.md](service/README.md)).
 - **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
-Not yet: enforcement at a gateway (the check is advisory), HR, IAM, ERP and CMDB connectors, VeroMesh's own licensing system (issue #56), and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: enforcement at a gateway (the check is advisory), ERP and CMDB connectors, VeroMesh's own licensing system (issue #56), and an Azure install. The plan is the Delivery Plan; open work is in the GitHub issues.
 
 DataHub runs **unmodified** from its official images; Veromesh extends it with a custom-model plugin and its APIs. See [docs/architecture.md](docs/architecture.md).
 
@@ -25,7 +25,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | Path | What |
 | --- | --- |
 | `service/` | Veromesh API (Python, FastAPI): REST model API, changesets, validation |
-| `connectors/` | Connector SDK and connectors (spreadsheet, CSV): clients of the REST API, CLI and container; see [docs/connectors.md](docs/connectors.md) |
+| `connectors/` | Connector SDK and connectors (spreadsheet, CSV, Workday, Entra ID): clients of the REST API, CLI and container; see [docs/connectors.md](docs/connectors.md) |
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
 | `branding/` | VeroMesh palette, logos, and the DataHub theme; see [branding/README.md](branding/README.md) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
