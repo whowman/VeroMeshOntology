@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -242,6 +243,8 @@ class SparqlHttpStore:
         self.update_url = update_url
         self.graph_store_url = graph_store_url
         self.fallback_query_url = fallback_query_url
+        self._fallback_since: float | None = None  # when reads started going to the fallback
+        self._fallback_reads = 0
         self._http = client or httpx.Client(timeout=30.0)
 
     @staticmethod
@@ -268,15 +271,29 @@ class SparqlHttpStore:
         try:
             resp = self._post_query(self.query_url, sparql)
         except httpx.TransportError as e:
-            log.warning("RDF store unreachable (%s); reading from %s", e, self.fallback_query_url)
+            self._falling_back(f"unreachable ({e})")
             return self._query(self.fallback_query_url, sparql)
         if resp.status_code in UNAVAILABLE:
-            log.warning(
-                "RDF store unavailable (%s); reading from %s", resp.status_code, self.fallback_query_url
-            )
+            self._falling_back(f"unavailable ({resp.status_code})")
             return self._query(self.fallback_query_url, sparql)
+        if self._fallback_since is not None:
+            log.warning(
+                "RDF store back after %.1f s; %d reads went to %s meanwhile",
+                time.monotonic() - self._fallback_since,
+                self._fallback_reads,
+                self.fallback_query_url,
+            )
+            self._fallback_since = None
         self._check(resp)
         return resp.json()
+
+    def _falling_back(self, why: str) -> None:
+        """Warn once per outage, not on every read (an outage can mean thousands of reads)."""
+        self._fallback_reads += 1
+        if self._fallback_since is None:
+            self._fallback_since = time.monotonic()
+            self._fallback_reads = 1
+            log.warning("RDF store %s; reading from %s until it is back", why, self.fallback_query_url)
 
     def _post_query(self, url: str, sparql: str) -> httpx.Response:
         return self._http.post(

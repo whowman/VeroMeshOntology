@@ -30,7 +30,7 @@ on:
         description: "bench: concurrencies for checks per second"
         default: "1,4,16"
       disk_gb:
-        description: "the machine's disk (premium SSD; Fuseki writes here): 128 GB = P10, 500 IOPS; 512 = P20, 2,300; 1024 = P30, 5,000"
+        description: "the disk Fuseki writes to: the premium OS disk (128 GB = P10, 500 IOPS; 512 = P20, 2,300; 1024 = P30, 5,000), or with premium-ssd-v2 that data disk's size (a writer and two replicas at xl need more than 128)"
         type: choice
         options: ["128", "512", "1024"]
         default: "128"
@@ -39,6 +39,11 @@ on:
         type: choice
         options: [os-disk, local-nvme, premium-ssd-v2]
         default: os-disk
+      fuseki:
+        description: "single: one Fuseki; replicated: a writer and two read replicas through Kafka, then the replication measurements"
+        type: choice
+        options: [single, replicated]
+        default: single
       fuseki_heap:
         description: "Fuseki's Java heap, e.g. 16g; auto = a quarter of the machine's memory"
         default: auto
@@ -131,7 +136,7 @@ jobs:
             if [ "$z" != none ]; then
               zone=(--zone "$z")
               az disk create -g "$RG" -n "$DATA_DISK" -l "$LOCATION" --zone "$z" --sku PremiumV2_LRS \
-                --size-gb 128 --tags "${tags[@]}" -o none
+                --size-gb "$DISK_GB" --tags "${tags[@]}" -o none
             fi
             if az vm create -g "$RG" -n "$VM" -l "$LOCATION" --size "$SIZE" "${zone[@]}" \
             --image Canonical:ubuntu-24_04-lts:server:latest \
@@ -160,10 +165,11 @@ jobs:
           HOURS: ${{ inputs.hours }}
           STORAGE: ${{ inputs.storage }}
           COPIES: ${{ inputs.copies }}
+          FUSEKI: ${{ inputs.fuseki }}
         run: |
           # The script that runs on the machine, with this run's settings in front.
           {
-            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\nCOPIES=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE" "$COPIES"
+            printf 'REF=%q\nMODE=%q\nSIZES=%q\nTHROUGHPUT=%q\nHEAP=%q\nSTORAGE=%q\nCOPIES=%q\nFUSEKI=%q\n' "$GITHUB_SHA" "$MODE" "$SIZES" "$THROUGHPUT" "$HEAP" "$STORAGE" "$COPIES" "$FUSEKI"
             cat deploy/azure-capacity/vm-run.sh
           } > run.sh
           az vm run-command create -g "$RG" --vm-name "$VM" --name capacity --location "$LOCATION" \

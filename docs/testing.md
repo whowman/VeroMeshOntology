@@ -96,6 +96,21 @@ With `diagnose` set (seconds), the job also profiles 300 checks, prints the stac
 
 Two tests keep the fast paths honest: `test_validation.py` checks that validating only the affected nodes finds what pyshacl with RDFS inference finds on the whole model, and `test_incremental.py` runs the same changes through the incremental and the full path and compares every report, stored graph and claim. The service suite also passes with `VEROMESH_VALIDATION=full` and with `VEROMESH_INCREMENTAL=off`.
 
+### Replication under load
+
+Gate 0's load test: the knowledge graph replicated through Kafka (one Fuseki writer, two read replicas, configured like the Helm chart; `tests/perf/replicated_fuseki.sh`), measured by `tests/perf/replication.py` after a bench load. Set the capacity workflows' `fuseki` input to `replicated`. Figures are in `tests/perf/targets.json` (`replication_ci_small`, `azure_xl_replicated`).
+
+| Measure | 20,000 people (free CI runner) | 500,000 people (Azure E16s v6, Premium SSD v2) |
+| --- | --- | --- |
+| Replicas after the load | At the writer's version at once; 636,030 triples on each | At the writer's version within 0.2 s; 15,438,990 triples on each |
+| Edits, one a second | p50 106 ms, max 286 ms | p50 180 ms, max 265 ms; the first edit after a restart 260 ms |
+| Replica lag | p50 505 ms, p95 526 ms | p50 521 ms, p95 559 ms, max 565 ms |
+| Writer stopped for 14 s | 341 checks a second from the replicas, none failed; an edit refused; writer back in 5.6 s | 379 checks a second from the replicas, none failed; an edit refused; writer back in 3.9 s; replicas at its version at once |
+| A new replica from an empty volume | Matches the writer in 34 s | Matches the writer in 5.7 minutes |
+| Planner state as the service starts | | 4.3 minutes, in the background (`/health`: `warming`, then `ready`) |
+
+Two fixes came from this test: the Fuseki-Kafka connector held each change until a poll came back empty at one edit a second (10 s late on every edit), so the chart sets `fuseki.kafka.low.volume.threshold` to 0; and the first edit after a restart rewrote the whole effective model because Fuseki spells decimals differently, 25 s at 20,000 people (PR #63).
+
 ## Contract snapshots
 
 The `contracts` suite keeps a snapshot of the interfaces other parts depend on, in `tests/contracts/golden/`:

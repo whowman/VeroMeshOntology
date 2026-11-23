@@ -45,6 +45,11 @@ on:
       stop_rss_gb:
         description: "grow: stop when the service process holds more memory"
         default: "5"
+      fuseki:
+        description: "single: one Fuseki; replicated: a writer and two read replicas through Kafka, then the replication measurements (tests/perf/replication.py)"
+        type: choice
+        options: [single, replicated]
+        default: single
       fuseki_heap:
         description: "Fuseki's Java heap (the image's default is 1g; production values use 4g)"
         default: "4g"
@@ -75,10 +80,15 @@ jobs:
         if: inputs.store == 'fuseki'
         env:
           FUSEKI_HEAP: ${{ inputs.fuseki_heap }}
+          FUSEKI_MODE: ${{ inputs.fuseki }}
         run: |
           source deploy/versions.env
           docker build -q --build-arg JENA_VERSION="$JENA_VERSION" \
             --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" -t veromesh/fuseki:capacity deploy/fuseki
+          if [ "$FUSEKI_MODE" = replicated ]; then
+            HEAP="$FUSEKI_HEAP" REPLICA_HEAP=2g tests/perf/replicated_fuseki.sh start 2
+            exit 0
+          fi
           # The heap the run asks for, and a log of Java's garbage-collector pauses.
           docker run -d --name fuseki -p 127.0.0.1:3030:3030 \
             -e JAVA_OPTS="-Xmx$FUSEKI_HEAP -Xlog:gc:stdout:uptime" veromesh/fuseki:capacity
@@ -107,6 +117,7 @@ jobs:
           LOG: ${{ inputs.log }}
           THROUGHPUT: ${{ inputs.throughput }}
           COPIES: ${{ inputs.copies }}
+          FUSEKI_MODE: ${{ inputs.fuseki }}
           GROW_STEP: ${{ inputs.grow_step }}
           STOP_RSS_GB: ${{ inputs.stop_rss_gb }}
           DIAGNOSE: ${{ inputs.diagnose }}
@@ -131,8 +142,15 @@ jobs:
             python tests/perf/capacity.py --step "$GROW_STEP" --people 1000 --store "$store" --log "$log" \
               --stop-rss-gb "$STOP_RSS_GB" --out capacity-results/grow.json
           else
-            python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear \
+            fallback=()
+            [ "$FUSEKI_MODE" = replicated ] && fallback=(--read-fallback http://localhost:3031/veromesh)
+            python tests/perf/bench.py --size "$SIZE" --store "$store" --log "$log" --clear "${fallback[@]}" \
               --throughput "$THROUGHPUT" --edits-every 1 --copies "$COPIES" --out "capacity-results/bench-$SIZE.json"
+            if [ "$FUSEKI_MODE" = replicated ]; then
+              python tests/perf/replication.py --writer http://localhost:3030/veromesh \
+                --replicas http://localhost:3031/veromesh,http://localhost:3032/veromesh \
+                --log "$log" --out capacity-results/replication.json
+            fi
           fi
       - name: Where the interpreter lock was held
         if: always() && inputs.diagnose != '0'

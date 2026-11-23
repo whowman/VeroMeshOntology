@@ -678,6 +678,8 @@ def test_replicas_are_read_only_and_follow_the_topic():
         "isolation.level": "read_committed",
         "auto.offset.reset": "earliest",
         "allow.auto.create.topics": "false",
+        # Commit each change on catching up, not in low-volume batches (about 10 s behind).
+        "fuseki.kafka.low.volume.threshold": "0",
     }
 
 

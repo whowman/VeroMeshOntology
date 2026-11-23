@@ -12,6 +12,9 @@
 #                machine's network-attached OS disk), local-nvme (its local NVMe drive, on a size
 #                with a "d", e.g. D4ds v6) or premium-ssd-v2 (an attached Premium SSD v2 disk)
 #   COPIES       bench: copies of the service the agents are spread over (default 1)
+#   FUSEKI       single (default) or replicated: a writer and two read replicas through Kafka
+#                (tests/perf/replicated_fuseki.sh, each replica with half the writer's heap),
+#                and after each bench the replication measurements (tests/perf/replication.py)
 #
 # Everything the steps print goes to /var/log/veromesh-capacity.log on the machine. Azure
 # returns only the end of what a run command prints, so this prints only the results:
@@ -21,10 +24,12 @@ set -euo pipefail
 LOG=/var/log/veromesh-capacity.log
 WORK=/opt/veromesh-capacity
 REPO=https://github.com/whowman/VeroMeshOntology.git
-: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${STORAGE:=os-disk}" "${COPIES:=1}"
+: "${REF:?}" "${MODE:=bench}" "${SIZES:=medium large}" "${THROUGHPUT:=1,4,16}" "${HEAP:=auto}" "${STORAGE:=os-disk}" "${COPIES:=1}" "${FUSEKI:=single}"
 
 fail() {
   echo "FAILED at: $1"
+  echo "--- disk space:"
+  df -h / "$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)" 2>/dev/null
   echo "--- the end of $LOG:"
   tail -c 3000 "$LOG"
   exit 1
@@ -109,11 +114,15 @@ cd "$WORK"
 # shellcheck disable=SC1091
 source deploy/versions.env
 
-step "Fuseki (heap $HEAP)"
+step "Fuseki (heap $HEAP, $FUSEKI)"
 {
   docker rm -f fuseki postgres 2>/dev/null || true
   docker build -q --build-arg JENA_VERSION="$JENA_VERSION" \
     --build-arg FUSEKI_KAFKA_VERSION="$FUSEKI_KAFKA_VERSION" -t veromesh/fuseki:capacity deploy/fuseki
+  if [ "$FUSEKI" = replicated ]; then
+    replica_heap="$(( ${HEAP%g} / 2 ))g"  # HEAP is in gigabytes (e.g. 16g)
+    env HEAP="$HEAP" REPLICA_HEAP="$replica_heap" tests/perf/replicated_fuseki.sh start 2
+  else
   docker run -d --name fuseki -p 127.0.0.1:3030:3030 \
     -e JAVA_OPTS="-Xmx$HEAP -Xlog:gc:stdout:uptime" veromesh/fuseki:capacity
   for _ in $(seq 120); do
@@ -121,6 +130,7 @@ step "Fuseki (heap $HEAP)"
     sleep 2
   done
   [ "$(docker inspect -f '{{.State.Health.Status}}' fuseki)" = healthy ]
+  fi
 } >>"$LOG" 2>&1 || fail "starting Fuseki"
 
 step "PostgreSQL"
@@ -154,15 +164,43 @@ if [ "$MODE" = grow ]; then
 else
   for size in $SIZES; do
     step "bench $size"
-    $PY tests/perf/bench.py --size "$size" --store "$STORE" --log "$DLOG" --clear \
+    fallback=()
+    [ "$FUSEKI" = replicated ] && fallback=(--read-fallback http://localhost:3031/veromesh)
+    $PY tests/perf/bench.py --size "$size" --store "$STORE" --log "$DLOG" --clear "${fallback[@]}" \
       --throughput "$THROUGHPUT" --edits-every 1 --copies "$COPIES" --out "results/bench-$size.json" \
       >"results/bench-$size.txt" 2>>"$LOG" || fail "bench $size"
     echo
     echo "=== $size"
     cat "results/bench-$size.txt"
+    if [ "$FUSEKI" = replicated ]; then
+      step "replication $size"
+      $PY tests/perf/replication.py --writer http://localhost:3030/veromesh \
+        --replicas http://localhost:3031/veromesh,http://localhost:3032/veromesh \
+        --log "$DLOG" --out "results/replication-$size.json" \
+        >"results/replication-$size.txt" 2>"results/replication-$size.err" || echo "(replication $size: a check did not pass)"
+      cat "results/replication-$size.txt"
+      # Reads falling back to a replica during the failover step are expected; leave them out.
+      grep -vE "reading from .* until it is back|RDF store back after|reading from http" \
+        "results/replication-$size.err" >"results/replication-$size.problems" || true
+      if [ -s "results/replication-$size.problems" ]; then
+        echo "--- replication $size: errors (the last 40 lines)"
+        tail -n 40 "results/replication-$size.problems"
+      fi
+      cat "results/replication-$size.err" >>"$LOG"
+    fi
   done
 fi
 echo
 docker logs fuseki 2>&1 | grep -E "GC\([0-9]+\) Pause" | grep -oE "[0-9.]+ms$" | tr -d ms |
   awk '{ n++; t += $1; if ($1 > max) max = $1 } END { printf "Fuseki GC pauses: %d, longest %.0f ms, total %.1f s\n", n, max, t / 1000 }'
+df -h "$(docker info -f '{{.DockerRootDir}}')" | tail -1 | awk '{ print "Disk used: " $3 " of " $2 }'
+# Azure keeps only the end of the output, so the replication results come last as well.
+if [ "$FUSEKI" = replicated ] && [ "$MODE" != grow ]; then
+  for size in $SIZES; do
+    echo
+    echo "=== replication $size (repeated, so it survives truncation)"
+    # One line per measurement: leave out the first edit's profile.
+    grep -E '^[A-Z]|^[a-z_]+: FAILED' "results/replication-$size.txt" 2>/dev/null | grep -v '^Ordered by' || echo "(no results)"
+  done
+fi
 step "done"
