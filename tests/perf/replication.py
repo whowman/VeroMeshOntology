@@ -101,6 +101,7 @@ def edit_lag(store, writer: str, replicas: list[str], n: int, base: str, ontolog
         ontology_dir=ontology,
     )
     first = time.perf_counter() - t
+    print(f"(planner after the first edit: {dict(incremental.STATS)})", flush=True)
     for i in range(n):
         item = {"type": "people", "op": "upsert", "entity": {"id": "Person3-d0", "name": f"Replicated {i}"}}
         t = time.perf_counter()
@@ -258,6 +259,11 @@ def main(argv: list[str] | None = None) -> int:
         validation.start_worker(capacity.ONTOLOGY)
         t1 = time.perf_counter()
         incremental.warm(store, capacity.BASE)
+        print(
+            f"(planner after the build: {dict(incremental.STATS)}; held at the store's version: "
+            f"{(store.held(('incremental', capacity.BASE)) or [None])[0] == store.version()})",
+            flush=True,
+        )
         return {"worker_s": round(t1 - t0, 1), "planner_s": round(time.perf_counter() - t1, 1)}
 
     step(
