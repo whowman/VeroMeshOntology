@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import httpx
@@ -34,7 +35,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import capacity  # noqa: E402
-from veromesh import changesets, decisions  # noqa: E402
+from veromesh import changesets, decisions, incremental  # noqa: E402
 from veromesh.modelcache import VERSION_GRAPH  # noqa: E402
 from veromesh.rdf_store import make_store  # noqa: E402
 
@@ -224,48 +225,92 @@ def main(argv: list[str] | None = None) -> int:
     log = decisions.make_log(a.log)
     out: dict = {}
 
-    out["catch_up"] = c = catch_up(a.writer, replicas)
-    print(
-        f"Catch-up after the load: replicas at the writer's version after {c['seconds']} s; triples {c['triples']}; same: {c['same']}",
-        flush=True,
+    failed: list[str] = []
+
+    def step(name, fn, report):
+        """Run one measurement; on an error, print its traceback and go on to the next."""
+        t0 = time.perf_counter()
+        try:
+            out[name] = got = fn()
+        except Exception as exc:  # noqa: BLE001 — reported, and the run goes on
+            failed.append(name)
+            out[name] = {
+                "error": f"{type(exc).__name__}: {exc}"[:2000],
+                "after_s": round(time.perf_counter() - t0, 1),
+            }
+            print(f"{name}: FAILED after {out[name]['after_s']} s: {out[name]['error']}", flush=True)
+            traceback.print_exc()
+            return None
+        print(report(got), flush=True)
+        return got
+
+    c = step(
+        "catch_up",
+        lambda: catch_up(a.writer, replicas),
+        lambda c: (
+            f"Catch-up after the load: replicas at the writer's version after {c['seconds']} s; triples {c['triples']}; same: {c['same']}"
+        ),
     )
-    out["edit_lag"] = e = edit_lag(store, a.writer, replicas, a.edits, capacity.BASE, capacity.ONTOLOGY)
-    print(
-        f"Edits ({e['edits']}, one a second, after a first edit of {e['first_edit_ms']} ms): edit p50 {e['edit_p50_ms']} ms, max {e['edit_max_ms']} ms; "
-        f"replica lag p50 {e['lag_p50_ms']} ms, p95 {e['lag_p95_ms']} ms, max {e['lag_max_ms']} ms",
-        flush=True,
+
+    def warm():
+        t0 = time.perf_counter()
+        incremental.warm(store, capacity.BASE)
+        return {"seconds": round(time.perf_counter() - t0, 1)}
+
+    step(
+        "planner_warm",
+        warm,
+        lambda w: f"Planner state built (as the service does at startup) in {w['seconds']} s",
     )
-    pool = [
-        {
-            "agent": r["id"],
-            "action": "ApproveSupplierInvoice-d" + r["id"].rsplit("-d", 1)[1],
-            "subject": r["signInClientId"],
-        }
-        for r in changesets.list_entities(store, "agents", capacity.BASE)
-        if r["id"].startswith("InvoiceAssistant-d") and r.get("signInClientId")
-    ]
-    out["failover"] = f = failover(store, log, a.writer, pool, "fuseki")
-    print(
-        f"Failover: writer down {f['writer_down_s']} s; checks a second {f['checks_per_s_before']} before, "
-        f"{f['checks_per_s_while_down']} while down ({f['failed_while_down']} failed); an edit while down: "
-        f"{'refused (' + f['edit_while_down_refused'] + ')' if f['edit_while_down_refused'] else 'ACCEPTED'}; "
-        f"writer taking edits {f['writer_back_and_editing_after_s']} s after it started",
-        flush=True,
+    step(
+        "edit_lag",
+        lambda: edit_lag(store, a.writer, replicas, a.edits, capacity.BASE, capacity.ONTOLOGY),
+        lambda e: (
+            f"Edits ({e['edits']}, one a second, after a first edit of {e['first_edit_ms']} ms): edit p50 {e['edit_p50_ms']} ms, "
+            f"max {e['edit_max_ms']} ms; replica lag p50 {e['lag_p50_ms']} ms, p95 {e['lag_p95_ms']} ms, max {e['lag_max_ms']} ms"
+        ),
     )
-    out["catch_up_after_failover"] = c2 = catch_up(a.writer, replicas)
-    print(
-        f"Replicas after the failover: at the writer's version after {c2['seconds']} s; same: {c2['same']}",
-        flush=True,
+
+    def pool():
+        return [
+            {
+                "agent": r["id"],
+                "action": "ApproveSupplierInvoice-d" + r["id"].rsplit("-d", 1)[1],
+                "subject": r["signInClientId"],
+            }
+            for r in changesets.list_entities(store, "agents", capacity.BASE)
+            if r["id"].startswith("InvoiceAssistant-d") and r.get("signInClientId")
+        ]
+
+    f = step(
+        "failover",
+        lambda: failover(store, log, a.writer, pool(), "fuseki"),
+        lambda f: (
+            f"Failover: writer down {f['writer_down_s']} s; checks a second {f['checks_per_s_before']} before, "
+            f"{f['checks_per_s_while_down']} while down ({f['failed_while_down']} failed); an edit while down: "
+            f"{'refused (' + f['edit_while_down_refused'] + ')' if f['edit_while_down_refused'] else 'ACCEPTED'}; "
+            f"writer taking edits {f['writer_back_and_editing_after_s']} s after it started"
+        ),
     )
-    out["rebuild"] = r = rebuild(a.writer, a.script)
-    print(
-        f"A new replica from an empty volume: matches the writer after {r['seconds']} s (same triples: {r['same_triples']})",
-        flush=True,
+    c2 = step(
+        "catch_up_after_failover",
+        lambda: catch_up(a.writer, replicas),
+        lambda c: (
+            f"Replicas after the failover: at the writer's version after {c['seconds']} s; same: {c['same']}"
+        ),
+    )
+    r = step(
+        "rebuild",
+        lambda: rebuild(a.writer, a.script),
+        lambda r: (
+            f"A new replica from an empty volume: matches the writer after {r['seconds']} s (same triples: {r['same_triples']})"
+        ),
     )
     if a.out:
         Path(a.out).write_text(json.dumps(out, indent=2) + "\n")
     ok = (
-        c["same"]
+        not failed
+        and c["same"]
         and c2["same"]
         and r["same_triples"]
         and f["edit_while_down_refused"]

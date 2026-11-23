@@ -177,8 +177,13 @@ else
       $PY tests/perf/replication.py --writer http://localhost:3030/veromesh \
         --replicas http://localhost:3031/veromesh,http://localhost:3032/veromesh \
         --log "$DLOG" --out "results/replication-$size.json" \
-        >"results/replication-$size.txt" 2>>"$LOG" || echo "(replication $size: a check did not pass)"
+        >"results/replication-$size.txt" 2>"results/replication-$size.err" || echo "(replication $size: a check did not pass)"
       cat "results/replication-$size.txt"
+      if [ -s "results/replication-$size.err" ]; then
+        echo "--- replication $size: errors (the last 60 lines)"
+        tail -n 60 "results/replication-$size.err"
+      fi
+      cat "results/replication-$size.err" >>"$LOG"
     fi
   done
 fi
