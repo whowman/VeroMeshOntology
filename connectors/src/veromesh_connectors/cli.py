@@ -5,6 +5,10 @@
     veromesh-connect spreadsheet export --source p2p -o p2p.xlsx
     veromesh-connect csv import people.csv --source hr --mapping workday.yaml [--dry-run]
     veromesh-connect csv import exports/ --source cmdb          # one file per entity type
+    veromesh-connect workday import --url https://wd2-impl-services1.workday.com --tenant acme [--via rest]
+    veromesh-connect workday changes --since 2026-11-01
+    veromesh-connect entra import --tenant <tenant ID> [--role-group-prefix SG-] [--agent-tag AIAgent]
+    veromesh-connect entra changes --state entra-delta.json
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
     veromesh-connect cleanup [--older-than-hours 24]
@@ -15,7 +19,14 @@ Connection settings (flags or environment):
     VEROMESH_TOKEN_URL, VEROMESH_CLIENT_ID, VEROMESH_CLIENT_SECRET, VEROMESH_SCOPE
                                             OAuth 2.0 client credentials (e.g. Keycloak)
     VEROMESH_CA_BUNDLE                      private CA for TLS
-    VEROMESH_RETRIES / VEROMESH_TIMEOUT     defaults 4 and 60 seconds
+    VEROMESH_RETRIES / VEROMESH_TIMEOUT     defaults 4 and 60 seconds (also used for source systems)
+
+Source systems:
+    WORKDAY_URL, WORKDAY_TENANT, WORKDAY_CLIENT_ID, WORKDAY_CLIENT_SECRET,
+    WORKDAY_REFRESH_TOKEN (without it, client credentials)
+    ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET,
+    ENTRA_GRAPH_URL / ENTRA_LOGIN_URL      defaults https://graph.microsoft.com and
+                                            https://login.microsoftonline.com
 """
 
 from __future__ import annotations
@@ -30,7 +41,18 @@ import httpx
 
 from . import __version__
 from .core import ApiError, ApiSession, ClientCredentials, Runner, RunOptions, StaticToken, Transport
-from .plugins import CsvConnector, SpreadsheetConnector, build_workbook
+from .core.source import SOURCE_RETRY, RefreshToken, SourceApi, SourceError
+from .plugins import (
+    CsvConnector,
+    EntraChangesConnector,
+    EntraConnector,
+    GraphClient,
+    SpreadsheetConnector,
+    WorkdayChangesConnector,
+    WorkdayClient,
+    WorkdayConnector,
+    build_workbook,
+)
 
 
 def _out(msg: str = "") -> None:
@@ -117,6 +139,120 @@ def csv_import(api: ApiSession, args) -> int:
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
+def _source_transport(url: str, label: str, http: httpx.Client | None) -> Transport:
+    return Transport(
+        url,
+        timeout=float(os.environ.get("VEROMESH_TIMEOUT", "60")),
+        retries=int(os.environ.get("VEROMESH_RETRIES", "4")),
+        http=http,
+        label=label,
+        retry_on=SOURCE_RETRY,
+    )
+
+
+def _need(value: str | None, flag: str, env: str) -> str:
+    if not value:
+        raise ValueError(f"{flag} (or {env}) is required")
+    return value
+
+
+def workday_client(args, http: httpx.Client | None = None) -> WorkdayClient:
+    url = _need(args.url, "--url", "WORKDAY_URL")
+    tenant = _need(args.tenant, "--tenant", "WORKDAY_TENANT")
+    t = _source_transport(url, "Workday", http)
+    token_url = f"{t.base_url}/ccx/oauth2/{tenant}/token"
+    cid, secret = os.environ.get("WORKDAY_CLIENT_ID", ""), os.environ.get("WORKDAY_CLIENT_SECRET", "")
+    if os.environ.get("WORKDAY_REFRESH_TOKEN"):
+        auth = RefreshToken(t, token_url, cid, secret, os.environ["WORKDAY_REFRESH_TOKEN"])
+    else:
+        auth = ClientCredentials(t, token_url, cid, secret)
+    return WorkdayClient(SourceApi("Workday", t, auth), tenant)
+
+
+def graph_client(args, http: httpx.Client | None = None) -> GraphClient:
+    tenant = _need(args.tenant, "--tenant", "ENTRA_TENANT_ID")
+    graph = _source_transport(args.graph, "Microsoft Graph", http)
+    login = _source_transport(args.login, "the Microsoft Entra sign-in", http)
+    auth = ClientCredentials(
+        login,
+        f"{login.base_url}/{tenant}/oauth2/v2.0/token",
+        os.environ.get("ENTRA_CLIENT_ID", ""),
+        os.environ.get("ENTRA_CLIENT_SECRET", ""),
+        "https://graph.microsoft.com/.default",
+    )
+    return GraphClient(SourceApi("Microsoft Graph", graph, auth))
+
+
+def workday_import(api: ApiSession, args) -> int:
+    role_map = _load_mapping(args.role_map) if args.role_map else None
+    conn = WorkdayConnector(
+        workday_client(args, getattr(args, "source_http", None)),
+        via=args.via,
+        report_owner=args.report_owner,
+        report=args.report,
+        roles=not args.no_roles,
+        role_map=role_map,
+    )
+    opts = RunOptions(source=args.source or "workday", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def workday_changes(api: ApiSession, args) -> int:
+    from datetime import date
+
+    conn = WorkdayChangesConnector(
+        workday_client(args, getattr(args, "source_http", None)),
+        date.fromisoformat(args.since),
+        report_owner=args.report_owner,
+        report=args.report,
+        through=date.fromisoformat(args.through) if args.through else None,
+        roles=not args.no_roles,
+        role_map=_load_mapping(args.role_map) if args.role_map else None,
+    )
+    results = Runner(api, _out).run_events(
+        conn, RunOptions(source=args.source or "workday", dry_run=args.dry_run)
+    )
+    _out(
+        f"{len(results)} events, {sum(not r.ok for r in results)} failed."
+        + (f" Next run: --since {conn.last_entered}" if conn.last_entered else " No changes.")
+    )
+    return 0 if all(r.ok for r in results) else 1
+
+
+def entra_import(api: ApiSession, args) -> int:
+    conn = EntraConnector(
+        graph_client(args, getattr(args, "source_http", None)),
+        tenant=args.tenant,
+        role_group_prefix=args.role_group_prefix,
+        agent_tag=args.agent_tag,
+    )
+    opts = RunOptions(source=args.source or "entra", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def entra_changes(api: ApiSession, args) -> int:
+    conn = EntraChangesConnector(
+        graph_client(args, getattr(args, "source_http", None)),
+        args.state,
+        role_group_prefix=args.role_group_prefix,
+    )
+    results = Runner(api, _out).run_events(
+        conn, RunOptions(source=args.source or "entra", dry_run=args.dry_run)
+    )
+    if conn.initialized:
+        _out(f"Recorded the current position in {args.state}; later runs apply the changes since.")
+        return 0
+    failed = sum(not r.ok for r in results)
+    if failed or args.dry_run:
+        _out(
+            f"{len(results)} events, {failed} failed. {args.state} not advanced, so they are retried next run."
+        )
+        return 1 if failed else 0
+    conn.save()
+    _out(f"{len(results)} events applied; position saved in {args.state}.")
+    return 0
+
+
 def sources(api: ApiSession, args) -> int:
     rows = api.sources()
     if not rows:
@@ -193,6 +329,59 @@ def parser() -> argparse.ArgumentParser:
     load_flags(ci)
     ci.set_defaults(fn=csv_import)
 
+    def workday_flags(sp, report: str):
+        sp.add_argument("--url", default=os.environ.get("WORKDAY_URL"), help="Workday services host")
+        sp.add_argument("--tenant", default=os.environ.get("WORKDAY_TENANT"))
+        sp.add_argument("--report-owner", default="ISU_VeroMesh", help="Owner of the custom report (RaaS)")
+        sp.add_argument("--report", default=report, help="Custom report name (RaaS)")
+        sp.add_argument("--role-map", help="YAML object: business title -> role ID")
+        sp.add_argument("--no-roles", action="store_true", help="Do not write roles from business titles")
+
+    wd = sub.add_parser("workday", help="Workday HCM: workers, positions, managers").add_subparsers(
+        dest="action", required=True
+    )
+    wi = wd.add_parser("import", help="Load every current worker")
+    workday_flags(wi, "VeroMesh_Workers")
+    wi.add_argument(
+        "--via", choices=("raas", "rest"), default="raas", help="Custom report (default) or REST API"
+    )
+    load_flags(wi)
+    wi.set_defaults(fn=workday_import)
+    wc = wd.add_parser("changes", help="Apply worker changes entered since a date, one event each")
+    workday_flags(wc, "VeroMesh_Worker_Changes")
+    wc.add_argument("--since", required=True, help="YYYY-MM-DD: changes entered on or after")
+    wc.add_argument("--through", help="YYYY-MM-DD (default: today in Workday)")
+    wc.add_argument("--source")
+    wc.add_argument("--dry-run", action="store_true")
+    wc.set_defaults(fn=workday_changes)
+
+    def entra_flags(sp):
+        sp.add_argument("--tenant", default=os.environ.get("ENTRA_TENANT_ID"), help="Directory (tenant) ID")
+        sp.add_argument("--graph", default=os.environ.get("ENTRA_GRAPH_URL", "https://graph.microsoft.com"))
+        sp.add_argument(
+            "--login", default=os.environ.get("ENTRA_LOGIN_URL", "https://login.microsoftonline.com")
+        )
+        sp.add_argument(
+            "--role-group-prefix", help="Groups named <prefix><role ID> give the roles people fill"
+        )
+
+    en = sub.add_parser(
+        "entra", help="Microsoft Entra ID: users, managers, role groups, agents"
+    ).add_subparsers(dest="action", required=True)
+    ei = en.add_parser("import", help="Load every enabled user, role group and agent")
+    entra_flags(ei)
+    ei.add_argument(
+        "--agent-tag", default="AIAgent", help="Service principals with this tag are agents ('' for none)"
+    )
+    load_flags(ei)
+    ei.set_defaults(fn=entra_import)
+    ec = en.add_parser("changes", help="Apply user changes since the last run (delta query)")
+    entra_flags(ec)
+    ec.add_argument("--state", default="entra-delta.json", help="Where the delta position is kept")
+    ec.add_argument("--source")
+    ec.add_argument("--dry-run", action="store_true")
+    ec.set_defaults(fn=entra_changes)
+
     sub.add_parser("sources", help="Sources loaded into the model").set_defaults(fn=sources)
     r = sub.add_parser("runs", help="Recent connector runs (changesets), newest first")
     r.add_argument("--source")
@@ -204,12 +393,18 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None, http: httpx.Client | None = None) -> int:
+def main(
+    argv: list[str] | None = None, http: httpx.Client | None = None, source_http: httpx.Client | None = None
+) -> int:
     args = parser().parse_args(argv)
+    args.source_http = source_http  # tests: a source system served in-process
     try:
         return args.fn(session_from(args, http), args)
     except ApiError as exc:
         _out(f"Error: {exc.detail}")
+        return 2
+    except SourceError as exc:
+        _out(f"Error: {exc}")
         return 2
     except (ValueError, OSError, KeyError) as exc:
         _out(f"Error: {exc}")

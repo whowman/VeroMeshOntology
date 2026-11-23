@@ -153,5 +153,39 @@ Guidelines:
 | --- | --- | --- |
 | Spreadsheet | `spreadsheet template \| import \| export` | The VeroMesh workbook: one sheet per entity type, generated from the API's schema; export writes a source back out for editing |
 | CSV | `csv import <file or folder>` | One file per entity type (named after it, or `--type`), or any columns with `--mapping` |
+| Workday | `workday import \| changes` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each |
+| Microsoft Entra ID | `entra import \| changes` | Users, managers, role groups and AI agents through Microsoft Graph; changes through delta queries |
 
-Tests for the SDK and both connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode.
+Tests for the SDK and the connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode. The Workday and Entra ID connectors are tested against small fakes of the public APIs, and against the VeroMesh test harness (a simulated company with each system's quirks) when it is installed: `test_against_harness.py`.
+
+### Source systems' APIs
+
+Connectors that call a source system's API use `core/source.py`: `SourceApi` reads JSON with the same transport as the VeroMesh side (backoff, `Retry-After`; for reads a 500 is retried too) and renews the source's OAuth token once on a 401. Grants: `ClientCredentials` (Entra ID) and `RefreshToken` (Workday). A source that refuses a request or cannot be reached is reported as a `SourceError` naming the system.
+
+### Workday
+
+```bash
+export WORKDAY_CLIENT_ID=... WORKDAY_CLIENT_SECRET=... WORKDAY_REFRESH_TOKEN=...
+veromesh-connect workday import --url https://wd2-impl-services1.workday.com --tenant acme
+veromesh-connect workday changes --since 2026-11-01      # prints the --since for the next run
+```
+
+- **Sign-in:** an API client registered in Workday, with a refresh token for the integration system user (without `WORKDAY_REFRESH_TOKEN`, client credentials), at `/ccx/oauth2/{tenant}/token`.
+- **Full load** (`import`): by default the custom report `ISU_VeroMesh/VeroMesh_Workers` through Reports as a Service (`--report-owner`, `--report`); it needs the columns `Employee_ID`, `Preferred_Name`, `Email_Primary_Work`, `Business_Title`, `Manager_Employee_ID`, `Hire_Date`, `Termination_Date` and `Active_Status`. `--via rest` reads `/ccx/api/v1/{tenant}/workers` instead, 100 a page.
+- **Writes:** people (ID = employee ID; the preferred name; email; manager; the role filled; valid from the hire date and until a termination date ahead) and a role per business title (`--role-map` maps titles to existing role IDs; `--no-roles` writes none). Workers whose termination has taken effect are left out. A manager who is not in the run (a contractor) is left out of the reference, and the run says how many.
+- **Changes** (`changes`): the report `VeroMesh_Worker_Changes` with `Updated_From`, by the date each business process was entered, so a termination entered late is still picked up. Each event fetches the worker and upserts them; a termination that has taken effect deletes them. Overlapping runs are safe: each event is applied once.
+
+### Microsoft Entra ID
+
+```bash
+export ENTRA_CLIENT_ID=... ENTRA_CLIENT_SECRET=...
+veromesh-connect entra import --tenant <tenant ID> --role-group-prefix SG-
+veromesh-connect entra changes --tenant <tenant ID> --role-group-prefix SG- --state entra-delta.json
+```
+
+- **Sign-in:** an app registration with the application permissions `User.Read.All`, `GroupMember.Read.All` and `Application.Read.All`, signing in with client credentials.
+- **Full load** (`import`): `/users` with `$expand=manager`, paged; with `--role-group-prefix`, the groups named `<prefix><role ID>` and their members; service principals tagged `AIAgent` (`--agent-tag`, `''` for none) and their owners.
+- **Writes:** people (ID = `employeeId`, the same as the HR system, so both sources describe one person; for accounts with no employee ID, such as contractors, the user principal name's local part, which the service warns about), roles from role groups, and agents (the client ID they sign in with, and the owner they act for). Disabled accounts are left out, along with references to them. An agent whose owners have all left is left out too, so the decision check refuses it.
+- **Changes** (`changes`): Graph delta queries. The first run records the current position in the state file; later runs apply each changed user as one event (with their manager and role groups), and delete removed or disabled accounts. The position is saved only when every event applied, so a refused event is retried. A leaver who is still the principal of an agent is refused until the agent is reassigned or the next full load leaves it out.
+
+Register each source once with its category (`hr` for Workday, `iam` for Entra ID) so precedence applies; see `docs/provenance.md`.

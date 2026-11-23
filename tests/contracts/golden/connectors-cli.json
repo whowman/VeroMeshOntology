@@ -25,6 +25,37 @@
       },
       "options": []
     },
+    "entra": {
+      "args": [],
+      "commands": {
+        "changes": {
+          "args": [],
+          "options": [
+            "--tenant",
+            "--graph",
+            "--login",
+            "--role-group-prefix",
+            "--state",
+            "--source",
+            "--dry-run"
+          ]
+        },
+        "import": {
+          "args": [],
+          "options": [
+            "--tenant",
+            "--graph",
+            "--login",
+            "--role-group-prefix",
+            "--agent-tag",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "runs": {
       "args": [],
       "options": [
@@ -61,6 +92,42 @@
           "options": [
             "-o/--output",
             "--example"
+          ]
+        }
+      },
+      "options": []
+    },
+    "workday": {
+      "args": [],
+      "commands": {
+        "changes": {
+          "args": [],
+          "options": [
+            "--url",
+            "--tenant",
+            "--report-owner",
+            "--report",
+            "--role-map",
+            "--no-roles",
+            "--since",
+            "--through",
+            "--source",
+            "--dry-run"
+          ]
+        },
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--tenant",
+            "--report-owner",
+            "--report",
+            "--role-map",
+            "--no-roles",
+            "--via ['raas', 'rest']",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
           ]
         }
       },
