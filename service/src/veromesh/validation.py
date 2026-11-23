@@ -18,6 +18,7 @@ the service's interpreter to themselves while an edit validates.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 from collections import deque
@@ -470,3 +471,29 @@ def affected(graphs: Iterable[Graph], changed: set[URIRef]) -> set[URIRef]:
                     out.add(s)
                     todo.append(s)
     return out
+
+
+# ---------------------------------------------------------------------------- ended references
+
+#: During a commit that keeps dropped entities as ended (issue #67): the entities that refer
+#: to them, as (type, id). A violation on one of these is the consequence of the ending
+#: (an agent whose principal has left) and belongs to the referring source's owner: it is
+#: reported as a finding, not a reason to refuse the source that dropped the entity.
+ENDED_REFERRERS: contextvars.ContextVar[frozenset] = contextvars.ContextVar(
+    "ended_referrers", default=frozenset()
+)
+
+
+def tolerate_ended(report: dict) -> None:
+    referrers = ENDED_REFERRERS.get()
+    if not referrers or not report.get("violations"):
+        return
+    keep = []
+    for v in report["violations"]:
+        if (v.get("type"), v.get("id")) in referrers:
+            report["warnings"].append(
+                {**v, "severity": "Warning", "message": f"Refers to an entity that has ended: {v['message']}"}
+            )
+        else:
+            keep.append(v)
+    report["violations"] = keep

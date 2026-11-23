@@ -58,7 +58,7 @@ stateDiagram-v2
   Disputed --> Unconfirmed: source changes the value
 ```
 
-**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `spreadsheet`, `steward`), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
+**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `spreadsheet`, `steward`, and `ended` for the system source below), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
 
 **Changeset** stays as it is; it becomes a `prov:Activity` that generated its claims.
 
@@ -86,6 +86,8 @@ For each entity and field, VeroMesh picks one source's values:
 - **Steward wins** where the system of record is often incomplete or is not where the business decides: owner and steward roles, criticality, classification and data category, descriptions and definitions, links between business entities (capability served, KPIs measured, data product inputs). The correction takes effect at once; the disagreement stays listed as a conflict until the source is fixed.
 - **Source wins** where a system of record is legally or operationally authoritative: a person's name, employee ID, email, reporting line and roles filled (HR); authority amounts, currencies and dates (ERP, IAM); system identifiers and lifecycle state (CMDB); every field of an approved AI use case (the governance board's register: board decisions are disputed, not overruled). A steward can dispute these, which flags them and notifies the source owner, but the value changes only when the source changes.
 - Customers can flip any field.
+
+**Ended entities** (issue #67). A load that drops something another source still refers to is not refused. A person who leaves HR, while a stale workbook still says an agent acts for them, is the usual case. The dropped entity is kept as a minimal record (its type, name and the fields it must have, no references) in the system source `ended`, category `ended`, ranked below every other source and never `hr`. The load goes through, and each reference becomes a warning on the changeset: "No longer in 'entra'; kept as ended because agents 'InvoiceAssistant' (actsFor) still refers to it". A violation that the ending causes on the referring entity is reported as a warning too, for that source's owner, and does not refuse the source that dropped it. Because `ended` is never HR, the decision check treats the person as no longer employed. Validation (`--dry-run`) gives the same answer as the commit.
 
 The result is materialized in an **effective graph** (`https://veromesh.ai/graph/effective`), recomputed for the touched entities on every commit and attestation. Validation, impact queries, the agent gateway and DataHub publishing read the effective graph instead of the union, so a disagreement between sources is no longer a model violation. Instead it is a **conflict**: two sources assert different non-empty values for the same field. Conflicts are listed by the API and, from Phase 2, routed to the entity's owner.
 

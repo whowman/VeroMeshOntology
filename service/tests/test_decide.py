@@ -287,3 +287,21 @@ def test_a_contractor_only_entra_lists_is_employed(ctx):
     assert m.employment("kim.vo") == "contractor"  # no employee ID: Entra ID decides
     assert m.employment("LeeExample") == "employed"
     assert m.employment("DanaExample") == "ended"
+
+
+def test_a_source_dropping_someone_another_source_refers_to_is_not_refused(ctx):
+    """Entra ID drops Dana's account while the example (another source) still says the
+    Invoice Assistant acts for her: the load goes through, Dana is kept as ended, and the
+    agent is refused because HR no longer lists her (issue #67)."""
+    client, _, service = ctx
+    load_source(client, "workday", "hr", [LEE])  # Dana has left HR
+    load_source(client, "entra", "iam", [DANA, LEE])
+    cs = client.post(f"{API}/changesets", json={"source": "entra"}).json()["id"]
+    client.post(f"{API}/changesets/{cs}/items", json={"items": [{"type": "people", "entity": LEE}]})
+    # Dana is still in p2p (the example) and the hr source is Lee only: drop her from entra.
+    r = client.post(f"{API}/changesets/{cs}/commit")
+    assert r.status_code == 200, r.text
+    assert client.get(f"{API}/people/DanaExample").status_code == 200  # still there via the example
+    attest_basis(client, service)
+    d = ask(client, 800)
+    assert d["outcome"] == "refuse" and d["basis"]["principalStatus"] == "ended"

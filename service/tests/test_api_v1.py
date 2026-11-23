@@ -106,20 +106,22 @@ def test_references_across_sources(client, example):
     assert report["summary"]["violations"] == 0
     assert client.get(f"{API}/roles/Controller").json()["sources"] == ["hr"]
 
-    # Replacing the HR source without the controller role breaks references in p2p.
+    # Replacing the HR source without the controller role, which p2p still refers to.
     hr_without = [i for i in example if i["type"] in people_types and i["entity"]["id"] != "Controller"]
     for i in hr_without:
         if i["type"] == "people" and "Controller" in i["entity"].get("rolesFilled", []):
             i["entity"]["rolesFilled"].remove("Controller")
-    _, broken = submit(client, hr_without, source="hr")
-    assert broken["valid"] is False
-    assert any(
-        e["type"] == "kpis"
-        and e["id"] == "DuplicatePaymentRate"
-        and e["field"] == "ownerRole"
-        and "no longer exists" in e["message"]
-        for e in broken["errors"]
-    ), broken["errors"]
+    # The load goes through and the role is kept as ended (issue #67), with a warning
+    # naming what still refers to it.
+    _, checked = submit(client, hr_without, source="hr")
+    assert checked["valid"] is True and checked["errors"] == []
+    ended = next(w for w in checked["warnings"] if w["id"] == "Controller")
+    assert (
+        "kept as ended" in ended["message"] and "kpis 'DuplicatePaymentRate' (ownerRole)" in ended["message"]
+    )
+    report = load(client, hr_without, source="hr")
+    assert [e["id"] for e in report["ended"]] == ["Controller"]
+    assert client.get(f"{API}/roles/Controller").json()["sources"] == ["ended"]
 
 
 def test_single_entity_writes(client, example):

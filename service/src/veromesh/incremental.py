@@ -669,6 +669,7 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
                 report["warnings"].append(describe(sev, node, message))
     finally:
         _apply_graph(model.graph, edit.model_added, edit.model_removed)
+    validation.tolerate_ended(report)
     report["preexistingViolations"] = sum(1 for sev, _, _ in before_findings if sev == "Violation")
     report["validated"] = "all" if focus is None else len(focus)
     for k in ("violations", "warnings"):
