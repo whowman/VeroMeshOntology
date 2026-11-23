@@ -115,6 +115,8 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
 | `POST /api/v1/decisions/{id}/overrides` | A person answers or overrules, as themselves: `{"verdict": "approved"\|"rejected", "role"?, "note"?}` |
 | `POST /api/v1/decisions/{id}/outcome` | The agent reports what it did: `{"outcome": "done"\|"not_done", "note"?}` |
+| `GET /api/v1/domains` | Which source category decides each question (source weighting): authoritative and evidence categories per domain, the fields it covers, whether this organization changed it |
+| `PUT` / `DELETE /api/v1/domains/{name}` | Change a domain, or return it to the default (administrators). Recorded on the decision log's hash chain; the effective model is rebuilt |
 | `GET /api/v1/decisions/inbox` | What waits for the signed-in person: consultations to answer, escalations above their agent's limit, allowed actions they may stop |
 | `GET /api/v1/decisions/measures[?since=&until=&agent=]` | Override rate, consultation precision, delegation extended (stewards) |
 | `GET /api/v1/decisions/{id}` | One entry and the entries that refer to it |

@@ -113,6 +113,7 @@ def governance() -> dict:
     return {
         "categories": list(CATEGORIES),
         "ranking": {"default": DEFAULT_RANKING, **RANKING},
+        "domains": "GET /api/v1/domains: which category decides each question, per field (these rankings apply only to fields no domain covers)",
         "sourceWins": {t: sorted(f) for t, f in SOURCE_WINS.items()},
         "stewardWins": "every field not listed under sourceWins",
         "cadenceDays": {
@@ -133,11 +134,29 @@ def cadence_days(type_: str, key: str) -> int:
     return CADENCE_DAYS.get(type_, DEFAULT_CADENCE_DAYS)
 
 
+# The domains in force (domains.activate): (type, field) -> its domain's order of categories,
+# and the fields combined across sources. Until activated, the shipped defaults.
+_FIELD_ORDER: dict[tuple[str, str], list[str]] = {}
+_UNION: set[tuple[str, str]] = set()
+
+
+def use_domains(doms: dict[str, dict]) -> None:
+    from . import domains as D
+
+    global _FIELD_ORDER, _UNION
+    _FIELD_ORDER = {k: D.order(doms, name) for k, name in D.field_domains(doms).items()}
+    _UNION = D.union_fields(doms)
+
+
 def rank(type_: str, key: str, category: str) -> int:
-    """Lower is more authoritative."""
-    order = RANKING.get(type_, DEFAULT_RANKING)
+    """Lower is more authoritative: the field's domain decides (domains.py), else the type's
+    ranking. A steward correction ranks first where stewards may correct; what the ended
+    source keeps ranks last."""
     if category == "steward":
         return -1 if steward_may_correct(type_, key) else 1000
+    if category == "ended":
+        return 10_000
+    order = _FIELD_ORDER.get((type_, key)) or RANKING.get(type_, DEFAULT_RANKING)
     return order.index(category) if category in order else len(order)
 
 
@@ -769,9 +788,21 @@ def resolve(
             live = [c for c in cands if not disputed(ea, c, f)] or list(cands)
             live.sort(key=lambda c: (rank(type_, f, c.category), -_dt(c.observed_at).timestamp(), c.source))
             win = live[0]
-            r.values[f] = win.values[f]
             r.winners[f] = win
             r.candidates[f] = cands
+            if (type_, f) in _UNION:
+                # Combined across sources (a person's job roles from HR and approval roles from
+                # identity groups or the workbook); what the ended source keeps does not count.
+                vals: list = []
+                for c in live:
+                    if c.category == "ended":
+                        continue
+                    for v in c.values[f] if isinstance(c.values[f], list) else [c.values[f]]:
+                        if v not in vals:
+                            vals.append(v)
+                r.values[f] = sorted(vals, key=str) if vals else win.values[f]
+                continue
+            r.values[f] = win.values[f]
             if len({fhash(c.values[f]) for c in cands}) > 1:
                 r.conflicts[f] = cands
         out[key] = r
@@ -832,6 +863,9 @@ def migrate(store: RDFStore, base: str) -> list[str]:
 
 def rebuild(store: RDFStore, base: str) -> dict:
     """Bring claims up to date with every source, then recompute and store the effective model."""
+    from . import domains
+
+    domains.activate(store)
     migrated = migrate(store, base)
     resolved = resolve(read_claims(store), read_attestations(store))
     g, _ = to_graph(resolved, base)
@@ -1355,3 +1389,12 @@ def authority_basis(store: RDFStore, rid: str) -> dict:
         "checks": checks,
         "reasons": [f"{c['type']} '{c['id']}' {c['field']}: {c['status']} ({c['why']})" for c in failing],
     }
+
+
+def _default_domains() -> None:
+    from . import domains
+
+    use_domains(domains.DEFAULTS)
+
+
+_default_domains()

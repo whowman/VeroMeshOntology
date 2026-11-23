@@ -44,8 +44,8 @@ from urllib.parse import quote
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
+from . import domains, incremental, validation
 from . import entities as E
-from . import incremental, validation
 from . import provenance as P
 from .compactgraph import compact_graph
 from .modelcache import VersionedStore, cached, unversioned
@@ -812,6 +812,7 @@ def _touched(upserts: list[Item], current: Graph, target: Graph, base: str) -> s
 
 
 def validate(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
+    domains.activate(store)
     meta = _require_open(store, cs)
     items = _load_items(store, cs)
     with incremental._LOCK:
@@ -859,6 +860,7 @@ def _source_lock(source: str) -> threading.Lock:
 
 
 def commit(store: RDFStore, cs: str, *, base: str, ontology_dir: str) -> dict:
+    domains.activate(store)  # precedence follows this organization's domains
     meta = get(store, cs)
     if meta["status"] == "committed":
         return {**meta.get("report", {}), "alreadyCommitted": True}

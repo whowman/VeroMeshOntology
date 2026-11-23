@@ -42,7 +42,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from . import changesets, clock, followup, incremental
+from . import changesets, clock, domains, followup, incremental
 from . import entities as E
 from . import provenance as prov
 from .decisions import DecisionLog
@@ -112,9 +112,11 @@ class Model:
         ``no-access`` when employed but an iam source exists and lists no enabled account
         for them; ``ended`` otherwise. With no hr source: ``unknown`` (no rule applies)."""
         cats = prov.categories(self._store)
-        hr = {s for s, c in cats.items() if c == "hr"}
+        emp = domains.activate(self._store)["employment"]
+        hr = {s for s, c in cats.items() if c in (emp.get("authoritative") or [])}
         if not hr:
             return "unknown"
+        contractors = emp.get("contractors")
         iam = {s for s, c in cats.items() if c == "iam"}
         holding = self.sources_holding("people", pid)
         person = self.get("people", pid) or {}
@@ -122,7 +124,7 @@ class Model:
             if iam and not holding & iam and person.get("employeeId"):
                 return "no-access"
             return "employed"
-        if holding & iam and not person.get("employeeId"):
+        if contractors and not person.get("employeeId") and any(cats.get(x) == contractors for x in holding):
             return "contractor"
         return "ended"
 
@@ -206,6 +208,7 @@ def check(
     require_attested: bool = True,
 ) -> dict:
     """Decide, append the decision to the log, and return the log entry plus who to inform."""
+    domains.activate(store)
     incremental.warm(store, base)  # follow what other copies changed, without reading the model
     pin = store.pinned() if hasattr(store, "pinned") else contextlib.nullcontext()
     with pin:  # one version read for the whole check, not one per cached read

@@ -8,6 +8,15 @@
       "422"
     ]
   },
+  "DELETE /api/v1/domains/{name}": {
+    "params": [
+      "name (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "DELETE /api/v1/{type_}/{rid}": {
     "params": [
       "rid (path)",
@@ -162,6 +171,12 @@
     "status": [
       "200",
       "422"
+    ]
+  },
+  "GET /api/v1/domains": {
+    "params": [],
+    "status": [
+      "200"
     ]
   },
   "GET /api/v1/examples/procure-to-pay": {
@@ -714,6 +729,18 @@
       }
     },
     "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/domains/{name}": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [
+      "name (path)"
+    ],
     "status": [
       "200",
       "422"

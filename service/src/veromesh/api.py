@@ -30,6 +30,7 @@ from . import (
     coverage,
     decide,
     decisions,
+    domains,
     entities,
     followup,
     gcsetup,
@@ -516,6 +517,56 @@ def create_app(
         out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
         prov.refresh_effective(s.store, c.instance_base)
         return out
+
+    @app.get("/api/v1/domains", dependencies=need(auth.READ), tags=["governance"])
+    def domains_list(s: Svc) -> dict:
+        """Which source category decides each question (source weighting): per domain, the
+        authoritative and evidence categories, the fields it covers, and whether this
+        organization changed it from the default."""
+        return domains.current(s.store)
+
+    @app.put("/api/v1/domains/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
+    def domain_set(s: Svc, c: Cfg, dl: Log, who: Who, name: str, body: dict) -> dict:
+        """Change one domain (only the keys given: authoritative, evidence, contractors, union,
+        fields). Recorded on the decision log's hash chain; the effective model is rebuilt."""
+        try:
+            out = domains.set_domain(s.store, name, body)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\"")) from e
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        dl.append(
+            {
+                "kind": "configuration",
+                "setting": f"domain:{name}",
+                "value": body,
+                "outcome": "changed",
+                "subject": who.subject,
+            }
+        )
+        domains.activate(s.store)
+        rebuilt = prov.rebuild(s.store, c.instance_base)
+        return {"domain": name, **out, "rebuilt": rebuilt}
+
+    @app.delete("/api/v1/domains/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
+    def domain_reset(s: Svc, c: Cfg, dl: Log, who: Who, name: str) -> dict:
+        """Return one domain to the shipped default. Recorded; the effective model is rebuilt."""
+        try:
+            out = domains.reset_domain(s.store, name)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\"")) from e
+        dl.append(
+            {
+                "kind": "configuration",
+                "setting": f"domain:{name}",
+                "value": {"reset": True},
+                "outcome": "reset",
+                "subject": who.subject,
+            }
+        )
+        domains.activate(s.store)
+        rebuilt = prov.rebuild(s.store, c.instance_base)
+        return {"domain": name, **out, "rebuilt": rebuilt}
 
     @app.get("/api/v1/conflicts", dependencies=need(auth.STEWARD), tags=["governance"])
     def conflicts(s: Svc, type: str | None = None) -> list[dict]:
