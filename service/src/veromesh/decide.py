@@ -11,7 +11,11 @@ The steps, all on the effective model (what VeroMesh believes now):
 3. **Authority.** An authority the agent holds covers the action, is valid on
    the day, is in the amount's currency and its limit is not exceeded; its
    parent authorities (up to the one the principal holds) are valid and cover
-   the action too. Above the agent's limit: refuse, and escalate to the principal.
+   the action too. Above the agent's limit: consult the next authority up, the
+   role whose authority for the action covers the amount with the smallest limit
+   (a role with people in it first), and its co-approvers above their amounts.
+   Only when no authority covers the amount: refuse, and escalate to the principal
+   (decided 23 November, issue #68).
 4. **Attested facts only.** Every fact behind that authority is attested and
    current (provenance.authority_basis); otherwise refuse.
 5. **Co-approval.** A co-approval tier on the authority or a parent applies
@@ -109,6 +113,26 @@ def _valid(a: dict, day: date) -> str | None:
     if a.get("validUntil") and day > date.fromisoformat(a["validUntil"]):
         return f"ended on {a['validUntil']}"
     return None
+
+
+def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) -> dict | None:
+    """The authority a role holds for ``action`` that covers ``amt`` on ``day``, with the
+    smallest limit: the next authority up from the agent's. A role with people in it
+    comes before a vacant one, so a decision does not wait on a post nobody fills."""
+    if amt is None:
+        return None
+    found = []
+    for a in m.by("authorities", "actionsCovered", action):
+        holder = a.get("holder")
+        if a["id"] in skip or not holder or m.get("roles", holder) is None:
+            continue
+        if any(_valid(x, day) for x in _chain(m, a)):
+            continue
+        limit = _dec(a.get("limitAmount"))
+        if limit is not None and ((a.get("currency") or "").upper() != cur or amt > limit):
+            continue
+        found.append((not m.people_in(holder), limit is None, limit or Decimal(0), a["id"], a))
+    return min(found, key=lambda f: f[:4])[4] if found else None
 
 
 def _chain(m: Model, auth: dict) -> list[dict]:
@@ -211,14 +235,36 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
             used = a["id"]
     if used is None and held and not refuse:
         a = held[0]
-        refuse.append(f"Not within the agent's authority: {'; '.join(problems[a['id']])}.")
         over_limit = any("above its limit" in w for w in problems[a["id"]])
-        if over_limit and principal:
-            escalate = {
-                "person": principal,
-                "name": m.name("people", principal),
-                "why": "above the agent's limit",
-            }
+        only_limit = over_limit and all("above its limit" in w for w in problems[a["id"]])
+        nxt = _next_authority(m, action, amt, cur, day, skip={x["id"] for x in held}) if only_limit else None
+        if nxt is not None:
+            why = (
+                f"{'; '.join(problems[a['id']])} (the agent's authority); within "
+                f"'{nxt.get('name') or nxt['id']}'"
+            )
+            consult.append(_consult_entry(m, nxt["holder"], why))
+            for t in m.by("co-approvals", "authority", *[x["id"] for x in _chain(m, nxt)]):
+                above = _dec(t.get("aboveAmount"))
+                if above is not None and amt is not None and amt > above:
+                    consult.append(
+                        _consult_entry(
+                            m, t["approverRole"], f"co-approval required above {_money(above)} {cur}"
+                        )
+                    )
+            reasons.append(
+                f"Above the agent's authority: {'; '.join(problems[a['id']])}. "
+                f"Consult the next authority up: {m.name('roles', nxt['holder'])}."
+            )
+            basis["nextAuthority"] = nxt["id"]
+        else:
+            refuse.append(f"Not within the agent's authority: {'; '.join(problems[a['id']])}.")
+            if over_limit and principal:
+                escalate = {
+                    "person": principal,
+                    "name": m.name("people", principal),
+                    "why": "above the agent's limit, and no authority covers the amount",
+                }
 
     if used:
         auth = m.get("authorities", used)

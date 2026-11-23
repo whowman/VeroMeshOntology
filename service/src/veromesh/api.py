@@ -747,7 +747,8 @@ def create_app(
         """Before a consequential action: may this agent take it, for its principal, now?
         Answers allow, consult (with the owners to consult first) or refuse, with reasons, and
         appends the decision to the log. Ask as the agent (its own sign-in); the answer says
-        whom to inform, whom to consult, and whom to escalate to above the agent's limit."""
+        whom to inform, whom to consult (above the agent's limit: the next authority up), and
+        whom to escalate to when no authority covers the amount."""
         trusted = c.auth_disabled or "admin" in who.roles
         if c.auth_disabled or (who.kind != "app" and "admin" in who.roles):
             if not body.agent:

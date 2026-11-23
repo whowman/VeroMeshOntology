@@ -95,12 +95,33 @@ def test_material_invoice_consults_the_kpi_owner(ctx):
     assert roles(d["inform"]) == ["ApManager"]
 
 
-def test_above_the_agents_limit_is_refused_and_escalated(ctx):
+def test_above_the_agents_limit_consults_the_next_authority_up(ctx):
     client, _, service = ctx
     attest_basis(client, service)
-    d = ask(client, 7000)
+    d = ask(client, 7000)  # the agent may approve 5,000; the AP manager 50,000; the controller 250,000
+    assert d["outcome"] == "consult"
+    ap = next(c for c in d["consult"] if c["role"] == "ApManager")
+    assert ap["people"] == [{"id": "DanaExample", "name": "Dana Example"}]
+    assert "7,000 USD is above its limit of 5,000 USD" in ap["why"][0]
+    assert "within 'Approve supplier invoices up to 50,000 USD'" in ap["why"][0]
+    assert d["basis"]["nextAuthority"] == "ApApprovalAuthority" and d["escalateTo"] is None
+    assert any("Consult the next authority up: " in r for r in d["reasons"])
+
+
+def test_the_next_authority_up_is_the_smallest_that_covers_the_amount(ctx):
+    client, _, service = ctx
+    attest_basis(client, service)
+    d = ask(client, 120_000)  # above the AP manager's 50,000: the controller
+    assert d["outcome"] == "consult" and d["basis"]["nextAuthority"] == "ControllerAuthority"
+    assert "Controller" in roles(d["consult"]) and "ApManager" not in roles(d["consult"])
+
+
+def test_above_every_authority_is_refused_and_escalated(ctx):
+    client, _, service = ctx
+    attest_basis(client, service)
+    d = ask(client, 300_000)  # above the controller's 250,000: nobody may approve it
     assert d["outcome"] == "refuse"
-    assert "7,000 USD is above its limit of 5,000 USD" in d["reasons"][0]
+    assert "300,000 USD is above its limit of 5,000 USD" in d["reasons"][0]
     assert d["escalateTo"]["person"] == "DanaExample"
 
 
@@ -158,7 +179,7 @@ def test_every_check_is_logged_in_one_chain(ctx):
     client, log, service = ctx
     ask(client, 800)  # refused: unattested
     attest_basis(client, service)
-    for a in (800, 3000, 7000):
+    for a in (800, 3000, 300_000):
         ask(client, a)
     v = log.verify()
     attested = log.find(kind="attestation")  # the facts attested are on the same chain

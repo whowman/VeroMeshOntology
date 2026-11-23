@@ -88,8 +88,9 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         (e.g. "3000", "USD"); note: what it is about (e.g. the invoice number), kept in the decision log.
         agent: leave it out; your sign-in says which agent you are. (Only an administrator testing a
         check, or an install with sign-in off, names the agent.)
-        Returns outcome allow | consult | refuse, reasons, whom to consult, whom to inform, and
-        escalateTo when it is above your limit. The decision is logged."""
+        Returns outcome allow | consult | refuse, reasons, whom to consult (above your limit: the
+        next authority up), whom to inform, and escalateTo when no authority covers the amount.
+        The decision is logged."""
         return _call(
             lambda: handlers["check_action"](
                 state(ctx), action=action, amount=amount, currency=currency, note=note, agent=agent

@@ -79,7 +79,7 @@ A token without any of these roles gets 403.
 
 1. For whom: the agent's one principal.
 2. Set up for it: the agent is registered to perform the action.
-3. Authority: one the agent holds covers the action, is valid today, is in the amount's currency and within its limit, and so are the authorities it derives from. Above the limit: refuse, and escalate to the principal.
+3. Authority: one the agent holds covers the action, is valid today, is in the amount's currency and within its limit, and so are the authorities it derives from. Above the agent's limit: consult the next authority up, the role whose authority for the action covers the amount with the smallest limit (a role with people in it first), and its co-approvers; only when no authority covers the amount, refuse and escalate to the principal (decided 23 November, issue #68).
 4. Attested facts only: every fact behind that authority is attested and current, or refuse.
 5. Co-approval: a tier on the authority or a parent applies above its amount: consult the approver role.
 6. Impact: per KPI or capability the action affects, below the materiality threshold act and inform the owner; above it, consult the owner first. Money thresholds ("USD per invoice") compare the amount; per-day thresholds ("invoices per day") count today's allowed decisions in the log; a threshold that cannot be checked counts as material.
@@ -109,7 +109,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | Endpoint | Does |
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
-| `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first) or refuse, with reasons, whom to inform and, above its limit, whom to escalate to. Logged |
+| `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first; above its limit, the next authority up) or refuse, with reasons, whom to inform and, when no authority covers the amount, whom to escalate to. Logged |
 | `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `decision_status`, `report_outcome`, `impact_of_action`, `who_owns`, `get_entity` |
 | `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
 | `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
