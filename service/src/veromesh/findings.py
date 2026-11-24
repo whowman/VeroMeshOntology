@@ -32,6 +32,10 @@ Worked out from the model:
   while another source (the CMDB, the workbook) still names them. To the owning source's owner.
 - ``capability-degraded`` (high): a KPI that shows a capability's health is past its health
   threshold. To the capability's owner: agents acting on it consult them until it recovers.
+- ``accountability-change-proposed`` (medium): a source changed who reports to whom, the
+  roles someone fills, an authority or an agent's principal, and the change waits for
+  attestation (the proposal step, proposals.py). To the proposing source's owner and to
+  the people asked to attest it (``about.attestBy``).
 - ``objective-conflict-unsettled`` (medium): two objectives conflict, neither has priority,
   and they share no parent objective whose owner could settle it. To both owners.
 """
@@ -404,6 +408,29 @@ def _compute(store: RDFStore) -> list[dict]:
                     key=pair,
                 )
 
+    from .proposals import _attest_by
+
+    for (t, rid), r in sorted(resolved.items()):
+        for f, claims in sorted(r.proposals.items()):
+            for c in claims:
+                in_force, proposed = (c.held or {}).get(f), c.values.get(f)
+                add(
+                    "accountability-change-proposed",
+                    "medium",
+                    {"type": t, "id": rid},
+                    f"{c.source} changes {f} of {name(t, rid)} to {proposed}; {in_force if in_force not in (None, []) else 'nothing'} "
+                    "stays in force until the change is attested (POST /api/v1/proposals/...).",
+                    source=c.source,
+                    owner_role=owner(c.source),
+                    about={
+                        "field": f,
+                        "proposed": proposed,
+                        "inForce": in_force,
+                        "attestBy": _attest_by(resolved, t, rid, f, proposed, in_force),
+                    },
+                    key=(f,),
+                )
+
     present = {t for t, _ in resolved}
     registered = {c for s, c in cats.items() if s not in (P.STEWARD_SOURCE,)}
     for dname, d in doms.items():
@@ -461,8 +488,12 @@ def findings(
         roles = p.get("rolesFilled") or []
         for role in roles if isinstance(roles, list) else [roles]:
             holders.setdefault(role, []).append({"id": p["id"], "name": p.get("name")})
+    names = {p["id"]: p.get("name") for p in people}
     for f in sel:
-        f["routedTo"] = sorted(holders.get(f.get("ownerRole") or "", []), key=lambda x: x["id"])
+        routed = {x["id"]: x for x in holders.get(f.get("ownerRole") or "", [])}
+        for pid in (f.get("about") or {}).get("attestBy") or []:  # a proposal: those asked to attest it
+            routed.setdefault(pid, {"id": pid, "name": names.get(pid)})
+        f["routedTo"] = sorted(routed.values(), key=lambda x: x["id"])
     rank = {s: i for i, s in enumerate(SEVERITIES)}
     sel.sort(key=lambda f: (rank[f["severity"]], f["kind"], json.dumps(f.get("subject"), sort_keys=True)))
     kinds: dict[str, int] = {}

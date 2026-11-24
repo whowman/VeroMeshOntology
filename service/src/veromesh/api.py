@@ -39,6 +39,8 @@ from . import (
     licence,
     mcp_server,
     modelmeasures,
+    proposals,
+    publish,
     querylog,
     suggest,
     usage,
@@ -107,6 +109,14 @@ class SourceIn(BaseModel):
     # People this source holds can sign in to or act in its system (an ITSM's active users or
     # agent seats). Default: identity and ERP sources do, others do not.
     grantsAccess: bool | None = None
+
+
+class ProposalVerdictIn(BaseModel):
+    verdict: str  # attested (accept the change) | disputed (keep the value in force)
+    attester: str | None = None  # as for AttestationIn
+    role: str
+    source: str | None = None  # when more than one source proposes a change to the field
+    note: str | None = None
 
 
 class AttestationIn(BaseModel):
@@ -506,21 +516,44 @@ def create_app(
         return changesets.validate(s.store, cs, base=c.instance_base, ontology_dir=c.ontology_dir)
 
     @app.post("/api/v1/changesets/{cs}/commit", dependencies=need(auth.CONNECTOR), tags=["changesets"])
-    def changeset_commit(s: Svc, c: Cfg, cs: str) -> dict:
-        """Re-validate and write. 409 with the report when it is not valid."""
-        return changesets.commit(s.store, cs, base=c.instance_base, ontology_dir=c.ontology_dir)
+    def changeset_commit(s: Svc, c: Cfg, dl: Log, who: Who, cs: str) -> dict:
+        """Re-validate and write. 409 with the report when it is not valid. A commit that
+        changes the model is a publish: the report carries the model version it made."""
+        before = publish.model_version(s.store)
+        report = changesets.commit(s.store, cs, base=c.instance_base, ontology_dir=c.ontology_dir)
+        return {**report, **published(s, dl, who, before, report.get("source"), cs)}
+
+    def published(s: VeromeshService, dl, who, before: str | None, source: str | None, cs: str | None = None):
+        """Record a publish when the model version moved (a no-op load publishes nothing)."""
+        if before is None or publish.model_version(s.store) == before:
+            return {}
+        return publish.record(dl, s.store, who.subject, source=source, changeset=cs)
+
+    @app.get("/api/v1/model/versions", dependencies=need(auth.READ), tags=["model"])
+    def model_versions(s: Svc, dl: Log, afterSeq: int = 0, limit: int = 100) -> dict:
+        """The publish history, oldest first: each model version, who and which source or
+        changeset made it. Decisions quote the version they were made on (basis.modelVersion)."""
+        return {
+            "current": publish.model_version(s.store),
+            "publishes": publish.history(dl, after_seq=afterSeq, limit=limit),
+        }
 
     @app.delete("/api/v1/changesets/{cs}", dependencies=need(auth.CONNECTOR), tags=["changesets"])
     def changeset_discard(s: Svc, cs: str) -> dict:
         return changesets.discard(s.store, cs)
 
-    def _single(s: VeromeshService, c: Settings, source: str, items: list[dict], status: int = 200):
+    def _single(
+        s: VeromeshService, c: Settings, source: str, items: list[dict], status: int = 200, dl=None, who=None
+    ):
+        before = publish.model_version(s.store)
         try:
             report = changesets.apply(
                 s.store, source=source, items=items, base=c.instance_base, ontology_dir=c.ontology_dir
             )
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
+        if who is not None:
+            report = {**report, **published(s, dl, who, before, source)}
         return JSONResponse(status_code=status, content=report)
 
     # ------------------------------------------------------------------ provenance and governance
@@ -615,6 +648,48 @@ def create_app(
     def impact_data_product_by_urn(s: Svc, c: Cfg, urn: str) -> dict:
         """The same, finding the data product by its catalog URN (as DataHub names it)."""
         return decide.data_change_impact(s.store, c.instance_base, urn=urn)
+
+    @app.get("/api/v1/proposals", dependencies=need(auth.READ), tags=["governance"])
+    def proposals_list(s: Svc, type: str | None = None, id: str | None = None) -> list[dict]:
+        """Accountability changes (reports to, roles filled, authorities, an agent's principal)
+        waiting for attestation: the value proposed, the value in force meanwhile, and who is
+        asked to attest it."""
+        return proposals.pending(s.store, type_=type, rid=id)
+
+    @app.post(
+        "/api/v1/proposals/{type_}/{rid}/{field}",
+        dependencies=need(auth.READ),
+        status_code=201,
+        tags=["governance"],
+    )
+    def proposals_settle(
+        s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, field: str, body: ProposalVerdictIn
+    ) -> dict:
+        """Attest a proposed accountability change (it enters the model) or dispute it (the value
+        in force stays). Those asked to attest it, or the proposing source's owner role, may;
+        stewards may settle any."""
+        attester, signed_in = attester_for(s, c, who, body.attester)
+        before = publish.model_version(s.store)
+        try:
+            out = proposals.settle(
+                s.store,
+                c.instance_base,
+                type_,
+                rid,
+                field,
+                verdict=body.verdict,
+                attester=attester,
+                role=body.role,
+                source=body.source,
+                note=body.note,
+                signed_in=signed_in,
+                owner_only=not who.has(*auth.STEWARD),
+                ontology_dir=c.ontology_dir,
+                log=dl,
+            )
+        except changesets.Conflict as exc:
+            return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
+        return {**out, **published(s, dl, who, before, None, None)}
 
     @app.get("/api/v1/findings", dependencies=need(auth.READ), tags=["governance"])
     def findings_list(
@@ -1172,8 +1247,9 @@ def create_app(
         """Steward correction of fields a steward may correct; recorded as the 'steward' source and attested
         by the signed-in person."""
         attester, signed_in = attester_for(s, c, who, body.attester)
+        before = publish.model_version(s.store)
         try:
-            return prov.correct(
+            out = prov.correct(
                 s.store,
                 c.instance_base,
                 c.ontology_dir,
@@ -1188,6 +1264,7 @@ def create_app(
             )
         except changesets.Conflict as exc:
             return JSONResponse(status_code=422, content={"detail": str(exc), "report": exc.report})
+        return {**out, **published(s, dl, who, before, prov.STEWARD_SOURCE)}
 
     @app.get("/api/v1/{type_}", dependencies=need(auth.READ), tags=["entities"])
     def entity_list(s: Svc, c: Cfg, who: Who, type_: str, source: str | None = None) -> list[dict]:
@@ -1203,7 +1280,9 @@ def create_app(
         )
 
     @app.post("/api/v1/{type_}", dependencies=need(auth.CONNECTOR), tags=["entities"])
-    def entity_create(s: Svc, c: Cfg, type_: str, source: str, entity: Annotated[dict, Body()]):
+    def entity_create(
+        s: Svc, c: Cfg, dl: Log, who: Who, type_: str, source: str, entity: Annotated[dict, Body()]
+    ):
         """Create one entity in a source (validated against the whole model, then committed)."""
         entities.check_type(type_)
         rid = entities.entity_id(type_, entity)
@@ -1213,17 +1292,20 @@ def create_app(
             raise changesets.Conflict(
                 f"{type_} '{rid}' already exists in source '{source}'; use PUT to replace it."
             )
-        return _single(s, c, source, [{"type": type_, "op": "upsert", "entity": entity}], status=201)
+        return _single(s, c, source, [{"type": type_, "op": "upsert", "entity": entity}], 201, dl, who)
 
     @app.put("/api/v1/{type_}/{rid}", dependencies=need(auth.CONNECTOR), tags=["entities"])
-    def entity_put(s: Svc, c: Cfg, type_: str, rid: str, source: str, entity: Annotated[dict, Body()]):
+    def entity_put(
+        s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, source: str, entity: Annotated[dict, Body()]
+    ):
         """Create or replace one entity in a source."""
-        return _single(s, c, source, [{"type": type_, "op": "upsert", "entity": {**entity, "id": rid}}])
+        items = [{"type": type_, "op": "upsert", "entity": {**entity, "id": rid}}]
+        return _single(s, c, source, items, 200, dl, who)
 
     @app.delete("/api/v1/{type_}/{rid}", dependencies=need(auth.CONNECTOR), tags=["entities"])
-    def entity_delete(s: Svc, c: Cfg, type_: str, rid: str, source: str):
+    def entity_delete(s: Svc, c: Cfg, dl: Log, who: Who, type_: str, rid: str, source: str):
         """Delete one entity from a source; refused if something still references it."""
-        return _single(s, c, source, [{"type": type_, "op": "delete", "entity": {"id": rid}}])
+        return _single(s, c, source, [{"type": type_, "op": "delete", "entity": {"id": rid}}], 200, dl, who)
 
     # ------------------------------------------------------------------ MCP, for agents
 

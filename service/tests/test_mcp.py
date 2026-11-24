@@ -105,7 +105,7 @@ def test_someone_else_cannot_use_a_persons_agent(mcp):
     client, log = mcp
     msg, err = call(client, through_agent("lee@example.com"), "check_action", action="ApproveSupplierInvoice")
     assert err and "acts for DanaExample" in msg
-    assert log.verify().entries == 0
+    assert log.verify().entries == len(log.find(kind="publish"))
 
 
 def test_a_person_without_an_agent_cannot_ask(mcp):
@@ -143,7 +143,11 @@ def test_with_sign_in_off_the_agent_is_named(service):
         msg, err = call(client, {}, "check_action", action="ApproveSupplierInvoice")
         assert err and "Give the agent ID" in msg
         d, err = call(client, {}, "check_action", action="ApproveSupplierInvoice", agent="InvoiceAssistant")
-        assert not err and d["agent"] == "InvoiceAssistant" and log.verify().entries == 1
+        assert (
+            not err
+            and d["agent"] == "InvoiceAssistant"
+            and log.verify().entries == 1 + len(log.find(kind="publish"))
+        )
 
 
 def test_a_signed_in_agent_cannot_name_another(mcp):
@@ -152,4 +156,4 @@ def test_a_signed_in_agent_cannot_name_another(mcp):
         client, agent_app(), "check_action", action="ApproveSupplierInvoice", agent="SomeOtherAgent"
     )
     assert err and "not SomeOtherAgent" in msg
-    assert log.verify().entries == 0
+    assert log.verify().entries == len(log.find(kind="publish"))

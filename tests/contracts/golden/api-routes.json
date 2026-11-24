@@ -245,6 +245,26 @@
       "200"
     ]
   },
+  "GET /api/v1/model/versions": {
+    "params": [
+      "afterSeq? (query)",
+      "limit? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/proposals": {
+    "params": [
+      "id? (query)",
+      "type? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/schema": {
     "params": [],
     "status": [
@@ -621,6 +641,41 @@
     "params": [],
     "status": [
       "200"
+    ]
+  },
+  "POST /api/v1/proposals/{type_}/{rid}/{field}": {
+    "body": {
+      "application/json": {
+        "attester?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "note?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "role": "string",
+        "source?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": "string"
+      }
+    },
+    "params": [
+      "field (path)",
+      "rid (path)",
+      "type_ (path)"
+    ],
+    "status": [
+      "201",
+      "422"
     ]
   },
   "POST /api/v1/usage/reports/{month}/send": {

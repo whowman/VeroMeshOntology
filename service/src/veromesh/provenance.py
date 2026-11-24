@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
@@ -214,6 +216,9 @@ class Claim:
     invalidated_at: str | None = None
     changeset: str | None = None
     iri: str | None = None
+    # Accountability changes awaiting their owner's attestation (the proposal step): per
+    # field, the value in force until the new one is attested (None: the field was empty).
+    held: dict | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -281,6 +286,8 @@ class Resolved:
     candidates: dict[str, list[Claim]] = field(default_factory=dict)
     conflicts: dict[str, list[Claim]] = field(default_factory=dict)
     claims: list[Claim] = field(default_factory=list)
+    # Per field: the claims proposing an accountability change not yet attested.
+    proposals: dict[str, list[Claim]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------- source registry
@@ -396,12 +403,13 @@ def _claim_rows(
     by_cs = f"?c <{PROV.wasGeneratedBy}> <{CHANGESET_BASE}{changeset}> ." if changeset and not iri else ""
     rows = select(
         store,
-        f"""SELECT {head} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
+        f"""SELECT {head} ?src ?t ?id ?vals ?obs ?vf ?vu ?gen ?inv ?cs ?held WHERE {{ GRAPH <{CLAIMS_GRAPH}> {{
               {by_cs}
               {c} a <{VMP.Claim}> ; <{VMP.source}> ?src ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ;
                  <{VMP.values}> ?vals ; <{VMP.observedAt}> ?obs ; <{PROV.generatedAtTime}> ?gen .
               OPTIONAL {{ {c} <{VMP.validFrom}> ?vf }} OPTIONAL {{ {c} <{VMP.validUntil}> ?vu }}
               OPTIONAL {{ {c} <{PROV.invalidatedAtTime}> ?inv }} OPTIONAL {{ {c} <{PROV.wasGeneratedBy}> ?cs }}
+              OPTIONAL {{ {c} <{VMP.held}> ?held }}
               {where} }} }}""",
     )
 
@@ -421,6 +429,7 @@ def _claim_rows(
             invalidated_at=v(b, "inv"),
             changeset=v(b, "cs")[len(CHANGESET_BASE) :] if v(b, "cs") else None,
             iri=v(b, "c"),
+            held=json.loads(v(b, "held")) if v(b, "held") else None,
         )
         for b in rows
     ]
@@ -493,6 +502,9 @@ def record_source(
     ``superseded`` (claim IRIs) and ``refreshed`` ((claim IRI, observed time))."""
     if current is None:
         current = {c.key: c for c in read_claims(store, source=source)}
+    cats = categories(store) if cats is None else cats
+    category = cats.get(source, DEFAULT_CATEGORY)
+    held_atts: dict[tuple[str, str], list[Attestation]] | None = None
     created: list[Claim] = []
     g = Graph()
     supersede, refresh = [], []
@@ -513,6 +525,13 @@ def record_source(
             continue
         if old is not None:
             supersede.append(old.iri)
+        held = None
+        if old is not None and key[0] in ACCOUNTABILITY and proposals_on():
+            if held_atts is None:
+                held_atts = {}
+                for a in read_attestations(store):
+                    held_atts.setdefault((a.type, a.id), []).append(a)
+            held = hold(key[0], old, values, held_atts.get(key, []), category)
         added += 1
         c = URIRef(CLAIM_BASE + uuid.uuid4().hex[:16])
         g.add((c, RDF.type, VMP.Claim))
@@ -524,6 +543,8 @@ def record_source(
         g.add((c, VMP.valueHash, Literal(value_hash(values))))
         g.add((c, VMP.observedAt, Literal(m.get("observedAt") or at, datatype=XSD.dateTime)))
         g.add((c, PROV.generatedAtTime, Literal(at, datatype=XSD.dateTime)))
+        if held:
+            g.add((c, VMP.held, Literal(json.dumps(held, sort_keys=True, default=str))))
         if changeset:
             g.add((c, PROV.wasGeneratedBy, URIRef(CHANGESET_BASE + changeset)))
         if m.get("validFrom"):
@@ -552,7 +573,6 @@ def record_source(
         if read_back:
             changes["claims"] = read_written(store, changes)
         else:  # the store has not been written yet (a deferred batch): as written, for now
-            cats = categories(store) if cats is None else cats
             refreshed = dict(refresh)
             mine = []
             for c in created:
@@ -569,6 +589,7 @@ def record_source(
                         generated_at=str(g.value(c, PROV.generatedAtTime)),
                         changeset=changeset,
                         iri=str(c),
+                        held=json.loads(str(g.value(c, VMP.held))) if g.value(c, VMP.held) else None,
                     )
                 )
             for old in current.values():
@@ -751,6 +772,123 @@ def verify_attestations(store: RDFStore, log) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------- the proposal step
+
+#: Accountability fields (whitepaper: who reports to whom, who fills which role, who holds an
+#: authority and how far it goes, whom an agent acts for). A change to one of these from a
+#: source is a proposal: the value in force stays until the change is attested, normally by
+#: its owner; a dispute keeps the old value. A new entity is not a change.
+ACCOUNTABILITY: dict[str, tuple[str, ...]] = {
+    "people": ("reportsTo", "rolesFilled"),
+    "authorities": (
+        "holder",
+        "actionsCovered",
+        "withinCapability",
+        "limitAmount",
+        "currency",
+        "delegatedBy",
+        "parentAuthority",
+        "scope",
+        "limitKind",
+        "limitValue",
+    ),
+    "co-approvals": ("approverRole", "aboveAmount"),
+    "agents": ("actsFor",),
+}
+
+
+def proposals_on() -> bool:
+    """VEROMESH_PROPOSALS: on (default) holds accountability changes for attestation; off
+    lets them into the effective model at once (as before the proposal step)."""
+    return os.environ.get("VEROMESH_PROPOSALS", "on").strip().lower() not in ("off", "0", "false", "no")
+
+
+def _same_value(a, b) -> bool:
+    if empty(a) and empty(b):
+        return True
+    if isinstance(a, list) and isinstance(b, list):
+        return sorted(map(str, a)) == sorted(map(str, b))
+    return fhash(a) == fhash(b)
+
+
+def verdict_on(atts: list[Attestation], claim: Claim, key: str) -> str | None:
+    """The latest verdict on this claim's current value for ``key``, or None."""
+    latest = None
+    for a in atts:
+        if (
+            a.source == claim.source
+            and a.type == claim.type
+            and a.id == claim.id
+            and a.covers(key, claim.values.get(key))
+        ):
+            latest = a
+    return latest.verdict if latest is not None else None
+
+
+def hold(type_: str, old: Claim | None, values: dict, atts: list[Attestation], category: str) -> dict | None:
+    """For a source's new statement of an entity it stated before (``old``), the
+    accountability fields whose change waits for attestation, with the value in force
+    until then. What the old claim held stays held unless its change was attested or the
+    source went back to the value in force. Steward corrections are attested as they are
+    made, and what the ended source keeps is not a change."""
+    fields = ACCOUNTABILITY.get(type_)
+    if not fields or old is None or category in (STEWARD_SOURCE, "steward", "ended") or not proposals_on():
+        return None
+    out = {}
+    for f in fields:
+        if old.held and f in old.held and verdict_on(atts, old, f) != "attested":
+            in_force = old.held[f]
+        else:
+            in_force = old.values.get(f)
+        new = values.get(f)
+        if _same_value(new, in_force):
+            continue
+        meanwhile = _meanwhile(type_, f, new, in_force)
+        if meanwhile is not _ACCEPT:
+            out[f] = None if empty(meanwhile) else meanwhile
+    return out or None
+
+
+_ACCEPT = object()
+#: Amounts where a lower value narrows what someone may do (a limit) or asks for more (a
+#: co-approval threshold): lowering one takes effect at once.
+_LOWER_NARROWS = {
+    ("authorities", "limitAmount"),
+    ("authorities", "limitValue"),
+    ("co-approvals", "aboveAmount"),
+}
+
+
+def _meanwhile(type_: str, f: str, new, in_force):
+    """What is in force while a change waits, or _ACCEPT when the change only narrows
+    accountability (a role or action removed, a limit lowered, a holder removed): narrowing
+    takes effect at once, so an agent never keeps authority while a revocation waits."""
+    if empty(new):
+        return _ACCEPT
+    if empty(in_force):
+        return None
+    if isinstance(new, list) or isinstance(in_force, list):
+        n = new if isinstance(new, list) else [new]
+        cur = in_force if isinstance(in_force, list) else [in_force]
+        if {str(v) for v in n} <= {str(v) for v in cur}:
+            return _ACCEPT
+        return [v for v in cur if str(v) in {str(x) for x in n}]
+    if (type_, f) in _LOWER_NARROWS:
+        try:
+            if Decimal(str(new)) <= Decimal(str(in_force)):
+                return _ACCEPT
+        except (InvalidOperation, ValueError):
+            pass
+    return in_force
+
+
+def pending(atts: list[Attestation], claim: Claim) -> dict:
+    """The claim's held fields whose change is not attested yet: {field: value in force}."""
+    if not claim.held:
+        return {}
+    return {f: v for f, v in claim.held.items() if verdict_on(atts, claim, f) != "attested"}
+
+
 def disputed(atts: list[Attestation], claim: Claim, key: str) -> bool:
     """Is this claim's current value for ``key`` under dispute (latest verdict on it)?"""
     latest = None
@@ -809,8 +947,27 @@ def resolve(
     out: dict[tuple[str, str], Resolved] = {}
     for key, cs in by_entity.items():
         type_, rid = key
-        r = Resolved(type=type_, id=rid, values={}, claims=cs)
         ea = by_type_atts.get(key, [])
+        proposed: dict[str, list[Claim]] = {}
+        if any(c.held for c in cs):
+            # The proposal step: a held change counts at its value in force until attested.
+            seen = []
+            for c in cs:
+                wait = pending(ea, c)
+                if not wait:
+                    seen.append(c)
+                    continue
+                vals = dict(c.values)
+                for f, v in wait.items():
+                    if verdict_on(ea, c, f) is None:  # disputed: settled, the value in force stays
+                        proposed.setdefault(f, []).append(c)
+                    if v is None:
+                        vals.pop(f, None)
+                    else:
+                        vals[f] = v
+                seen.append(replace(c, values=vals, held=None))
+            cs = seen
+        r = Resolved(type=type_, id=rid, values={}, claims=cs, proposals=proposed)
         fields = sorted({k for c in cs for k, v in c.values.items() if not empty(v)})
         for f in fields:
             cands = [c for c in cs if not empty(c.values.get(f))]

@@ -81,8 +81,20 @@ def test_the_workflow_out_of_sync_with_policy(ctx):
     assert f["subject"]["id"] == "AssistantApprovalAuthority" and f["source"] == "ap"
     assert f["ownerRole"] == "Controller" and f["about"]["field"] == "limitAmount"
     assert float(f["about"]["inForce"]) == 3000 and float(f["about"]["otherValue"]) == 5000
-    _authority(client, "ap", "erp", "5000.00", ownerRole="Controller")  # back in sync (same amount)
-    assert not found(client, kind="out-of-sync")
+    _authority(client, "ap", "erp", "5000.00", ownerRole="Controller")  # raised to the policy amount
+    # A raise is an accountability change: it waits for attestation (the proposal step).
+    assert found(client, kind="out-of-sync")
+    (p,) = found(client, kind="accountability-change-proposed")
+    assert p["subject"]["id"] == "AssistantApprovalAuthority" and p["about"]["field"] == "limitAmount"
+    assert p["ownerRole"] == "Controller" and p["about"]["attestBy"] == ["DanaExample"]
+    assert [x["id"] for x in p["routedTo"]] == ["DanaExample", "LeeExample"]  # parent's holder, source owner
+    r = client.post(
+        f"{API}/proposals/authorities/AssistantApprovalAuthority/limitAmount",
+        json={"verdict": "attested", "attester": "LeeExample", "role": "Controller"},
+    )
+    assert r.status_code == 201, r.text
+    assert not found(client, kind="out-of-sync")  # back in sync (same amount)
+    assert not found(client, kind="accountability-change-proposed")
 
 
 def test_a_derived_source_out_of_sync_with_its_origin(ctx):

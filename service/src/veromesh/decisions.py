@@ -40,7 +40,7 @@ from urllib.parse import unquote, urlparse
 log = logging.getLogger("veromesh.decisions")
 
 GENESIS = "0" * 64
-KINDS = ("decision", "override", "outcome", "attestation", "configuration", "query")
+KINDS = ("decision", "override", "outcome", "attestation", "configuration", "query", "publish")
 ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
 # Fields an entry may carry, beyond those the log assigns (id, seq, recordedAt, prevHash, hash).
@@ -74,6 +74,9 @@ FIELDS = (
     # configuration entries: a setting that changes what agents may do, and its new value
     "setting",
     "value",
+    # publish entries: a change to the effective model, the version it made, and the changeset
+    "modelVersion",
+    "changeset",
 )
 
 
@@ -119,6 +122,11 @@ def check(fields: dict) -> dict:
             raise InvalidEntry("A configuration change refers to no decision.")
         if not fields.get("setting") or not isinstance(fields.get("value"), dict):
             raise InvalidEntry("A configuration entry needs setting and value (an object).")
+    elif kind == "publish":
+        if fields.get("refersTo"):
+            raise InvalidEntry("A publish refers to no decision.")
+        if not fields.get("modelVersion"):
+            raise InvalidEntry("A publish entry needs modelVersion (the version it made).")
     elif kind == "query":
         if fields.get("refersTo"):
             raise InvalidEntry("A query refers to no decision.")
