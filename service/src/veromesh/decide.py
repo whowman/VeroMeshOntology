@@ -413,6 +413,8 @@ def _check(
     escalate: dict | None = None
     used: str | None = None
     basis: dict = {"onDate": day.isoformat()}
+    if hasattr(store, "version"):  # the published model this decision was made on (pinned for the check)
+        basis["modelVersion"] = store.version()
 
     # 1. For whom
     ag = m.get("agents", agent)

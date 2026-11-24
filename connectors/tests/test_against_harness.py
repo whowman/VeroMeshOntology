@@ -76,7 +76,12 @@ def test_a_month_of_changes_through_both_feeds(http, company, tmp_path):
     people = {p["id"] for p in http.get("/api/v1/people").json()}
     left = {p.employee_id for p in truth.people.values() if p.left and start < p.left <= truth.today}
     hired = {p.employee_id for p in truth.people.values() if start < p.hired <= truth.today}
-    assert left and not (left & people)
+    # A leaver whose reports' moves wait for attestation (the proposal step) is kept only as
+    # an ended record, so the reporting line in force still resolves; no source lists them.
+    ended = {p["id"] for p in http.get("/api/v1/people", params={"source": "ended"}).json()}
+    assert left and (left & people) <= ended
+    waiting = {p["inForce"] for p in http.get("/api/v1/proposals", params={"type": "people"}).json()}
+    assert (left & people) <= waiting
     assert hired and hired <= people
 
 

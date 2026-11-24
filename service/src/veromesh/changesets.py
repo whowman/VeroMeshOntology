@@ -603,12 +603,19 @@ def _effective(
     when their values are unchanged; the changeset's items supply new ones."""
     at = now()
     claims = []
+    by_key: dict = {}
+    for a in atts:
+        by_key.setdefault((a.type, a.id), []).append(a)
     for iri, g in graphs.items():
         source = iri[len(SOURCE_GRAPH_BASE) :]
+        cat = cats.get(source, P.DEFAULT_CATEGORY)
         for key, values in P.extract(g, base).items():
             old = stored.get((source, *key))
             m = (item_meta or {}).get(key, {}) if source == target_source else {}
             same = old is not None and P.value_hash(old.values) == P.value_hash(values)
+            held = (
+                (old.held if same else P.hold(key[0], old, values, by_key.get(key, []), cat)) if old else None
+            )
             claims.append(
                 P.Claim(
                     source=source,
@@ -619,6 +626,7 @@ def _effective(
                     observed_at=m.get("observedAt") or (old.observed_at if same else at),
                     valid_from=m.get("validFrom", old.valid_from if same else None),
                     valid_until=m.get("validUntil", old.valid_until if same else None),
+                    held=held,
                 )
             )
     # Validation checks structure, so facts outside their valid period still count here.
@@ -918,6 +926,12 @@ def _dropped(store: RDFStore, cs: str, meta: dict, report: dict, base: str) -> d
         if it is not None:
             return target in E._values(it.entity.get(field))
         if meta["mode"] != "merge" or (t, rid) in deleted:
+            return False
+        # The value in force is another source's (an HR move waiting for attestation still
+        # names the old manager, while this source drops them): not this source's reference.
+        r = P._current(store)[0].get((t, rid))
+        win = r.winners.get(field) if r is not None else None
+        if win is not None and win.source != meta["source"]:
             return False
         iri, tgt = E.iri_for(base, rid), E.iri_for(base, target)
         res = store.query(

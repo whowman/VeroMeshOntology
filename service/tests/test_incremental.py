@@ -68,7 +68,7 @@ STEPS = [
     (
         "hr",
         "merge",
-        [item("authorities", "ApApprovalAuthority", limitAmount="900000.00")],
+        [item("authorities", "ApApprovalAuthority", limitAmount="900000")],
     ),  # above its parent
     ("hr", "merge", [{**person("Later", rolesFilled=["Controller"]), "validFrom": "2999-01-01"}]),
     ("hr", "merge", [person("ReportsToLater", reportsTo="Later")]),  # refers to someone not valid yet
@@ -212,9 +212,13 @@ def same_state(kept: incremental.State, fresh: incremental.State) -> None:
         assert {r: ks for r, ks in k.referrers.items() if ks} == f.referrers, view
 
 
+@pytest.mark.parametrize("proposals", ["on", "off"])
 @pytest.mark.parametrize("one_request", [True, False])
 @pytest.mark.parametrize("validate_first", [False, True])
-def test_same_results_as_the_full_path(monkeypatch, validate_first, one_request):
+def test_same_results_as_the_full_path(monkeypatch, validate_first, one_request, proposals):
+    # With the proposal step on, accountability changes (a limit above its parent, a new
+    # manager) are held for attestation on both paths alike; off, they apply (and are refused).
+    monkeypatch.setenv("VEROMESH_PROPOSALS", proposals)
     if not one_request:  # every commit sends its writes as it goes (as large loads do)
         monkeypatch.setattr(incremental, "SMALL_TRIPLES", -1)
     fast, full = make_store("memory"), make_store("memory")

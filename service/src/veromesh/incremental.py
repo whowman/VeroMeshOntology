@@ -554,6 +554,15 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
             old = st.claims.get(k, {}).get(source)
             m = item_meta.get(k, {})
             same = old is not None and P.value_hash(old.values) == P.value_hash(values[k])
+            held = None
+            if old is not None:
+                held = (
+                    old.held
+                    if same
+                    else P.hold(
+                        k[0], old, values[k], st.atts.get(k, []), st.cats.get(source, P.DEFAULT_CATEGORY)
+                    )
+                )
             cs.append(
                 P.Claim(
                     source=source,
@@ -564,6 +573,7 @@ def plan(st: State, meta: dict, items, base: str, ontology_dir: str):
                     observed_at=m.get("observedAt") or (old.observed_at if same else at),
                     valid_from=m.get("validFrom", old.valid_from if same else None),
                     valid_until=m.get("validUntil", old.valid_until if same else None),
+                    held=held,
                 )
             )
         changes[k] = P.resolve(cs, st.atts.get(k, []), ignore_validity=True).get(k)

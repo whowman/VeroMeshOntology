@@ -197,7 +197,15 @@ def test_workday_changes_apply_hires_moves_and_terminations(http):
     assert rc == 0
     people = {p["id"]: p for p in http.get("/api/v1/people").json()}
     assert "E6" in people and "E5" not in people
-    assert people["E3"]["reportsTo"] == "E1" and people["E3"]["rolesFilled"] == ["accounts-payable-manager"]
+    # The move is in Workday's record and waits for attestation before it is in force.
+    wd_people = {p["id"]: p for p in http.get("/api/v1/people", params={"source": "workday"}).json()}
+    assert wd_people["E3"]["reportsTo"] == "E1" and wd_people["E3"]["rolesFilled"] == [
+        "accounts-payable-manager"
+    ]
+    assert {p["field"] for p in http.get("/api/v1/proposals", params={"id": "E3"}).json()} == {
+        "reportsTo",
+        "rolesFilled",
+    }
     # Delivered again (an overlapping --since): each event is applied once.
     runs = len(http.get("/api/v1/changesets", params={"limit": 100}).json())
     main(workday("changes", "--since", "2026-02-01"), http=http, source_http=wd.client())
@@ -355,7 +363,14 @@ def test_entra_changes_record_the_position_then_apply_deltas(http, tmp_path):
     assert main(entra("changes", *flags), http=http, source_http=client) == 0
     people = {p["id"]: p for p in http.get("/api/v1/people").json()}
     assert "kim.vo" not in people
-    assert people["E3"]["reportsTo"] == "E1" and people["E3"]["rolesFilled"] == ["APManager"]
+    mine = {p["id"]: p for p in http.get("/api/v1/people", params={"source": "entra"}).json()}
+    assert mine["E3"]["reportsTo"] == "E1" and mine["E3"]["rolesFilled"] == ["APManager"]
+    # The promotion waits for attestation (the proposal step); the old role goes at once.
+    assert people["E3"]["reportsTo"] == "E2" and "APManager" not in (people["E3"].get("rolesFilled") or [])
+    assert {p["field"] for p in http.get("/api/v1/proposals", params={"id": "E3"}).json()} == {
+        "reportsTo",
+        "rolesFilled",
+    }
 
 
 def test_a_leaver_an_agent_acts_for_is_held_until_the_agent_is_reassigned(http, tmp_path, capsys):

@@ -183,7 +183,8 @@ def test_every_check_is_logged_in_one_chain(ctx):
         ask(client, a)
     v = log.verify()
     attested = log.find(kind="attestation")  # the facts attested are on the same chain
-    assert v.ok and attested and v.entries == 4 + len(attested)
+    published = log.find(kind="publish")  # the example load published the model
+    assert v.ok and attested and v.entries == 4 + len(attested) + len(published)
     assert [e["outcome"] for e in log.find(kind="decision")] == ["refuse", "allow", "consult", "refuse"]
 
 
