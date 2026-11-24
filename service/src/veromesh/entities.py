@@ -83,6 +83,9 @@ def _name(what: str) -> Col:
     return Col("Name", "label", RDFS.label, required=True, help=f"Display name of the {what}.")
 
 
+OBJECTIVE_LEVELS = ("enterprise", "function", "capability", "process")
+
+
 def _owner() -> Col:
     return Col(
         "Owner role",
@@ -114,8 +117,48 @@ SHEETS: tuple[Sheet, ...] = (
                 multi=True,
                 help="IDs of KPIs that measure progress. Separate several with ';'.",
             ),
+            _owner(),
+            Col(
+                "Level",
+                "str_enum",
+                VMO.objectiveLevel,
+                values=OBJECTIVE_LEVELS,
+                help="enterprise, function, capability or process: where the objective sits in the cascade.",
+            ),
+            Col(
+                "Parent objective",
+                "ref",
+                VMO.parentObjective,
+                ("Objectives",),
+                help="ID of the objective this one contributes to, one level up. Empty for an enterprise objective.",
+            ),
+            Col(
+                "Priority",
+                "decimal",
+                VMO.priority,
+                help="When objectives pull against each other, the lower number wins: 1 is the highest priority. "
+                "Compare objectives with the same parent.",
+            ),
+            Col(
+                "Supports objectives",
+                "ref",
+                VMO.supportsObjective,
+                ("Objectives",),
+                multi=True,
+                help="IDs of other objectives that progress on this one helps. Separate several with ';'.",
+            ),
+            Col(
+                "Conflicts with objectives",
+                "ref",
+                VMO.conflictsWith,
+                ("Objectives",),
+                multi=True,
+                help="IDs of objectives that progress on this one can set back (on-time payment against "
+                "working capital). A conflict counts both ways. Separate several with ';'.",
+            ),
         ),
-        help="Outcomes the organization intends to achieve.",
+        help="Outcomes the organization intends to achieve, in a cascade from the enterprise down, with "
+        "their owners, priorities and the objectives they pull against.",
     ),
     Sheet(
         "KPIs",
@@ -139,8 +182,42 @@ SHEETS: tuple[Sheet, ...] = (
                 multi=True,
                 help="IDs of the data products the KPI is calculated from. Separate several with ';'.",
             ),
+            Col(
+                "Health of capabilities",
+                "ref",
+                VMO.healthOf,
+                ("Capabilities",),
+                multi=True,
+                help="IDs of the capabilities whose health this KPI shows. Separate several with ';'.",
+            ),
+            Col(
+                "Health threshold",
+                "decimal",
+                VMO.healthThreshold,
+                help="The value past which the capability counts as degraded, in the KPI's unit.",
+            ),
+            Col(
+                "Better when",
+                "str_enum",
+                VMO.betterWhen,
+                values=("higher", "lower"),
+                help="higher: degraded below the threshold. lower: degraded above it.",
+            ),
+            Col(
+                "Current value",
+                "decimal",
+                VMO.currentValue,
+                help="The latest value, usually loaded from the metrics layer, in the KPI's unit.",
+            ),
+            Col(
+                "Measured on",
+                "date",
+                VMO.measuredOn,
+                help="When the current value was measured (YYYY-MM-DD).",
+            ),
         ),
-        help="Measures of progress. Used to route impact to their owners, not as targets.",
+        help="Measures of progress. Used to route impact to their owners, not as targets; with a health "
+        "threshold, they also show whether a capability is degraded.",
     ),
     Sheet(
         "Capabilities",

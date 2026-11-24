@@ -35,9 +35,75 @@
         "targets": [
           "kpis"
         ]
+      },
+      {
+        "help": "ID of the role that owns this (ownership always sits with a role, not a person).",
+        "key": "ownerRole",
+        "kind": "ref",
+        "label": "Owner role",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "roles"
+        ]
+      },
+      {
+        "help": "enterprise, function, capability or process: where the objective sits in the cascade.",
+        "key": "level",
+        "kind": "str_enum",
+        "label": "Level",
+        "multi": false,
+        "required": false,
+        "values": [
+          "enterprise",
+          "function",
+          "capability",
+          "process"
+        ]
+      },
+      {
+        "help": "ID of the objective this one contributes to, one level up. Empty for an enterprise objective.",
+        "key": "parentObjective",
+        "kind": "ref",
+        "label": "Parent objective",
+        "multi": false,
+        "required": false,
+        "targets": [
+          "objectives"
+        ]
+      },
+      {
+        "help": "When objectives pull against each other, the lower number wins: 1 is the highest priority. Compare objectives with the same parent.",
+        "key": "priority",
+        "kind": "decimal",
+        "label": "Priority",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "IDs of other objectives that progress on this one helps. Separate several with ';'.",
+        "key": "supportsObjectives",
+        "kind": "ref",
+        "label": "Supports objectives",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "objectives"
+        ]
+      },
+      {
+        "help": "IDs of objectives that progress on this one can set back (on-time payment against working capital). A conflict counts both ways. Separate several with ';'.",
+        "key": "conflictsWithObjectives",
+        "kind": "ref",
+        "label": "Conflicts with objectives",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "objectives"
+        ]
       }
     ],
-    "help": "Outcomes the organization intends to achieve.",
+    "help": "Outcomes the organization intends to achieve, in a cascade from the enterprise down, with their owners, priorities and the objectives they pull against.",
     "keyed": true,
     "label": "Objectives",
     "type": "objectives"
@@ -97,9 +163,56 @@
         "targets": [
           "data-products"
         ]
+      },
+      {
+        "help": "IDs of the capabilities whose health this KPI shows. Separate several with ';'.",
+        "key": "healthOfCapabilities",
+        "kind": "ref",
+        "label": "Health of capabilities",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "capabilities"
+        ]
+      },
+      {
+        "help": "The value past which the capability counts as degraded, in the KPI's unit.",
+        "key": "healthThreshold",
+        "kind": "decimal",
+        "label": "Health threshold",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "higher: degraded below the threshold. lower: degraded above it.",
+        "key": "betterWhen",
+        "kind": "str_enum",
+        "label": "Better when",
+        "multi": false,
+        "required": false,
+        "values": [
+          "higher",
+          "lower"
+        ]
+      },
+      {
+        "help": "The latest value, usually loaded from the metrics layer, in the KPI's unit.",
+        "key": "currentValue",
+        "kind": "decimal",
+        "label": "Current value",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "When the current value was measured (YYYY-MM-DD).",
+        "key": "measuredOn",
+        "kind": "date",
+        "label": "Measured on",
+        "multi": false,
+        "required": false
       }
     ],
-    "help": "Measures of progress. Used to route impact to their owners, not as targets.",
+    "help": "Measures of progress. Used to route impact to their owners, not as targets; with a health threshold, they also show whether a capability is degraded.",
     "keyed": true,
     "label": "KPIs",
     "type": "kpis"
