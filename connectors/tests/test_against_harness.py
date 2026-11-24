@@ -162,3 +162,42 @@ def test_servicenow_cmdb_systems_and_owner_roles(http, company, monkeypatch):
     assert ehr["businessOwner"] in (roles if isinstance(roles, list) else [roles])
     dups = http.get("/api/v1/findings", params={"kind": "duplicate-system"}).json()["findings"]
     assert len(dups) == 1 and dups[0]["about"]["names"][1] == "Epic"
+
+
+def test_halo_applications_and_agent_seats(http, company, monkeypatch):
+    truth, h = company
+    monkeypatch.setenv("SERVICENOW_USER", "admin")
+    monkeypatch.setenv("SERVICENOW_PASSWORD", "harness")
+    monkeypatch.setenv("HALO_CLIENT_ID", "veromesh-connector")
+    monkeypatch.setenv("HALO_CLIENT_SECRET", "harness-secret")
+    load(http, h)
+    for name, cat, access in (
+        ("workday", "hr", None),
+        ("entra", "iam", None),
+        ("servicenow", "cmdb", None),
+        ("servicenow-users", "cmdb", True),
+        ("halo", "cmdb", None),
+        ("halo-agents", "cmdb", True),
+    ):
+        body = {"category": cat, **({"grantsAccess": access} if access is not None else {})}
+        assert http.put(f"/api/v1/sources/{name}", json=body).status_code == 200
+    assert (
+        main(
+            [*API, "servicenow", "import", "--url", "http://testserver/servicenow"], http=http, source_http=h
+        )
+        == 0
+    )
+    assert http.get("/api/v1/people", params={"source": "servicenow-users"}).json()
+    assert main([*API, "halo", "import", "--url", "http://testserver/halo"], http=http, source_http=h) == 0
+    sn = {s["name"]: s["id"] for s in http.get("/api/v1/systems", params={"source": "servicenow"}).json()}
+    halo = {s["name"]: s for s in http.get("/api/v1/systems", params={"source": "halo"}).json()}
+    assert halo and all(halo[n]["id"] == sn[n] for n in halo if n in sn)  # one system, two sources
+    agents = http.get("/api/v1/people", params={"source": "halo-agents"}).json()
+    it = {
+        p.employee_id
+        for p in truth.people.values()
+        if (p.at(truth.today) or p.history[-1]).unit in ("IT", "INFRA", "APPS", "SEC")
+    }
+    assert agents and {a["id"] for a in agents} <= it | {
+        a["id"] for a in agents if not a["id"].startswith("W")
+    }

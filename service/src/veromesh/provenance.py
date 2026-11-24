@@ -302,10 +302,10 @@ def _categories(store: RDFStore) -> dict[str, str]:
 
 def registry(store: RDFStore) -> dict[str, dict]:
     res = store.query(
-        f"""SELECT ?name ?cat ?owner ?desc ?derived WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
+        f"""SELECT ?name ?cat ?owner ?desc ?derived ?access WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
               ?s <{VMP.name}> ?name ; <{VMP.category}> ?cat .
               OPTIONAL {{ ?s <{VMP.ownerRole}> ?owner }} OPTIONAL {{ ?s <{VMP.description}> ?desc }}
-              OPTIONAL {{ ?s <{VMP.derivedFrom}> ?derived }} }} }}"""
+              OPTIONAL {{ ?s <{VMP.derivedFrom}> ?derived }} OPTIONAL {{ ?s <{VMP.grantsAccess}> ?access }} }} }}"""
     )
     return {
         b["name"]["value"]: {
@@ -313,6 +313,7 @@ def registry(store: RDFStore) -> dict[str, dict]:
             "ownerRole": b.get("owner", {}).get("value"),
             "description": b.get("desc", {}).get("value"),
             "derivedFrom": json.loads(b["derived"]["value"]) if b.get("derived") else {},
+            "grantsAccess": (b["access"]["value"] == "true") if b.get("access") else None,
         }
         for b in res["results"]["bindings"]
     }
@@ -325,6 +326,7 @@ def register_source(
     owner_role: str | None = None,
     description: str | None = None,
     derived_from: dict[str, str] | None = None,
+    grants_access: bool | None = None,
 ) -> dict:
     """Register a source. ``derived_from`` maps a domain to the source this one takes it
     from (an AP workflow whose limits are copied from Workday levels): where the two
@@ -352,6 +354,8 @@ def register_source(
         if name in derived_from.values():
             raise ValueError("derivedFrom: a source cannot be derived from itself.")
         extra += f" ; <{VMP.derivedFrom}> {literal(json.dumps(derived_from, sort_keys=True))}"
+    if grants_access is not None:
+        extra += f' ; <{VMP.grantsAccess}> "{str(bool(grants_access)).lower()}"^^<http://www.w3.org/2001/XMLSchema#boolean>'
     store.update(
         f"""DELETE {{ GRAPH <{REGISTRY_GRAPH}> {{ <{s}> ?p ?o }} }} WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{ <{s}> ?p ?o }} }} ;
             INSERT DATA {{ GRAPH <{REGISTRY_GRAPH}> {{
@@ -364,6 +368,7 @@ def register_source(
         "ownerRole": owner_role,
         "description": description,
         "derivedFrom": derived_from or {},
+        "grantsAccess": grants_access,
     }
 
 

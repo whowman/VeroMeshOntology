@@ -81,6 +81,22 @@
       },
       "options": []
     },
+    "halo": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--agents-source",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "runs": {
       "args": [],
       "options": [
@@ -95,6 +111,7 @@
           "args": [],
           "options": [
             "--url",
+            "--users-source",
             "--source",
             "--mode ['replace', 'merge']",
             "--dry-run"

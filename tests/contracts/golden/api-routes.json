@@ -822,6 +822,12 @@
             "null"
           ]
         },
+        "grantsAccess?": {
+          "anyOf": [
+            "boolean",
+            "null"
+          ]
+        },
         "ownerRole?": {
           "anyOf": [
             "string",

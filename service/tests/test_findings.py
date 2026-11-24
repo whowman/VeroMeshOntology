@@ -165,3 +165,15 @@ def test_an_owner_who_has_left(ctx):
     assert [(f["subject"]["id"], f["about"]["field"]) for f in got] == [("APM1", "businessOwner")]
     load_source(client, "workday", "hr", [DANA, LEE, {**pat, "employeeId": "E-9"}])  # Pat is employed
     assert not found(client, kind="owner-has-left")
+
+
+def test_a_source_that_grants_access(ctx):
+    client, _, _ = ctx
+    load_source(client, "workday", "hr", [LEE])  # Dana has left
+    load_source(client, "halo-agents", "cmdb", [DANA])  # her ITSM agent seat
+    assert not found(client, kind="access-without-employment")  # a CMDB does not grant access
+    r = client.put(f"{API}/sources/halo-agents", json={"category": "cmdb", "grantsAccess": True})
+    assert r.status_code == 200 and r.json()["grantsAccess"] is True
+    got = found(client, kind="access-without-employment")
+    assert [(f["subject"]["id"], f["source"]) for f in got] == [("DanaExample", "halo-agents")]
+    assert client.get(f"{API}/sources").json()  # the registry still reads
