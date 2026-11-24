@@ -98,6 +98,7 @@ For each entity and field, VeroMesh picks one source's values:
 | out-of-sync | medium | Two sources that both decide a domain state different values (the AP workflow against the governance workbook), or a derived source no longer matches its origin. The value in force is the winner's |
 | ended-reference | medium | Someone their source dropped is still named by another entity (a leaver still named as a manager) |
 | domain-without-authority | info | Facts in a domain, and no registered source in a category that decides it |
+| owner-has-left | high | Everyone who fills an owner role of something (a system's business or technical owner, a KPI's, a data product's) has left: HR no longer lists them while another source still names them |
 | capability-degraded | high | A KPI that shows a capability's health is past its threshold; to the capability's owner |
 | objective-conflict-unsettled | medium | Two objectives conflict, neither has priority and no parent objective's owner settles it; to both owners |
 | reported by connectors | as reported | For example the ERP connector's purchase orders their buyer approved, and invoices approved above the approver's limit or without a co-approver (`PUT /api/v1/findings/reported/{source}`, each run replacing the last) |

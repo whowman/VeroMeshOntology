@@ -146,3 +146,22 @@ def test_connectors_report_what_they_find(ctx):
         == 422
     )
     assert client.get(f"{API}/findings", params={"severity": "dire"}).status_code == 422
+
+
+def test_an_owner_who_has_left(ctx):
+    client, _, _ = ctx
+    pat = {"id": "PatExample", "name": "Pat Example", "rolesFilled": "Erp.BusinessOwner"}
+    assert client.put(f"{API}/sources/cmdb", json={"category": "cmdb"}).status_code == 200
+    cs = client.post(f"{API}/changesets", json={"source": "cmdb"}).json()["id"]
+    items = [
+        {"type": "roles", "entity": {"id": "Erp.BusinessOwner", "name": "Business owner of the ERP"}},
+        {"type": "systems", "entity": {"id": "APM1", "name": "ERP", "businessOwner": "Erp.BusinessOwner"}},
+        {"type": "people", "entity": pat},
+    ]
+    client.post(f"{API}/changesets/{cs}/items", json={"items": items})
+    assert client.post(f"{API}/changesets/{cs}/commit").status_code == 200
+    load_source(client, "workday", "hr", [DANA, LEE])  # Pat is not in HR
+    got = found(client, kind="owner-has-left")
+    assert [(f["subject"]["id"], f["about"]["field"]) for f in got] == [("APM1", "businessOwner")]
+    load_source(client, "workday", "hr", [DANA, LEE, {**pat, "employeeId": "E-9"}])  # Pat is employed
+    assert not found(client, kind="owner-has-left")

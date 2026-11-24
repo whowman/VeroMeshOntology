@@ -26,6 +26,9 @@ Worked out from the model:
   names them.
 - ``domain-without-authority`` (info): the model holds facts in a domain, and no
   registered source is in a category that decides it. To administrators.
+- ``owner-has-left`` (high): everyone who fills an owner role of something (a system's
+  business or technical owner, a KPI's, a data product's...) has left: HR no longer lists them,
+  while another source (the CMDB, the workbook) still names them. To the owning source's owner.
 - ``capability-degraded`` (high): a KPI that shows a capability's health is past its health
   threshold. To the capability's owner: agents acting on it consult them until it recovers.
 - ``objective-conflict-unsettled`` (medium): two objectives conflict, neither has priority,
@@ -172,6 +175,7 @@ def _compute(store: RDFStore) -> list[dict]:
         )
 
     iam_sources = sorted(s for s, c in cats.items() if c == "iam")
+    status_of: dict[str, str] = {}
     for (t, rid), r in sorted(resolved.items()):
         if t != "people":
             continue
@@ -179,6 +183,7 @@ def _compute(store: RDFStore) -> list[dict]:
         if not holding:
             continue
         status = employment_status(holding, cats, emp, bool(r.values.get("employeeId")))
+        status_of[rid] = status
         who = r.values.get("name") or rid
         if status == "ended":
             for src in sorted(holding):
@@ -288,6 +293,32 @@ def _compute(store: RDFStore) -> list[dict]:
                             about={"referrer": {"type": t, "id": rid, "field": f}},
                             key=(t, rid, f),
                         )
+
+    holders: dict[str, list[str]] = {}
+    for pid in status_of:
+        roles = resolved[("people", pid)].values.get("rolesFilled") or []
+        for role in roles if isinstance(roles, list) else [roles]:
+            holders.setdefault(role, []).append(pid)
+    owner_fields = ("ownerRole", "stewardRole", "businessOwner", "technicalOwner")
+    for (t, rid), r in sorted(resolved.items()):
+        for f in owner_fields:
+            role = r.values.get(f)
+            if not isinstance(role, str) or not holders.get(role):
+                continue
+            if any(status_of[p] != "ended" for p in holders[role]):
+                continue
+            src = r.winners[f].source if f in r.winners else None
+            who = ", ".join(name("people", p) for p in sorted(holders[role]))
+            add(
+                "owner-has-left",
+                "high",
+                {"type": t, "id": rid},
+                f"{name(t, rid)}'s {f} is {name('roles', role)}, filled only by {who}, whom HR no longer lists.",
+                source=src,
+                owner_role=owner(src),
+                about={"field": f, "role": role, "people": sorted(holders[role])},
+                key=(f,),
+            )
 
     vals = {key: r.values for key, r in resolved.items()}
 
