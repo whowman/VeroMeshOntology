@@ -87,6 +87,9 @@ A token without any of these roles gets 403.
 5. Co-approval: a tier on the authority or a parent applies above its amount: consult the approver role.
 6. Impact: per KPI or capability the action affects, below the materiality threshold act and inform the owner; above it, consult the owner first. Money thresholds ("USD per invoice") compare the amount; per-day thresholds ("invoices per day") count today's allowed decisions in the log; a threshold that cannot be checked counts as material. An action with no mapped impact consults whoever is accountable, nearest first: the owners of its process, else of the capability the agent's authority is within, else the principal's role; it is refused only when there is nobody (`VEROMESH_DECISION_UNMAPPED_IMPACT=allow` to act instead).
 
+7. Trade-offs: when the action moves KPIs of two objectives that conflict, the owners of both are consulted if any of those impacts is material, and informed otherwise. The reasons say which has priority (the lower number); with no priority between them, the owner of their nearest common parent objective, who settles it, is consulted too. `basis.tradeoffs` lists each pair.
+8. Health: when a capability the action touches (its process's capability, the capability its authority is within, or one it affects) has a health KPI past its threshold, the capability's owner is consulted until it recovers. `basis.degraded` names the KPI and its value.
+
 Refuse if any step refuses, else consult if anyone must be consulted, else allow. Each answer names the roles and the people filling them, and is appended to the decision log. It is advisory: an agent could skip it; enforcement at a gateway comes later. An agent asks as itself (its sign-in implies the agent, and the day is today); an administrator may test a check on an agent's behalf with `agent` and `onDate`.
 
 **After a decision** (`src/veromesh/followup.py`), everything is appended to the decision log, referring to the decision:

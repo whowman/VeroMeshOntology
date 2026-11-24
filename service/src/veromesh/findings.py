@@ -26,6 +26,10 @@ Worked out from the model:
   names them.
 - ``domain-without-authority`` (info): the model holds facts in a domain, and no
   registered source is in a category that decides it. To administrators.
+- ``capability-degraded`` (high): a KPI that shows a capability's health is past its health
+  threshold. To the capability's owner: agents acting on it consult them until it recovers.
+- ``objective-conflict-unsettled`` (medium): two objectives conflict, neither has priority,
+  and they share no parent objective whose owner could settle it. To both owners.
 """
 
 from __future__ import annotations
@@ -284,6 +288,88 @@ def _compute(store: RDFStore) -> list[dict]:
                             about={"referrer": {"type": t, "id": rid, "field": f}},
                             key=(t, rid, f),
                         )
+
+    vals = {key: r.values for key, r in resolved.items()}
+
+    def ids(v):
+        return [] if not v else v if isinstance(v, list) else [v]
+
+    def dec(v):
+        try:
+            return Decimal(str(v)) if v not in (None, "") else None
+        except (InvalidOperation, ValueError):
+            return None
+
+    for (t, rid), v in sorted(vals.items()):
+        if t != "kpis":
+            continue
+        cur, thr, better = dec(v.get("currentValue")), dec(v.get("healthThreshold")), v.get("betterWhen")
+        if cur is None or thr is None or better not in ("higher", "lower"):
+            continue
+        if not ((better == "higher" and cur < thr) or (better == "lower" and cur > thr)):
+            continue
+        for cap in ids(v.get("healthOfCapabilities")):
+            cv = vals.get(("capabilities", cap), {})
+            src = (
+                resolved[("capabilities", cap)].winners.get("ownerRole")
+                if ("capabilities", cap) in resolved
+                else None
+            )
+            add(
+                "capability-degraded",
+                "high",
+                {"type": "capabilities", "id": cap},
+                f"{cv.get('name') or cap} is degraded: {v.get('name') or rid} is {cur} {v.get('unit') or ''}".rstrip()
+                + f", past its health threshold of {thr}. Agents acting on it consult its owner.",
+                source=src.source if src else None,
+                owner_role=cv.get("ownerRole"),
+                about={
+                    "kpi": rid,
+                    "value": str(cur),
+                    "threshold": str(thr),
+                    "measuredOn": v.get("measuredOn"),
+                },
+                key=(rid,),
+            )
+
+    def ancestors(oid):
+        out, seen = [], {oid}
+        while (p := vals.get(("objectives", oid), {}).get("parentObjective")) and p not in seen:
+            out.append(p)
+            seen.add(p)
+            oid = p
+        return out
+
+    seen_pairs = set()
+    for (t, a), va in sorted(vals.items()):
+        if t != "objectives":
+            continue
+        for b in ids(va.get("conflictsWithObjectives")):
+            pair = tuple(sorted((a, b)))
+            vb = vals.get(("objectives", b))
+            if vb is None or pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            pa, pb = dec(va.get("priority")), dec(vb.get("priority"))
+            common = next((x for x in ancestors(a) if x in set(ancestors(b))), None)
+            if (pa is not None and pb is not None and pa != pb) or (
+                common and vals.get(("objectives", common), {}).get("ownerRole")
+            ):
+                continue
+            for oid, ov in (
+                (pair[0], vals[("objectives", pair[0])]),
+                (pair[1], vals[("objectives", pair[1])]),
+            ):
+                add(
+                    "objective-conflict-unsettled",
+                    "medium",
+                    {"type": "objectives", "id": oid},
+                    f"{va.get('name') or a} and {vb.get('name') or b} conflict, neither has priority, and no "
+                    "parent objective's owner settles it: an agent whose action moves both cannot be told which wins.",
+                    owner_role=ov.get("ownerRole"),
+                    about={"objectives": list(pair)},
+                    key=pair,
+                )
 
     present = {t for t, _ in resolved}
     registered = {c for s, c in cats.items() if s not in (P.STEWARD_SOURCE,)}

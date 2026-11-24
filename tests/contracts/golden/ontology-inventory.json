@@ -350,6 +350,10 @@
       "closed": "false",
       "properties": [
         {
+          "class": "vmo:BusinessCapability",
+          "path": "vmo:healthOf"
+        },
+        {
           "class": "vmo:DataProduct",
           "minCount": "1",
           "path": "vmo:computedFrom",
@@ -359,6 +363,18 @@
           "class": "vmo:Role",
           "maxCount": "1",
           "path": "vmo:ownedBy"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:betterWhen"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:currentValue"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:healthThreshold"
         },
         {
           "minCount": "1",
@@ -376,7 +392,7 @@
         }
       ],
       "severity": "",
-      "sparqlRules": 0,
+      "sparqlRules": 1,
       "target": [
         "vmo:KPI"
       ]
@@ -391,12 +407,38 @@
           "severity": "sh:Warning"
         },
         {
+          "class": "vmo:Objective",
+          "maxCount": "1",
+          "path": "vmo:parentObjective"
+        },
+        {
+          "class": "vmo:Objective",
+          "path": "vmo:conflictsWith"
+        },
+        {
+          "class": "vmo:Objective",
+          "path": "vmo:supportsObjective"
+        },
+        {
+          "class": "vmo:Role",
+          "maxCount": "1",
+          "path": "vmo:ownedBy"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:objectiveLevel"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:priority"
+        },
+        {
           "minCount": "1",
           "path": "rdfs:label"
         }
       ],
       "severity": "",
-      "sparqlRules": 0,
+      "sparqlRules": 1,
       "target": [
         "vmo:Objective"
       ]
@@ -846,6 +888,15 @@
           "vmo:System"
         ]
       },
+      "vmo:betterWhen": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmo:bindsElement": {
         "domain": [
           "vmo:ColumnBinding"
@@ -930,6 +981,15 @@
           "xsd:string"
         ]
       },
+      "vmo:conflictsWith": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Objective"
+        ]
+      },
       "vmo:consumes": {
         "domain": [
           "(vmo:AIAgent or vmo:BusinessCapability or vmo:Process)"
@@ -982,6 +1042,15 @@
         "kind": "owl:DatatypeProperty",
         "range": [
           "xsd:string"
+        ]
+      },
+      "vmo:currentValue": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
         ]
       },
       "vmo:dataCategory": {
@@ -1043,6 +1112,24 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:Impact"
+        ]
+      },
+      "vmo:healthOf": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:BusinessCapability"
+        ]
+      },
+      "vmo:healthThreshold": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
         ]
       },
       "vmo:heldBy": {
@@ -1129,10 +1216,28 @@
           "vmo:KPI"
         ]
       },
+      "vmo:measuredOn": {
+        "domain": [
+          "vmo:KPI"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
       "vmo:measures": {
         "domain": [],
         "kind": "owl:ObjectProperty",
         "range": []
+      },
+      "vmo:objectiveLevel": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
       },
       "vmo:ownedBy": {
         "domain": [
@@ -1157,6 +1262,15 @@
           "vmo:BusinessCapability"
         ]
       },
+      "vmo:parentObjective": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Objective"
+        ]
+      },
       "vmo:partOfProcess": {
         "domain": [
           "vmo:Action"
@@ -1173,6 +1287,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:Action"
+        ]
+      },
+      "vmo:priority": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
         ]
       },
       "vmo:produces": {
@@ -1268,6 +1391,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:Role"
+        ]
+      },
+      "vmo:supportsObjective": {
+        "domain": [
+          "vmo:Objective"
+        ],
+        "kind": "owl:ObjectProperty",
+        "range": [
+          "vmo:Objective"
         ]
       },
       "vmo:technicalOwner": {

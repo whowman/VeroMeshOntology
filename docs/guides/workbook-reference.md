@@ -22,7 +22,7 @@ The organization sheets record who does what: usually from HR and the operating 
 
 ## Objectives
 
-Outcomes the organization intends to achieve.
+Outcomes the organization intends to achieve, in a cascade from the enterprise down, with their owners, priorities and the objectives they pull against.
 
 | Column | Required | Holds | What it means |
 | --- | --- | --- | --- |
@@ -30,10 +30,16 @@ Outcomes the organization intends to achieve.
 | Name | yes | text | Display name of the objective. |
 | Definition |  | text | What achieving this objective means, in a sentence or two. |
 | Measured by KPIs |  | ID of KPIs (several, separated by `;`) | IDs of KPIs that measure progress. |
+| Owner role |  | ID of Roles | ID of the role that owns this (ownership always sits with a role, not a person). |
+| Level |  | one of: `enterprise`, `function`, `capability`, `process` | enterprise, function, capability or process: where the objective sits in the cascade. |
+| Parent objective |  | ID of Objectives | ID of the objective this one contributes to, one level up. Empty for an enterprise objective. |
+| Priority |  | number | When objectives pull against each other, the lower number wins: 1 is the highest priority. Compare objectives with the same parent. |
+| Supports objectives |  | ID of Objectives (several, separated by `;`) | IDs of other objectives that progress on this one helps. |
+| Conflicts with objectives |  | ID of Objectives (several, separated by `;`) | IDs of objectives that progress on this one can set back (on-time payment against working capital). A conflict counts both ways. |
 
 ## KPIs
 
-Measures of progress. Used to route impact to their owners, not as targets.
+Measures of progress. Used to route impact to their owners, not as targets; with a health threshold, they also show whether a capability is degraded.
 
 | Column | Required | Holds | What it means |
 | --- | --- | --- | --- |
@@ -43,6 +49,11 @@ Measures of progress. Used to route impact to their owners, not as targets.
 | Unit |  | text | e.g. percent, days, USD |
 | Owner role |  | ID of Roles | ID of the role that owns this (ownership always sits with a role, not a person). |
 | Computed from data products |  | ID of Data products (several, separated by `;`) | IDs of the data products the KPI is calculated from. |
+| Health of capabilities |  | ID of Capabilities (several, separated by `;`) | IDs of the capabilities whose health this KPI shows. |
+| Health threshold |  | number | The value past which the capability counts as degraded, in the KPI's unit. |
+| Better when |  | one of: `higher`, `lower` | higher: degraded below the threshold. lower: degraded above it. |
+| Current value |  | number | The latest value, usually loaded from the metrics layer, in the KPI's unit. |
+| Measured on |  | date (YYYY-MM-DD) | When the current value was measured (YYYY-MM-DD). |
 
 ## Capabilities
 

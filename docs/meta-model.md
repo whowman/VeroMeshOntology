@@ -56,8 +56,8 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 
 | Type | What it is | Key facts recorded | Usual source |
 | --- | --- | --- | --- |
-| Objective | An outcome the organization intends | name, KPIs measuring it | Strategy / OKR tools |
-| KPI | A measure of progress toward objectives; used for routing, not as a target | definition, unit, one owning role, data products it is computed from | Metrics layer, performance tools |
+| Objective | An outcome the organization intends | name, KPIs measuring it, owner role, level (enterprise, function, capability, process), parent objective, priority, objectives it supports and conflicts with | Strategy / OKR tools, goal-setting in the HR suite |
+| KPI | A measure of progress toward objectives; used for routing, not as a target | definition, unit, one owning role, data products it is computed from; as a health measure: capabilities it shows the health of, health threshold, better when higher or lower, current value and date | Metrics layer, performance tools |
 | Policy, Regulation | An internal rule or external law | name, jurisdiction, what it bounds | GRC / policy library |
 | Business capability | What the organization can do | owner, objectives served, parent capability, processes, data produced and consumed | Enterprise architecture tools |
 | Process | A business process realizing a capability | owner, systems it runs on | Process repository |
@@ -71,6 +71,8 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Approved AI use case (governance) | A governance board's decision that an AI use may run. Outside the 12 core types: it records a board decision about agents, not a new kind of authority | approving board (a role), status (approved, conditional, suspended, retired), agents covered, actions allowed, approved on, review by, conditions | AI review board register or minutes (source category `governance`) |
 
 Four supporting types: **Impact** (attaches a materiality threshold to "action affects KPI"), **Co-approval** (a second sign-off by a role above an amount), **Business data element** (a business-level data item) and **Column binding** (a DataHub column holds a data element; one per column, kept per source so it can be attested or disputed like any fact).
+
+**Decision criteria** (24 November 2026). Objectives form a cascade (parent objective, level) and carry a priority and the objectives they conflict with, so an agent knows which measure wins when two pull against each other and who settles it: the owner of the nearest common parent objective. KPIs with a health threshold show whether a capability is degraded. The decision check uses both (`service/README.md`, steps 7 and 8).
 
 ## Validation rules
 

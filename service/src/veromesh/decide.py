@@ -184,6 +184,121 @@ def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) 
     return min(found, key=lambda f: f[:4])[4] if found else None
 
 
+def _objective_owners(m: Model, obj: dict, kpis: set[str]) -> list[str]:
+    own = m.owner_roles("objectives", obj["id"])
+    return own or sorted({r for k in kpis for r in m.owner_roles("kpis", k)})
+
+
+def _ancestors(m: Model, oid: str) -> list[str]:
+    out, seen = [], {oid}
+    while True:
+        parent = (m.get("objectives", oid) or {}).get("parentObjective")
+        if not parent or parent in seen:
+            return out
+        out.append(parent)
+        seen.add(parent)
+        oid = parent
+
+
+def _tradeoffs(m: Model, material_on: dict[str, bool]) -> list[dict]:
+    """Pairs of conflicting objectives that both move with the action. Each names which has
+    priority (the lower number), whom to consult (both owners) and who settles it if they
+    disagree: the owner of their nearest common parent objective."""
+    touched: dict[str, set[str]] = {}
+    for k in material_on:
+        if m.get("kpis", k) is None:
+            continue
+        for o in m.by("objectives", "measuredByKpis", k):
+            touched.setdefault(o["id"], set()).add(k)
+    out, seen = [], set()
+    for a in sorted(touched):
+        oa = m.get("objectives", a) or {}
+        for b in sorted(touched):
+            ob = m.get("objectives", b) or {}
+            if a >= b or (a, b) in seen:
+                continue
+            if b not in _ids(oa.get("conflictsWithObjectives")) and a not in _ids(
+                ob.get("conflictsWithObjectives")
+            ):
+                continue
+            seen.add((a, b))
+            pa, pb = _dec(oa.get("priority")), _dec(ob.get("priority"))
+            first = (
+                a
+                if pa is not None and (pb is None or pa < pb)
+                else b
+                if pb is not None and (pa is None or pb < pa)
+                else None
+            )
+            common = next((x for x in _ancestors(m, a) if x in set(_ancestors(m, b))), None)
+            settler = m.owner_roles("objectives", common) if common else []
+            owners = sorted(
+                set(_objective_owners(m, oa, touched[a])) | set(_objective_owners(m, ob, touched[b]))
+            )
+            material = any(material_on.get(k) for k in touched[a] | touched[b])
+            na, nb = m.name("objectives", a), m.name("objectives", b)
+            why = f"{na} and {nb} pull against each other"
+            if first:
+                why += f"; {m.name('objectives', first)} has priority"
+            else:
+                why += "; neither has priority"
+            if settler:
+                why += f", and {m.name('objectives', common)} ({', '.join(m.name('roles', r) for r in settler)}) settles it"
+            if material and not first:
+                owners = sorted(set(owners) | set(settler))
+            out.append(
+                {
+                    "objectives": [a, b],
+                    "priority": first,
+                    "settledBy": {"objective": common, "roles": settler} if common else None,
+                    "material": material,
+                    "owners": owners,
+                    "why": why,
+                }
+            )
+    return out
+
+
+def _ids(v) -> list[str]:
+    if not v:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def _degraded(m: Model, act: dict, used: str | None) -> list[dict]:
+    """Capabilities the action touches whose health KPI is past its threshold."""
+    caps = {t for t in _ids(act.get("affects")) if m.get("capabilities", t)}
+    caps |= {
+        i.get("impactOn")
+        for i in m.by("impacts", "action", act["id"])
+        if m.get("capabilities", i.get("impactOn"))
+    }
+    if act.get("partOfProcess"):
+        caps |= {c["id"] for c in m.by("capabilities", "realizedByProcesses", act["partOfProcess"])}
+    if used and (cap := (m.get("authorities", used) or {}).get("withinCapability")):
+        caps.add(cap)
+    out = []
+    for cap in sorted(caps):
+        for k in m.by("kpis", "healthOfCapabilities", cap):
+            v, thr, better = _dec(k.get("currentValue")), _dec(k.get("healthThreshold")), k.get("betterWhen")
+            if v is None or thr is None or better not in ("higher", "lower"):
+                continue
+            if (better == "higher" and v < thr) or (better == "lower" and v > thr):
+                out.append(
+                    {
+                        "capability": cap,
+                        "kpi": k["id"],
+                        "value": str(v),
+                        "threshold": str(thr),
+                        "measuredOn": k.get("measuredOn"),
+                        "why": f"{m.name('capabilities', cap)} is degraded: {m.name('kpis', k['id'])} is "
+                        f"{_money(v)} {k.get('unit') or ''}".rstrip()
+                        + f", past its health threshold of {_money(thr)}",
+                    }
+                )
+    return out
+
+
 def _use_case(m: Model, agent: str, action: str, day: date) -> tuple[dict | None, str]:
     """The current approved AI use case covering the agent for the action, or why there is none."""
     seen = []
@@ -465,6 +580,7 @@ def _check(
     if not refuse:
         impacts = m.by("impacts", "action", action)
         with_threshold = {i.get("impactOn") for i in impacts}
+        material_on: dict[str, bool] = {}
         done_today: int | None = None
         for i in impacts:
             target = i.get("impactOn")
@@ -488,6 +604,7 @@ def _check(
                 why = (
                     f"the threshold on {tname} ({_money(thr)} {unit}) cannot be checked against this request"
                 )
+            material_on[target] = material_on.get(target, False) or material
             for role in owners or []:
                 (consult if material else inform).append(
                     _consult_entry(m, role, ("material: " if material else "below materiality: ") + why)
@@ -497,6 +614,7 @@ def _check(
         for target in act.get("affects", []):
             if target in with_threshold:
                 continue
+            material_on[target] = True
             ttype = "kpis" if m.get("kpis", target) else "capabilities"
             for role in m.owner_roles(ttype, target):
                 consult.append(
@@ -504,6 +622,21 @@ def _check(
                         m, role, f"{m.name(ttype, target)} has no materiality threshold for this action"
                     )
                 )
+
+        # 7. Trade-offs: objectives the action moves that pull against each other.
+        tradeoffs = _tradeoffs(m, material_on)
+        for t in tradeoffs:
+            for role in t["owners"]:
+                (consult if t["material"] else inform).append(_consult_entry(m, role, t["why"]))
+        if tradeoffs:
+            basis["tradeoffs"] = [
+                {k: v for k, v in t.items() if k not in ("owners", "why")} for t in tradeoffs
+            ]
+        # 8. Health: a degraded capability the action touches is its owner's to decide on.
+        for d in _degraded(m, act, used):
+            for role in m.owner_roles("capabilities", d["capability"]):
+                consult.append(_consult_entry(m, role, d["why"]))
+            basis.setdefault("degraded", []).append({k: v for k, v in d.items() if k != "why"})
 
         if not impacts and not act.get("affects") and unmapped_impact == "consult":
             # Unknown impact: consult whoever is accountable, nearest first: the owners of the

@@ -178,6 +178,33 @@ vmo:measuredBy
 
 vmo:measures a owl:ObjectProperty ; rdfs:label "measures" .
 
+vmo:parentObjective
+    a owl:ObjectProperty ;
+    rdfs:label "parent objective" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range vmo:Objective ;
+    skos:definition "Builds the objective cascade: enterprise, function, capability, process." .
+
+vmo:supportsObjective
+    a owl:ObjectProperty ;
+    rdfs:label "supports objective" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range vmo:Objective .
+
+vmo:conflictsWith
+    a owl:ObjectProperty , owl:SymmetricProperty ;
+    rdfs:label "conflicts with" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range vmo:Objective ;
+    skos:definition "Progress on one can set the other back: a trade-off an agent must not settle alone." .
+
+vmo:healthOf
+    a owl:ObjectProperty ;
+    rdfs:label "health of" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range vmo:BusinessCapability ;
+    skos:definition "The KPI shows whether the capability is healthy or degraded." .
+
 vmo:serves
     a owl:ObjectProperty ;
     rdfs:label "serves" ;
@@ -398,6 +425,45 @@ vmo:dataCategory
 # -----------------------------------------------------------------------------
 # Attributes
 # -----------------------------------------------------------------------------
+
+vmo:objectiveLevel
+    a owl:DatatypeProperty ;
+    rdfs:label "level" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range xsd:string ;
+    skos:definition "enterprise, function, capability or process." .
+
+vmo:priority
+    a owl:DatatypeProperty ;
+    rdfs:label "priority" ;
+    rdfs:domain vmo:Objective ;
+    rdfs:range xsd:decimal ;
+    skos:definition "1 is the highest; decides which of two conflicting objectives wins." .
+
+vmo:healthThreshold
+    a owl:DatatypeProperty ;
+    rdfs:label "health threshold" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range xsd:decimal .
+
+vmo:betterWhen
+    a owl:DatatypeProperty ;
+    rdfs:label "better when" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range xsd:string ;
+    skos:definition "higher or lower: which side of the health threshold is healthy." .
+
+vmo:currentValue
+    a owl:DatatypeProperty ;
+    rdfs:label "current value" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range xsd:decimal .
+
+vmo:measuredOn
+    a owl:DatatypeProperty ;
+    rdfs:label "measured on" ;
+    rdfs:domain vmo:KPI ;
+    rdfs:range xsd:date .
 
 vmo:limitAmount
     a owl:DatatypeProperty ;
