@@ -97,3 +97,8 @@ principal, or what is missing. The usual causes:
 | Signed in, but no VeroMesh role is assigned | Step 3 |
 | The facts behind this authority are not all attested | A steward or owner attests them |
 | 401 at /mcp | The scope in step 5, or the API's issuer and audience settings |
+
+## Purpose and the query log
+
+Every read the agent makes is logged on the decision log's hash chain with the agent, the person it acts for and the purpose it states. The MCP read tools (`who_am_i`, `impact_of_action`, `who_owns`, `get_entity`, `decision_status`) take an optional `purpose`; tell the agent in its instructions to give one, for example "Give a short purpose with every VeroMesh lookup, such as the invoice you are working on." A lookup without a purpose is still answered.
+

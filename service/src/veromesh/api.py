@@ -38,6 +38,7 @@ from . import (
     incremental,
     licence,
     mcp_server,
+    querylog,
     suggest,
     usage,
     validation,
@@ -288,10 +289,22 @@ def create_app(
     Who = Annotated[auth.Caller, Depends(caller)]
 
     def need(roles: tuple[str, ...]):
-        """Route dependency: the caller holds admin or one of ``roles``."""
+        """Route dependency: the caller holds admin or one of ``roles``. Reads by agents are
+        logged with their stated purpose (querylog.py)."""
 
-        def check(who: Who) -> auth.Caller:
+        def check(request: Request, who: Who, c: Cfg) -> auth.Caller:
             auth.forbid(who, *roles)
+            if request.method == "GET" and querylog.wanted(who, c.query_log):
+                s = svc(request)
+                q = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+                querylog.record(
+                    dlog(request, c),
+                    s.store,
+                    c.instance_base,
+                    who,
+                    query=q,
+                    purpose=request.headers.get(querylog.HEADER),
+                )
             return who
 
         return [Depends(check)]
@@ -882,6 +895,8 @@ def create_app(
             on=on,
             note=body.note,
             require_attested=c.decision_requires_attested,
+            require_use_case=c.decision_requires_use_case,
+            unmapped_impact=c.decision_unmapped_impact,
         )
 
     def use(request: Request) -> usage.Usage:
@@ -1185,6 +1200,25 @@ def create_app(
 
     # ------------------------------------------------------------------ MCP, for agents
 
+    def mcp_read(tool: str, fn):
+        """An MCP read tool, logged like a REST read (agent, principal, stated purpose)."""
+
+        def run(st: dict, purpose: str | None = None, **kw):
+            c = st["settings"]
+            if querylog.wanted(st["caller"], c.query_log):
+                args = " ".join(f"{k}={v}" for k, v in kw.items() if v is not None)
+                querylog.record(
+                    st["log"],
+                    st["service"].store,
+                    c.instance_base,
+                    st["caller"],
+                    query=f"mcp:{tool}" + (f" {args}" if args else ""),
+                    purpose=purpose,
+                )
+            return fn(st, **kw)
+
+        return run
+
     def mcp_entity(st: dict, type_: str, rid: str) -> dict:
         entities.check_type(type_)
         e = changesets.get_entity(st["service"].store, type_, rid, st["settings"].instance_base)
@@ -1192,19 +1226,28 @@ def create_app(
 
     mcp = mcp_server.build(
         {
-            "who_am_i": lambda st: me(st["service"], st["settings"], st["caller"]),
+            "who_am_i": mcp_read("who_am_i", lambda st: me(st["service"], st["settings"], st["caller"])),
             "check_action": lambda st, **kw: decisions_check(
                 st["service"], st["settings"], st["log"], st["caller"], CheckIn(**kw)
             ),
-            "impact_of_action": lambda st, action: decide.impact_of(
-                st["service"].store, st["settings"].instance_base, action
+            "impact_of_action": mcp_read(
+                "impact_of_action",
+                lambda st, action: decide.impact_of(
+                    st["service"].store, st["settings"].instance_base, action
+                ),
             ),
-            "who_owns": lambda st, type_, rid: decide.owners_of(
-                st["service"].store, st["settings"].instance_base, type_, rid
+            "who_owns": mcp_read(
+                "who_owns",
+                lambda st, type_, rid: decide.owners_of(
+                    st["service"].store, st["settings"].instance_base, type_, rid
+                ),
             ),
-            "get_entity": mcp_entity,
-            "decision_status": lambda st, decision_id: decisions_status(
-                st["service"], st["settings"], st["log"], st["caller"], decision_id
+            "get_entity": mcp_read("get_entity", mcp_entity),
+            "decision_status": mcp_read(
+                "decision_status",
+                lambda st, decision_id: decisions_status(
+                    st["service"], st["settings"], st["log"], st["caller"], decision_id
+                ),
             ),
             "report_outcome": lambda st, decision_id, outcome, note: decisions_outcome(
                 st["service"],

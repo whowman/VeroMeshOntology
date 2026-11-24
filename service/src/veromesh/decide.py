@@ -184,6 +184,28 @@ def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) 
     return min(found, key=lambda f: f[:4])[4] if found else None
 
 
+def _use_case(m: Model, agent: str, action: str, day: date) -> tuple[dict | None, str]:
+    """The current approved AI use case covering the agent for the action, or why there is none."""
+    seen = []
+    for uc in m.by("ai-use-cases", "coversAgents", agent):
+        status = uc.get("status")
+        allows = uc.get("allowsActions") or []
+        allows = allows if isinstance(allows, list) else [allows]
+        review = uc.get("reviewBy")
+        if status not in ("approved", "conditional"):
+            seen.append(f"{m.name('ai-use-cases', uc['id'])} is {status}")
+        elif allows and action not in allows:
+            seen.append(f"{m.name('ai-use-cases', uc['id'])} does not allow {action}")
+        elif review and str(review) < day.isoformat():
+            seen.append(f"{m.name('ai-use-cases', uc['id'])} was due for review on {review}")
+        else:
+            return uc, ""
+    name = m.name("agents", agent)
+    if not seen:
+        return None, f"No approved AI use case covers {name}."
+    return None, f"No current approved AI use case covers {name} for {action}: " + "; ".join(seen) + "."
+
+
 def _chain(m: Model, auth: dict) -> list[dict]:
     """The authority and its parents, nearest first (stops on a loop or a missing parent)."""
     out, seen = [auth], {auth["id"]}
@@ -213,16 +235,53 @@ def check(
     on: date | None = None,
     note: str | None = None,
     require_attested: bool = True,
+    require_use_case: bool = False,
+    unmapped_impact: str = "consult",
 ) -> dict:
-    """Decide, append the decision to the log, and return the log entry plus who to inform."""
+    """Decide, append the decision to the log, and return the log entry plus who to inform.
+
+    ``require_use_case``: refuse an agent no current approved AI use case covers for the action
+    (the governance board's decision gates the agent). ``unmapped_impact``: what an action with
+    no mapped impact gets: ``consult`` the owners of its process (the white paper: unknown
+    impact is a reason to consult, not a licence to act) or ``allow``."""
+    if unmapped_impact not in ("consult", "allow"):
+        raise ValueError("unmapped_impact is consult or allow.")
     domains.activate(store)
     incremental.warm(store, base)  # follow what other copies changed, without reading the model
     pin = store.pinned() if hasattr(store, "pinned") else contextlib.nullcontext()
     with pin:  # one version read for the whole check, not one per cached read
-        return _check(store, base, log, agent, action, subject, amount, currency, on, note, require_attested)
+        return _check(
+            store,
+            base,
+            log,
+            agent,
+            action,
+            subject,
+            amount,
+            currency,
+            on,
+            note,
+            require_attested,
+            require_use_case,
+            unmapped_impact,
+        )
 
 
-def _check(store, base, log, agent, action, subject, amount, currency, on, note, require_attested) -> dict:
+def _check(
+    store,
+    base,
+    log,
+    agent,
+    action,
+    subject,
+    amount,
+    currency,
+    on,
+    note,
+    require_attested,
+    require_use_case=False,
+    unmapped_impact="consult",
+) -> dict:
     m = Model(store, base)
     day = on or clock.today()
     amt = _dec(amount)
@@ -266,6 +325,16 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
     # 2. Set up for it
     if action not in ag.get("performsActions", []):
         refuse.append(f"{ag.get('name') or agent} is not registered to {act_name.lower()}.")
+    if require_use_case:
+        uc, why_not = _use_case(m, agent, action, day)
+        if uc is None:
+            refuse.append(why_not)
+        else:
+            basis["useCase"] = uc["id"]
+            if uc.get("status") == "conditional" and uc.get("conditions"):
+                reasons.append(
+                    f"Approved with conditions ({m.name('ai-use-cases', uc['id'])}): {uc['conditions']}"
+                )
 
     # 3. Authority
     held = [a for a in m.by("authorities", "holder", agent) if action in a.get("actionsCovered", [])]
@@ -434,6 +503,27 @@ def _check(store, base, log, agent, action, subject, amount, currency, on, note,
                     _consult_entry(
                         m, role, f"{m.name(ttype, target)} has no materiality threshold for this action"
                     )
+                )
+
+        if not impacts and not act.get("affects") and unmapped_impact == "consult":
+            # Unknown impact: consult whoever is accountable, nearest first: the owners of the
+            # process the action is part of, else of the capability the agent's authority is
+            # within, else the agent's principal (the person accountable for what it does).
+            why = f"no impact is mapped for {act_name.lower()}, so its impact is unknown"
+            proc = act.get("partOfProcess")
+            owners = m.owner_roles("processes", proc) if proc else []
+            if not owners and used:
+                cap = (m.get("authorities", used) or {}).get("withinCapability")
+                owners = m.owner_roles("capabilities", cap) if cap else []
+            if not owners and principal:
+                roles_ = (m.get("people", principal) or {}).get("rolesFilled") or []
+                owners = sorted(roles_ if isinstance(roles_, list) else [roles_])[:1]
+            for role in owners:
+                consult.append(_consult_entry(m, role, why))
+            if not owners:
+                refuse.append(
+                    f"No impact is mapped for {act_name.lower()} and nobody accountable can be consulted; "
+                    "map its impact or set unmapped impact to allow."
                 )
 
     consult = _merge(consult)

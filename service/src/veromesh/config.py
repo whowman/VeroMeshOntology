@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     # The decision check refuses when the facts behind the agent's authority are not
     # all attested and current (decision 3). Off only for demonstrations on unreviewed data.
     decision_requires_attested: bool = True
+    # Refuse an agent no current approved AI use case covers for the action (the board's
+    # decision gates the agent). Off by default: turn it on once the use cases are loaded.
+    decision_requires_use_case: bool = False
+    # An action with no mapped impact: "consult" the owners of its process (the white paper:
+    # unknown impact is a reason to consult) or "allow" (the behaviour before 24 November).
+    decision_unmapped_impact: str = "consult"
+    # Log reads with the caller, agent, principal and stated purpose on the decision log's
+    # hash chain: "agents" (callers signed in with the agent role), "all", or "off".
+    query_log: str = "agents"
     # The calendar the dates people reason about follow (validity dates, per-day
     # limits, measures periods): an IANA time zone such as America/New_York.
     # Timestamps are stored in UTC either way (clock.py).

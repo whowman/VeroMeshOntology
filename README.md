@@ -111,4 +111,4 @@ Service-only development (no Docker): see [service/README.md](service/README.md)
 
 ## Licensing
 
-Veromesh is proprietary (see `LICENSE`). DataHub and the other bundled components are open source under permissive licenses; obligations and the approved-license policy are in [docs/licensing.md](docs/licensing.md) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+The organizational model and everything in it belong to the customer: it is held in open W3C standards (RDF, OWL, SHACL) in the customer's own environment, and can be read out whole at any time (`/sparql`, the workbook export). The software that keeps it true (connectors, precedence, attestation, the decision check) is VeroMesh's, licensed and proprietary (see `LICENSE`). DataHub and the other bundled components are open source under permissive licenses; obligations and the approved-license policy are in [docs/licensing.md](docs/licensing.md) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

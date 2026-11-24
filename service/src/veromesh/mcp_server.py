@@ -69,10 +69,11 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         return ctx.request_context.request.state.veromesh
 
     @mcp.tool()
-    def who_am_i(ctx: Context) -> dict:
+    def who_am_i(ctx: Context, purpose: str | None = None) -> dict:
         """Who you are in the organization's model: the agent, the one person you act for (their roles,
-        not their personal details), and the authorities you hold with their limits and dates."""
-        return _call(lambda: handlers["who_am_i"](state(ctx)))
+        not their personal details), and the authorities you hold with their limits and dates.
+        purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
+        return _call(lambda: handlers["who_am_i"](state(ctx), purpose=purpose))
 
     @mcp.tool()
     def check_action(
@@ -98,10 +99,13 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         )
 
     @mcp.tool()
-    def decision_status(ctx: Context, decision_id: str) -> dict:
+    def decision_status(ctx: Context, decision_id: str, purpose: str | None = None) -> dict:
         """Where a decision stands (the id check_action returned): allowed, pending (waitingFor the
-        consulted roles), approved, rejected or refused; mayAct says whether you may act now."""
-        return _call(lambda: handlers["decision_status"](state(ctx), decision_id=decision_id))
+        consulted roles), approved, rejected or refused; mayAct says whether you may act now.
+        purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
+        return _call(
+            lambda: handlers["decision_status"](state(ctx), purpose=purpose, decision_id=decision_id)
+        )
 
     @mcp.tool()
     def report_outcome(ctx: Context, decision_id: str, outcome: str, note: str | None = None) -> dict:
@@ -114,21 +118,24 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         )
 
     @mcp.tool()
-    def impact_of_action(ctx: Context, action: str) -> dict:
+    def impact_of_action(ctx: Context, action: str, purpose: str | None = None) -> dict:
         """What an action affects: the KPIs and capabilities it can move, the materiality threshold for
-        each (below it, act and inform the owner; above it, consult first), and their owners."""
-        return _call(lambda: handlers["impact_of_action"](state(ctx), action=action))
+        each (below it, act and inform the owner; above it, consult first), and their owners.
+        purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
+        return _call(lambda: handlers["impact_of_action"](state(ctx), purpose=purpose, action=action))
 
     @mcp.tool()
-    def who_owns(ctx: Context, type: str, id: str) -> dict:
+    def who_owns(ctx: Context, type: str, id: str, purpose: str | None = None) -> dict:
         """The owner and steward roles of something in the model (a KPI, capability, process, system,
-        data product, policy...) and the people who fill them. type is the plural type name, e.g. kpis."""
-        return _call(lambda: handlers["who_owns"](state(ctx), type_=type, rid=id))
+        data product, policy...) and the people who fill them. type is the plural type name, e.g. kpis.
+        purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
+        return _call(lambda: handlers["who_owns"](state(ctx), purpose=purpose, type_=type, rid=id))
 
     @mcp.tool()
-    def get_entity(ctx: Context, type: str, id: str) -> dict:
+    def get_entity(ctx: Context, type: str, id: str, purpose: str | None = None) -> dict:
         """One entity of the model as VeroMesh believes it now (need to know: no personal details).
-        type is the plural type name: roles, people, authorities, actions, kpis, capabilities, ..."""
-        return _call(lambda: handlers["get_entity"](state(ctx), type_=type, rid=id))
+        type is the plural type name: roles, people, authorities, actions, kpis, capabilities, ...
+        purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
+        return _call(lambda: handlers["get_entity"](state(ctx), purpose=purpose, type_=type, rid=id))
 
     return mcp
