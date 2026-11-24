@@ -7,6 +7,10 @@
 #   ./setup.sh all        everything below, in order
 #   ./setup.sh tls <cert.pem> <key.pem>   an origin certificate for the host, if the assessment's does not cover it
 #   ./setup.sh show       what to send Scott and GitHub, and the sign-in details
+#   ./setup.sh off        turn the ontology tool off: its node pool to 0 (the assessment keeps running)
+#   ./setup.sh on         turn it back on (about 5-10 minutes until it answers)
+#   ./setup.sh status     on or off, its nodes and pods
+#   (the same three from GitHub: Actions > Ontology on/off, no approval needed)
 #
 # What it adds, in resource group VeroMeshAI (West US 2), reusing the assessment's
 # cluster, registry, PostgreSQL server and gateway:
@@ -40,6 +44,8 @@ GATEWAY_NS=assessment-gateway
 GATEWAY=assessment-gateway
 CERT_SECRET=${CERT_SECRET:-assessment-origin-cert}
 ID_GITHUB=id-github-ontology
+ID_POWER=id-github-ontology-power   # may only scale the veromesh node pool
+POWER_ENVIRONMENT=azure-dev-power
 API_APP="VeroMesh Ontology API (dev)"
 UI_APP="VeroMesh steward screen (dev)"
 ROLES=(admin steward connector reader agent)
@@ -273,6 +279,65 @@ step_github() {
   fi
 }
 
+step_power_identity() {
+  say "On/off identity ($ID_POWER): may scale the $POOL node pool and nothing else"
+  exists az identity show -g "$RESOURCE_GROUP" -n "$ID_POWER" || az identity create -g "$RESOURCE_GROUP" -n "$ID_POWER" -l "$LOCATION" -o none
+  local principal cluster_id
+  principal=$(az identity show -g "$RESOURCE_GROUP" -n "$ID_POWER" --query principalId -o tsv)
+  cluster_id=$(az aks show -g "$RESOURCE_GROUP" -n "$AKS" --query id -o tsv)
+  exists az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$ID_POWER" -n github-power ||
+    az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$ID_POWER" -n github-power \
+      --issuer https://token.actions.githubusercontent.com --subject "repo:$GITHUB_REPO:environment:$POWER_ENVIRONMENT" \
+      --audiences api://AzureADTokenExchange -o none
+  # Reading the cluster, and changing the one node pool: not the assessment's nodes.
+  assign "Azure Kubernetes Service Cluster User Role" "$cluster_id" "$principal" ServicePrincipal
+  assign "Azure Kubernetes Service Contributor Role" "$cluster_id/agentPools/$POOL" "$principal" ServicePrincipal
+  assign "Azure Kubernetes Service RBAC Reader" "$cluster_id/namespaces/$NAMESPACE" "$principal" ServicePrincipal
+  if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+    # No reviewer (turning it on or off is yours to do at any time), from main only.
+    gh api -X PUT "repos/$GITHUB_REPO/environments/$POWER_ENVIRONMENT" --input - >/dev/null <<JSON
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+    gh api -X POST "repos/$GITHUB_REPO/environments/$POWER_ENVIRONMENT/deployment-branch-policies" -f name=main >/dev/null 2>&1 || true
+    while IFS='=' read -r name value; do gh variable set "$name" --repo "$GITHUB_REPO" --env "$POWER_ENVIRONMENT" --body "$value"; done <<V
+AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
+AZURE_SUBSCRIPTION_ID=$SUBSCRIPTION
+AZURE_CLIENT_ID=$(az identity show -g "$RESOURCE_GROUP" -n "$ID_POWER" --query clientId -o tsv)
+AKS_RESOURCE_GROUP=$RESOURCE_GROUP
+AKS_NAME=$AKS
+NODE_POOL=$POOL
+NODE_COUNT=$POOL_COUNT
+NAMESPACE=$NAMESPACE
+V
+    echo "  Environment $POWER_ENVIRONMENT and its variables set: Actions > Ontology on/off."
+  fi
+}
+
+step_power() { # off | on | status
+  az account set --subscription "$SUBSCRIPTION"
+  local count
+  count=$(az aks nodepool show -g "$RESOURCE_GROUP" --cluster-name "$AKS" -n "$POOL" --query count -o tsv)
+  case $1 in
+    off)
+      say "Turning the ontology tool off (node pool $POOL to 0; the assessment keeps running)"
+      if [[ $count == 0 ]]; then echo "  already off"; return; fi
+      az aks nodepool scale -g "$RESOURCE_GROUP" --cluster-name "$AKS" -n "$POOL" --node-count 0 -o none
+      echo "  Off. While off it costs about \$8 a month (the disks that keep its data)." ;;
+    on)
+      say "Turning the ontology tool on ($POOL_COUNT nodes)"
+      if [[ $count == "$POOL_COUNT" ]]; then echo "  already on"; else
+        az aks nodepool scale -g "$RESOURCE_GROUP" --cluster-name "$AKS" -n "$POOL" --node-count "$POOL_COUNT" -o none
+      fi
+      kube
+      echo "  Nodes up; waiting for VeroMesh to answer..."
+      kubectl -n "$NAMESPACE" rollout status deploy/veromesh-api --timeout=15m &&
+        echo "  On: https://$HOST/steward/ (DataHub may take a few more minutes)." ;;
+    status)
+      say "Ontology tool: $([[ $count == 0 ]] && echo off || echo "on, $count nodes")"
+      if [[ $count != 0 ]]; then kube; kubectl -n "$NAMESPACE" get pods -o wide; fi ;;
+  esac
+}
+
 variables() {
   cat <<V
 AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
@@ -301,11 +366,12 @@ step_show() {
 case "${1:-}" in
   all)
     step_prereqs; step_quota; step_pool; step_vault; step_database; step_secrets; step_gateway
-    step_entra; step_github; step_show
+    step_entra; step_github; step_power_identity; step_show
     say "Done. Next: Scott's DNS record, then Actions > Deploy to Azure (dev) > Run workflow."
     ;;
   tls) [[ $# -eq 3 ]] || { echo "usage: $0 tls <cert.pem> <key.pem>" >&2; exit 2; }; az account set --subscription "$SUBSCRIPTION"; step_tls "$2" "$3" ;;
   gateway) az account set --subscription "$SUBSCRIPTION"; step_gateway ;;
   show) az account set --subscription "$SUBSCRIPTION"; step_show ;;
-  *) sed -n '2,18p' "$0"; exit 2 ;;
+  off | on | status) step_power "$1" ;;
+  *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 2 ;;
 esac

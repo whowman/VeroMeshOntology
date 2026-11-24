@@ -66,6 +66,14 @@ jobs:
           az aks get-credentials -g "${{ vars.AKS_RESOURCE_GROUP }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
           kubelogin convert-kubeconfig -l azurecli
 
+      - name: The ontology tool must be on
+        run: |
+          n=$(az aks show -g "${{ vars.AKS_RESOURCE_GROUP }}" -n "${{ vars.AKS_NAME }}" --query "agentPoolProfiles[?name=='veromesh'].count | [0]" -o tsv)
+          if [ "${n:-0}" = 0 ]; then
+            echo "::error::The ontology tool is off (its node pool has no nodes). Run Actions > Ontology on/off > on, then deploy again."
+            exit 1
+          fi
+
       - name: DataHub (prerequisites, then DataHub)
         if: inputs.datahub
         run: |

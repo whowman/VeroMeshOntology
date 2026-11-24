@@ -1,0 +1,69 @@
+# Turn the ontology tool's dev install on Azure off and on, leaving the assessment running
+# (deploy/azure/README.md, "Turning it off and on"). Off scales the veromesh node pool to
+# zero: its pods stop, their disks and data stay. On brings the nodes back and waits until
+# VeroMesh answers. Runs from main, with no approval; the identity may scale that one node
+# pool and nothing else. From a phone: the GitHub app > Actions > Ontology on/off > Run.
+name: Ontology on/off
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "on, off, or status"
+        type: choice
+        options: [status, on, off]
+        default: status
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-azure-dev   # never while a deploy is running
+  cancel-in-progress: false
+
+jobs:
+  power:
+    runs-on: ubuntu-latest
+    environment: azure-dev-power
+    timeout-minutes: 30
+    env:
+      RG: ${{ vars.AKS_RESOURCE_GROUP }}
+      AKS: ${{ vars.AKS_NAME }}
+      POOL: ${{ vars.NODE_POOL }}
+      COUNT: ${{ vars.NODE_COUNT }}
+      NAMESPACE: ${{ vars.NAMESPACE }}
+    steps:
+      - name: Sign in to Azure
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ${{ inputs.action }}
+        run: |
+          now=$(az aks nodepool show -g "$RG" --cluster-name "$AKS" -n "$POOL" --query count -o tsv)
+          case "${{ inputs.action }}" in
+            off)
+              [ "$now" = 0 ] || az aks nodepool scale -g "$RG" --cluster-name "$AKS" -n "$POOL" --node-count 0 -o none
+              echo "The ontology tool is off. The assessment is untouched; the ontology's data stays on its disks (about \$8 a month)." >> "$GITHUB_STEP_SUMMARY" ;;
+            on)
+              [ "$now" = "$COUNT" ] || az aks nodepool scale -g "$RG" --cluster-name "$AKS" -n "$POOL" --node-count "$COUNT" -o none
+              echo "NODES_UP=1" >> "$GITHUB_ENV" ;;
+            status)
+              if [ "$now" = 0 ]; then state=off; else state="on ($now nodes)"; fi
+              echo "The ontology tool is $state." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - uses: azure/use-kubelogin@0ce7c36141aa27d4934872cf00b0120804c98a29 # v1.3
+        if: env.NODES_UP == '1'
+        with:
+          kubelogin-version: v0.2.22
+      - name: Wait until VeroMesh answers
+        if: env.NODES_UP == '1'
+        run: |
+          az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+          kubectl -n "$NAMESPACE" rollout status deploy/veromesh-api --timeout=15m
+          echo "The ontology tool is on: https://dev-ontology.veromesh.ai/steward/ (DataHub may take a few more minutes)." >> "$GITHUB_STEP_SUMMARY"

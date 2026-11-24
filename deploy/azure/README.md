@@ -27,7 +27,7 @@ What it reuses from the assessment: the cluster, the container registry, the Pos
 | A Key Vault, a managed identity, two Entra apps | Secrets, the GitHub deploy, sign-in | under $1 |
 | **Total** | | **about $205** |
 
-Pay-as-you-go prices for West US 2, November 2026. Stopping the node pool (`az aks nodepool scale ... --node-count 0`) stops most of it.
+Pay-as-you-go prices for West US 2, November 2026. Turned off it costs about $8 a month: see [Turning it off and on](#turning-it-off-and-on).
 
 ## First install
 
@@ -39,11 +39,28 @@ Pay-as-you-go prices for West US 2, November 2026. Stopping the node pool (`az a
    ./deploy/azure/setup.sh all
    ```
 
-   It checks the B-series vCPU quota first (it needs 6 more), then adds the node pool, the Key Vault, the database and its user, the namespace's Secrets, a listener for the host on the assessment's gateway, the two Entra apps (and gives you VeroMesh.admin and VeroMesh.steward), and the GitHub deploy identity. With `gh` signed in it also creates the `azure-dev` environment with you as its required reviewer, and sets its variables. Registering the Entra apps needs the Entra role Application Developer.
+   It checks the B-series vCPU quota first (it needs 6 more), then adds the node pool, the Key Vault, the database and its user, the namespace's Secrets, a listener for the host on the assessment's gateway, the two Entra apps (and gives you VeroMesh.admin and VeroMesh.steward), the GitHub deploy identity, and the on/off identity. With `gh` signed in it also creates the `azure-dev` environment (with you as its required reviewer) and the `azure-dev-power` environment (no reviewer, `main` only), and sets their variables. Registering the Entra apps needs the Entra role Application Developer.
 2. **Cloudflare (Scott).** A proxied DNS record `dev-ontology.veromesh.ai` to the assessment's IP address (`./deploy/azure/setup.sh show` prints it). If the assessment's origin certificate does not cover the name (`setup.sh` says so), Scott issues one. Install it from Cloud Shell, then delete the files: `./deploy/azure/setup.sh tls ontology-origin.pem ontology-origin.key`.
 3. **First deploy.** Actions > Deploy to Azure (dev) > Run workflow (DataHub ticked), then approve it. It builds and pushes the images (about 40 minutes with DataHub), installs DataHub's prerequisites, DataHub and VeroMesh, applies the route, and runs `helm test`.
 4. **Check.** https://dev-ontology.veromesh.ai/steward/ signs you in with Entra ID. Load the example from https://dev-ontology.veromesh.ai/docs, or load a connector run.
 5. **Copilot Studio (issue #19).** Follow [docs/copilot-studio.md](../../docs/copilot-studio.md) with this address: the invoice assistant's app registration, its sign-in client ID in the model, the MCP tool, then the test as Dana and Lee.
+
+## Turning it off and on
+
+The ontology tool runs on its own node pool (`veromesh`), so it can be turned off without touching the assessment, which keeps its own two nodes, its database and its gateway.
+
+| | From GitHub (also the GitHub app on a phone) | From Cloud Shell |
+| --- | --- | --- |
+| Off | Actions > **Ontology on/off** > Run workflow > `off` | `./deploy/azure/setup.sh off` |
+| On | the same, `on` (it waits until VeroMesh answers, about 5 to 10 minutes) | `./deploy/azure/setup.sh on` |
+| Which is it? | the same, `status` | `./deploy/azure/setup.sh status` |
+
+- **Off** scales the pool to zero nodes. VeroMesh, Fuseki and DataHub stop. Their data stays on its disks, and so does the decision log on the PostgreSQL server. Turning it back on brings everything back as it was.
+- **Cost:** off, about $8 a month (the disks that keep its data). On, about $0.27 an hour; running it 40 hours a month comes to roughly $20 with the disks. Azure bills the nodes by the hour.
+- **No approval needed:** the on/off workflow runs from `main` with its own identity, `id-github-ontology-power`. That identity may scale this one node pool and nothing else: not the assessment's nodes, and not deploys.
+- **A deploy** needs the tool on: the deploy workflow stops with a message if it is off.
+- **Never stop the whole cluster** (`az aks stop`): that would take the assessment's live site down too.
+- Every part of the ontology tool, DataHub's one-off set-up jobs included, is pinned to the `veromesh` pool (`nodeSelector: workload: veromesh`). None of it runs on the assessment's nodes, and all of it stops when the pool is off.
 
 ## Notes
 
