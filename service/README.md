@@ -118,11 +118,12 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | --- | --- |
 | `GET /api/v1/me` | Who the caller is: VeroMesh roles; for a person, their own record; for an agent, its Agent entity, the one person it acts for (need to know: roles, not personal details) and the authorities it holds, or what is missing to link it |
 | `POST /api/v1/decisions/check` | Before a consequential action, an agent signed in as itself asks `{"action", "amount"?, "currency"?, "note"?}`: allow, consult (the owners to consult first; above its limit, the next authority up) or refuse, with reasons, whom to inform and, when no authority covers the amount, whom to escalate to. Logged |
-| `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `decision_status`, `report_outcome`, `impact_of_action`, `who_owns`, `get_entity` |
+| `/mcp` | The same, as an MCP server for agents (Streamable HTTP): `who_am_i`, `check_action`, `decision_status`, `report_outcome`, `impact_of_action`, `who_owns`, `get_entity`, `impact_of_data_change` |
 | `GET /api/v1/decisions[?agent=&principal=&action=&kind=&refersTo=&afterSeq=&limit=]` | Decision log entries in order (stewards): decisions, and the overrides and outcomes that refer to them |
 | `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
 | `POST /api/v1/decisions/{id}/overrides` | A person answers or overrules, as themselves: `{"verdict": "approved"\|"rejected", "role"?, "note"?}` |
 | `POST /api/v1/decisions/{id}/outcome` | The agent reports what it did: `{"outcome": "done"\|"not_done", "note"?}` |
+| `GET /api/v1/impact/data-products/{id}` (or `?urn=` with the catalog URN) | A data product is about to change: every data product downstream of it (following *feeds*), the KPIs computed from them, the objectives those measure, the capabilities and agents that consume them, and the owner roles to tell with the reasons. MCP tool `impact_of_data_change` |
 | `GET /api/v1/findings` | What needs attention (access without employment, employed without access, out of sync, ended references, domains with no deciding source, and what connectors report), each routed to an owner role and the people in it. Filters `kind`, `severity`, `ownerRole`, `source` |
 | `PUT /api/v1/findings/reported/{source}` | A connector's findings for its source (stewards and connectors); each run replaces the last |
 | `GET /api/v1/domains` | Which source category decides each question (source weighting): authoritative and evidence categories per domain, the fields it covers, whether this organization changed it |

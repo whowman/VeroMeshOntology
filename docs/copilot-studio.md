@@ -100,5 +100,5 @@ principal, or what is missing. The usual causes:
 
 ## Purpose and the query log
 
-Every read the agent makes is logged on the decision log's hash chain with the agent, the person it acts for and the purpose it states. The MCP read tools (`who_am_i`, `impact_of_action`, `who_owns`, `get_entity`, `decision_status`) take an optional `purpose`; tell the agent in its instructions to give one, for example "Give a short purpose with every VeroMesh lookup, such as the invoice you are working on." A lookup without a purpose is still answered.
+Every read the agent makes is logged on the decision log's hash chain with the agent, the person it acts for and the purpose it states. The MCP read tools (`who_am_i`, `impact_of_action`, `who_owns`, `get_entity`, `decision_status`, `impact_of_data_change`) take an optional `purpose`; tell the agent in its instructions to give one, for example "Give a short purpose with every VeroMesh lookup, such as the invoice you are working on." A lookup without a purpose is still answered.
 

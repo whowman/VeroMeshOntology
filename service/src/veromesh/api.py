@@ -589,6 +589,17 @@ def create_app(
         rebuilt = prov.rebuild(s.store, c.instance_base)
         return {"domain": name, **out, "rebuilt": rebuilt}
 
+    @app.get("/api/v1/impact/data-products/{rid}", dependencies=need(auth.READ), tags=["governance"])
+    def impact_data_product(s: Svc, c: Cfg, rid: str) -> dict:
+        """A data product is about to change: everything downstream of it (data products, KPIs,
+        objectives, capabilities, agents) and the owner roles to tell, with the reasons."""
+        return decide.data_change_impact(s.store, c.instance_base, rid)
+
+    @app.get("/api/v1/impact/data-products", dependencies=need(auth.READ), tags=["governance"])
+    def impact_data_product_by_urn(s: Svc, c: Cfg, urn: str) -> dict:
+        """The same, finding the data product by its catalog URN (as DataHub names it)."""
+        return decide.data_change_impact(s.store, c.instance_base, urn=urn)
+
     @app.get("/api/v1/findings", dependencies=need(auth.READ), tags=["governance"])
     def findings_list(
         s: Svc,
@@ -1243,6 +1254,12 @@ def create_app(
                 ),
             ),
             "get_entity": mcp_read("get_entity", mcp_entity),
+            "impact_of_data_change": mcp_read(
+                "impact_of_data_change",
+                lambda st, data_product: decide.data_change_impact(
+                    st["service"].store, st["settings"].instance_base, data_product
+                ),
+            ),
             "decision_status": mcp_read(
                 "decision_status",
                 lambda st, decision_id: decisions_status(

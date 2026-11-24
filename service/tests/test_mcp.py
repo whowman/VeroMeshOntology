@@ -78,6 +78,7 @@ def test_tools_and_instructions(mcp):
         "impact_of_action",
         "who_owns",
         "get_entity",
+        "impact_of_data_change",
     }
 
 

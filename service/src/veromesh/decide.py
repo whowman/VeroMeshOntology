@@ -719,6 +719,86 @@ def impact_of(store: RDFStore, base: str, action: str) -> dict:
     return {"action": action, "name": act.get("name") or action, "affects": out}
 
 
+def data_change_impact(
+    store: RDFStore, base: str, product: str | None = None, *, urn: str | None = None
+) -> dict:
+    """A data product is about to change (a column renamed, a definition changed, a pipeline
+    moved): everything downstream of it, and whom to tell (design checkpoint gap 3, the
+    Delivery Plan's Gate 3). Follows *feeds* to every downstream data product, then the KPIs
+    computed from them, the objectives those KPIs measure, the capabilities and agents that
+    consume them, and routes the change to each owner role with the reasons."""
+    m = Model(store, base)
+    if urn and not product:
+        hits = m.by("data-products", "catalogUrn", urn)
+        if not hits:
+            raise prov_not_found(f"No data product with catalog URN '{urn}'.")
+        product = hits[0]["id"]
+    start = m.get("data-products", product or "")
+    if start is None:
+        raise prov_not_found(f"No data product '{product}' in the model.")
+    affected, order, todo = {start["id"]}, [start["id"]], [start["id"]]
+    while todo:
+        for nxt in _ids((m.get("data-products", todo.pop(0)) or {}).get("feedsDataProducts")):
+            if nxt not in affected and m.get("data-products", nxt):
+                affected.add(nxt)
+                order.append(nxt)
+                todo.append(nxt)
+    route: list[dict] = []
+
+    def tell(role: str | None, why: str) -> None:
+        if role:
+            route.append(_consult_entry(m, role, why))
+
+    pname = m.name("data-products", start["id"])
+    for dp in order:
+        e = m.get("data-products", dp) or {}
+        what = "the data product that changes" if dp == start["id"] else f"downstream of {pname}"
+        tell(e.get("ownerRole"), f"owns {m.name('data-products', dp)}, {what}")
+        tell(e.get("stewardRole"), f"stewards {m.name('data-products', dp)}, {what}")
+        for sys in _ids(e.get("runsOnSystems")):
+            tell(
+                (m.get("systems", sys) or {}).get("technicalOwner"),
+                f"runs {m.name('systems', sys)}, where {m.name('data-products', dp)} lives",
+            )
+    kpis = sorted({k["id"] for dp in order for k in m.by("kpis", "computedFromDataProducts", dp)})
+    for k in kpis:
+        tell(
+            (m.get("kpis", k) or {}).get("ownerRole"),
+            f"owns {m.name('kpis', k)}, computed from data that changes",
+        )
+    objectives = sorted({o["id"] for k in kpis for o in m.by("objectives", "measuredByKpis", k)})
+    for o in objectives:
+        tell(
+            (m.get("objectives", o) or {}).get("ownerRole"),
+            f"owns {m.name('objectives', o)}, measured by a KPI that changes",
+        )
+    caps = sorted({c["id"] for dp in order for c in m.by("capabilities", "consumesDataProducts", dp)})
+    for c in caps:
+        tell(
+            (m.get("capabilities", c) or {}).get("ownerRole"),
+            f"owns {m.name('capabilities', c)}, which depends on data that changes",
+        )
+    agents = []
+    for a in sorted({a["id"] for dp in order for a in m.by("agents", "consumesDataProducts", dp)}):
+        ag = m.get("agents", a) or {}
+        agents.append({"id": a, "name": m.name("agents", a), "actsFor": ag.get("actsFor")})
+        for r in _ids((m.get("people", ag.get("actsFor") or "") or {}).get("rolesFilled"))[:1]:
+            tell(r, f"{m.name('agents', a)} acts for them and consumes data that changes")
+
+    def named(type_, ids):
+        return [{"id": i, "name": m.name(type_, i)} for i in ids]
+
+    return {
+        "dataProduct": {"id": start["id"], "name": pname},
+        "downstream": named("data-products", order[1:]),
+        "kpis": named("kpis", kpis),
+        "objectives": named("objectives", objectives),
+        "capabilities": named("capabilities", caps),
+        "agents": agents,
+        "notify": sorted(_merge(route), key=lambda e: e["role"]),
+    }
+
+
 def owners_of(store: RDFStore, base: str, type_: str, rid: str) -> dict:
     """The owner and steward roles of an entity, and the people who fill them."""
     m = Model(store, base)

@@ -203,6 +203,24 @@
       "200"
     ]
   },
+  "GET /api/v1/impact/data-products": {
+    "params": [
+      "urn (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/impact/data-products/{rid}": {
+    "params": [
+      "rid (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/licence": {
     "params": [],
     "status": [

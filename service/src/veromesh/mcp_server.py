@@ -138,4 +138,14 @@ def build(handlers: dict[str, Callable[..., Any]]) -> FastMCP:
         purpose: why you need it (e.g. "checking who approves invoice INV-1"); it is logged."""
         return _call(lambda: handlers["get_entity"](state(ctx), purpose=purpose, type_=type, rid=id))
 
+    @mcp.tool()
+    def impact_of_data_change(ctx: Context, data_product: str, purpose: str | None = None) -> dict:
+        """Before changing a data product (renaming a column, changing a definition): everything
+        downstream of it (data products, KPIs, objectives, capabilities, agents) and the owner roles
+        to tell, with the reasons. data_product: its ID.
+        purpose: why you need it (e.g. "renaming invoice_amount"); it is logged."""
+        return _call(
+            lambda: handlers["impact_of_data_change"](state(ctx), purpose=purpose, data_product=data_product)
+        )
+
     return mcp
