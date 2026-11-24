@@ -1,0 +1,28 @@
+# DataHub for the dev install, on top of deploy/helm/datahub/datahub-values.yaml: the
+# VeroMesh images from the registry (the workflow sets it), small resources, and no
+# DataHub tokens. GMS and the UI stay inside the cluster: reach the UI with
+# kubectl -n veromesh-dev port-forward svc/datahub-datahub-frontend 9002:9002.
+global:
+  datahub:
+    # Dev only: GMS is reachable only inside the cluster, so VeroMesh calls it without a token.
+    metadata_service_authentication:
+      enabled: false
+datahub-gms:
+  nodeSelector: {workload: veromesh}
+  resources:
+    requests: {cpu: 250m, memory: 1536Mi}
+    limits: {memory: 2Gi}
+datahub-frontend:
+  nodeSelector: {workload: veromesh}
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1Gi}
+acryl-datahub-actions:
+  nodeSelector: {workload: veromesh}
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 512Mi}
+datahub-mae-consumer:
+  nodeSelector: {workload: veromesh}
+datahub-mce-consumer:
+  nodeSelector: {workload: veromesh}
