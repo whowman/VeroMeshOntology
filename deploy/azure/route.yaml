@@ -1,0 +1,18 @@
+# The dev install's one public route, through the assessment's gateway (setup.sh adds the
+# listener for the host): Cloudflare -> gateway -> the VeroMesh service (API, /mcp, /steward).
+# ${HOST} and ${NAMESPACE} are filled in by the deploy workflow.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: veromesh
+  namespace: ${NAMESPACE}
+spec:
+  parentRefs:
+    - name: assessment-gateway
+      namespace: assessment-gateway
+      sectionName: https-ontology-dev
+  hostnames: ["${HOST}"]
+  rules:
+    - backendRefs:
+        - name: veromesh-api
+          port: 8700

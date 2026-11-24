@@ -1,0 +1,120 @@
+# Deploy VeroMesh to Azure (dev), beside the assessment on its AKS cluster (issue #19).
+# Started by hand; each run waits for approval on the azure-dev environment (deploy/azure/README.md).
+# Signs in to Azure with OIDC as id-github-ontology, which may push to the registry and act
+# only in the veromesh-dev namespace.
+name: Deploy to Azure (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      datahub:
+        description: "Install or upgrade DataHub too (its images take about 30 minutes to build)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-azure-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: azure-dev
+    timeout-minutes: 120
+    env:
+      NAMESPACE: ${{ vars.NAMESPACE }}
+      HOST: ${{ vars.HOST }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Sign in to Azure
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Java for the DataHub images
+        if: inputs.datahub
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Build and push the images (tagged with this commit)
+        run: |
+          tag=${GITHUB_SHA::12}
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          registry="${{ vars.ACR_NAME }}.azurecr.io"
+          echo "REGISTRY=$registry" >> "$GITHUB_ENV"
+          az acr login --name "${{ vars.ACR_NAME }}"
+          if [ "${{ inputs.datahub }}" != true ]; then export SKIP_DATAHUB=1; fi
+          TAG=$tag REGISTRY=$registry deploy/helm/build-images.sh --push
+
+      - uses: azure/use-kubelogin@0ce7c36141aa27d4934872cf00b0120804c98a29 # v1.3
+        with:
+          kubelogin-version: v0.2.22
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Cluster credentials
+        run: |
+          az aks get-credentials -g "${{ vars.AKS_RESOURCE_GROUP }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+
+      - name: DataHub (prerequisites, then DataHub)
+        if: inputs.datahub
+        run: |
+          source deploy/versions.env
+          helm repo add datahub https://helm.datahubproject.io && helm repo update datahub
+          helm upgrade --install prerequisites datahub/datahub-prerequisites -n "$NAMESPACE" \
+            --version "$DATAHUB_PREREQUISITES_CHART_VERSION" \
+            -f deploy/helm/datahub/prerequisites-values.yaml -f deploy/azure/values-prerequisites.yaml \
+            --wait --timeout 20m
+          # The DataHub images keep their own versions (build-images.sh): the plugin the
+          # service's, the UI DataHub's. Point the overlay at the registry (helm --set
+          # would replace the whole init container list).
+          service_version=$(sed -n 's/^version = "\(.*\)"/\1/p' service/pyproject.toml)
+          sed -e "s|image: veromesh/datahub-model-plugin:.*|image: $REGISTRY/veromesh/datahub-model-plugin:$service_version|" \
+              -e "s|repository: veromesh/datahub-frontend-react|repository: $REGISTRY/veromesh/datahub-frontend-react|" \
+              deploy/helm/datahub/datahub-values.yaml > "$RUNNER_TEMP/datahub-values.yaml"
+          helm upgrade --install datahub datahub/datahub -n "$NAMESPACE" --version "$DATAHUB_CHART_VERSION" \
+            -f "$RUNNER_TEMP/datahub-values.yaml" -f deploy/azure/values-datahub.yaml \
+            --set "datahub-frontend.image.tag=$DATAHUB_VERSION" \
+            --wait --timeout 30m
+
+      - name: VeroMesh
+        run: |
+          tenant="${{ vars.AZURE_TENANT_ID }}" api="${{ vars.API_CLIENT_ID }}"
+          helm upgrade --install veromesh deploy/helm/veromesh -n "$NAMESPACE" \
+            -f deploy/azure/values-veromesh.yaml \
+            --set "api.image.repository=$REGISTRY/veromesh/service" --set "api.image.tag=$TAG" \
+            --set "fuseki.image.repository=$REGISTRY/veromesh/fuseki" --set "fuseki.image.tag=$TAG" \
+            --set "backup.image.repository=$REGISTRY/veromesh/backup" --set "backup.image.tag=$TAG" \
+            --set "api.auth.issuer=https://login.microsoftonline.com/$tenant/v2.0" \
+            --set "api.auth.audience=$api,api://$api" \
+            --set "api.auth.uiClientId=${{ vars.UI_CLIENT_ID }}" \
+            --set "api.auth.uiScope=openid profile email api://$api/access_as_user" \
+            --set "backup.encryption.recipients={${{ vars.BACKUP_RECIPIENT }}}" \
+            --wait --timeout 15m
+          export NAMESPACE HOST
+          envsubst '${NAMESPACE} ${HOST}' < deploy/azure/route.yaml | kubectl apply -f -
+
+      - name: Install check (helm test)
+        run: helm test veromesh -n "$NAMESPACE" --logs --timeout 5m
+
+      - name: What went wrong
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get pods,jobs,pvc -o wide || true
+          for p in $(kubectl -n "$NAMESPACE" get pods -o name 2>/dev/null); do
+            echo "---- $p"; kubectl -n "$NAMESPACE" logs "$p" --all-containers --tail=40 || true
+          done
+
+      - name: Summary
+        run: |
+          echo "Deployed VeroMesh $TAG to https://$HOST (dev): /steward/, /docs and /mcp." >> "$GITHUB_STEP_SUMMARY"

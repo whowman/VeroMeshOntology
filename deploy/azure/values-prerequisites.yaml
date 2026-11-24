@@ -1,0 +1,24 @@
+# DataHub's prerequisites for the dev install, on top of deploy/helm/datahub/prerequisites-values.yaml:
+# small single nodes on the veromesh node pool.
+postgresql:
+  primary:
+    nodeSelector: {workload: veromesh}
+    persistence: {size: 8Gi}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+opensearch:
+  nodeSelector: {workload: veromesh}
+  opensearchJavaOpts: "-Xms512m -Xmx512m"
+  persistence: {size: 10Gi}
+  resources:
+    requests: {cpu: 100m, memory: 1Gi}
+    limits: {memory: 1536Mi}
+kafka:
+  controller:
+    nodeSelector: {workload: veromesh}
+    persistence: {size: 8Gi}
+    heapOpts: "-Xmx512m -Xms512m"
+    resources:
+      requests: {cpu: 100m, memory: 768Mi}
+      limits: {memory: 1Gi}

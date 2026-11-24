@@ -1,0 +1,37 @@
+# The VeroMesh chart on the assessment's AKS cluster: the dev install (issue #19).
+# The deploy workflow adds the registry, image tags, the Entra app IDs, the host and the
+# backup key's public half (--set), from the azure-dev environment's variables.
+api:
+  datahub:
+    gmsUrl: http://datahub-datahub-gms:8080   # DataHub in the same namespace (values-datahub.yaml)
+  instanceBase: "urn:veromesh:org:veromesh-dev:"
+  auth:
+    rolesClaim: roles
+    rolePrefix: VeroMesh.
+  decisionLog:
+    existingSecret: veromesh-decision-log   # setup.sh: the database on the assessment's PostgreSQL server
+  timeZone: America/Chicago
+  usage:
+    customerName: VeroMesh (dev)
+    hosting: hosted
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1536Mi}
+  nodeSelector: {workload: veromesh}
+fuseki:
+  javaOpts: "-Xmx1g"
+  persistence:
+    size: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 1536Mi}
+    limits: {memory: 2Gi}
+  nodeSelector: {workload: veromesh}
+  # One Fuseki for dev: replicas would double its memory for no test that needs them.
+  replication:
+    enabled: false
+backup:
+  # Encrypted to the key setup.sh keeps in the Key Vault; to a volume in the cluster for dev.
+  volume:
+    existingClaim: veromesh-backups
+  workSize: 1Gi
+  nodeSelector: {workload: veromesh}
