@@ -304,15 +304,30 @@ def _categories(store: RDFStore) -> dict[str, str]:
     )
     out = {b["name"]["value"]: b["cat"]["value"] for b in res["results"]["bindings"]}
     out[STEWARD_SOURCE] = "steward"
+    fid = store.query(
+        f"""SELECT ?name ?fid WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
+              ?s <{VMP.name}> ?name ; <{VMP.declaredFidelity}> ?fid }} }}"""
+    )
+    _DECLARED.clear()
+    _DECLARED.update(
+        {b["name"]["value"]: _FID_ORDER.get(b["fid"]["value"], 1) for b in fid["results"]["bindings"]}
+    )
     return out
+
+
+#: Declared fidelity per source (0 high, 1 medium, 2 low): among sources of one category,
+#: it breaks a tie before recency does (fidelity.py). Read with the categories.
+_FID_ORDER = {"high": 0, "medium": 1, "low": 2}
+_DECLARED: dict[str, int] = {}
 
 
 def registry(store: RDFStore) -> dict[str, dict]:
     res = store.query(
-        f"""SELECT ?name ?cat ?owner ?desc ?derived ?access WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
+        f"""SELECT ?name ?cat ?owner ?desc ?derived ?access ?fid WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
               ?s <{VMP.name}> ?name ; <{VMP.category}> ?cat .
               OPTIONAL {{ ?s <{VMP.ownerRole}> ?owner }} OPTIONAL {{ ?s <{VMP.description}> ?desc }}
-              OPTIONAL {{ ?s <{VMP.derivedFrom}> ?derived }} OPTIONAL {{ ?s <{VMP.grantsAccess}> ?access }} }} }}"""
+              OPTIONAL {{ ?s <{VMP.derivedFrom}> ?derived }} OPTIONAL {{ ?s <{VMP.grantsAccess}> ?access }}
+              OPTIONAL {{ ?s <{VMP.declaredFidelity}> ?fid }} }} }}"""
     )
     return {
         b["name"]["value"]: {
@@ -321,6 +336,7 @@ def registry(store: RDFStore) -> dict[str, dict]:
             "description": b.get("desc", {}).get("value"),
             "derivedFrom": json.loads(b["derived"]["value"]) if b.get("derived") else {},
             "grantsAccess": (b["access"]["value"] == "true") if b.get("access") else None,
+            "fidelity": b.get("fid", {}).get("value"),
         }
         for b in res["results"]["bindings"]
     }
@@ -334,6 +350,7 @@ def register_source(
     description: str | None = None,
     derived_from: dict[str, str] | None = None,
     grants_access: bool | None = None,
+    fidelity: str | None = None,
 ) -> dict:
     """Register a source. ``derived_from`` maps a domain to the source this one takes it
     from (an AP workflow whose limits are copied from Workday levels): where the two
@@ -361,6 +378,10 @@ def register_source(
         if name in derived_from.values():
             raise ValueError("derivedFrom: a source cannot be derived from itself.")
         extra += f" ; <{VMP.derivedFrom}> {literal(json.dumps(derived_from, sort_keys=True))}"
+    if fidelity is not None:
+        if fidelity not in ("high", "medium", "low"):
+            raise ValueError("fidelity (the declared rating) is high, medium or low.")
+        extra += f" ; <{VMP.declaredFidelity}> {literal(fidelity)}"
     if grants_access is not None:
         extra += f' ; <{VMP.grantsAccess}> "{str(bool(grants_access)).lower()}"^^<http://www.w3.org/2001/XMLSchema#boolean>'
     store.update(
@@ -369,6 +390,9 @@ def register_source(
               <{s}> a <{VMP.Source}>, <{PROV.SoftwareAgent}> ; <{VMP.name}> {literal(name)} ;
                 <{VMP.category}> {literal(category)}{extra} . }} }}"""
     )
+    from . import fidelity as _fidelity
+
+    _fidelity.forget(store)  # a new declared rating or category: work the bands out again
     return {
         "source": name,
         "category": category,
@@ -376,6 +400,7 @@ def register_source(
         "description": description,
         "derivedFrom": derived_from or {},
         "grantsAccess": grants_access,
+        "fidelity": fidelity,
     }
 
 
@@ -656,6 +681,14 @@ def write_attestation(
     given), then in the attestations graph the model reads."""
     at = at or now_ts()
     days = min(cadence_days(type_, k) for k in values) if values else DEFAULT_CADENCE_DAYS
+    if verdict == "attested" and source not in (STEWARD_SOURCE, ENDED_SOURCE):
+        from . import domains, fidelity
+
+        fd = domains.field_domains(domains.current(store))
+        dom = next((fd[(type_, k)] for k in values if (type_, k) in fd), None)
+        # A medium or low fidelity source is reviewed sooner (half, a quarter of the cycle).
+        b = fidelity.band(store, source, dom, stale_ok=True)
+        days = max(1, round(days * fidelity.REVIEW_FACTOR[b]))
     expires = (
         (_dt(at) + timedelta(days=days)).replace(microsecond=0).isoformat() if verdict == "attested" else None
     )
@@ -974,7 +1007,14 @@ def resolve(
             if len(cands) == len(cs):
                 cands = cs  # every claim states it (the usual case): share the list, one fewer object to keep
             live = [c for c in cands if not disputed(ea, c, f)] or list(cands)
-            live.sort(key=lambda c: (rank(type_, f, c.category), -_dt(c.observed_at).timestamp(), c.source))
+            live.sort(
+                key=lambda c: (
+                    rank(type_, f, c.category),
+                    _DECLARED.get(c.source, 1),
+                    -_dt(c.observed_at).timestamp(),
+                    c.source,
+                )
+            )
             win = live[0]
             r.winners[f] = win
             r.candidates[f] = cands

@@ -739,6 +739,44 @@ def _check(
                 {"step": e.get("step"), "role": e["role"], "people": e["people"]} for e in more
             ]
 
+    # Fidelity (step 7a): how well the sources the decision relies on are kept. A low band
+    # for the domain they decide makes the check consult the source's owner rather than allow.
+    if not refuse:
+        from . import fidelity
+
+        cats = prov.categories(store)
+        doms = domains.activate(store)
+        relied: list[tuple[str, str]] = []
+        if principal and basis.get("principalStatus") in ("employed", "no-access"):
+            auth_cats = set(doms["employment"].get("authoritative") or [])
+            relied += [
+                ("employment", src)
+                for src in sorted(m.sources_holding("people", principal))
+                if cats.get(src) in auth_cats
+            ]
+        if used:
+            r = prov._current(store)[0].get(("authorities", used))
+            win = next(
+                (r.winners[f] for f in ("limitValue", "limitAmount", "holder") if r and f in r.winners), None
+            )
+            if win is not None and win.source not in (prov.STEWARD_SOURCE, prov.ENDED_SOURCE):
+                relied.append(("authority-in-force", win.source))
+        reg = prov.registry(store)
+        seen_low = set()
+        for dom, src in relied:
+            b = fidelity.band(store, src, dom, stale_ok=True)  # a 90-day measure: the last worked out will do
+            basis.setdefault("fidelity", []).append({"domain": dom, "source": src, "band": b})
+            if b != "low" or src in seen_low:
+                continue
+            seen_low.add(src)
+            why = "; ".join(fidelity.reasons(store, src, dom)) or "low fidelity"
+            owner = (reg.get(src) or {}).get("ownerRole")
+            reasons.append(f"Relies on {src} for {dom}, whose fidelity is low ({why}).")
+            if owner:
+                consult.append(_consult_entry(m, owner, f"{src} has low fidelity for {dom}: {why}"))
+            else:
+                refuse.append(f"{src} has low fidelity for {dom} and no owner role to consult.")
+
     # 6. Impact
     if not refuse:
         impacts = m.by("impacts", "action", action)

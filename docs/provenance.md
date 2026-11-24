@@ -128,6 +128,23 @@ For each entity and field, VeroMesh picks one source's values:
 
 `GET /api/v1/proposals` lists what waits: the value proposed, the value in force, the proposing source, and who is asked to attest it. Those are the proposed manager and the manager in force for a reporting line, the person's manager for roles, the holder of the parent authority (a role's fillers, an agent's principal) for an authority, and the proposed principal for an agent. The proposing source's owner role is also asked. `POST /api/v1/proposals/{type}/{id}/{field}` with `attested` or `disputed` settles it; the attestation goes on the decision log's hash chain like any other. Each waiting change is also an `accountability-change-proposed` finding, routed to those people. `VEROMESH_PROPOSALS=off` turns the step off.
 
+**Fidelity** (step 7a; step 3 of the source-weighting design, `src/veromesh/fidelity.py`). Fidelity is how well this organization keeps a source. It is measured per registered source, per domain the source decides, over the last 90 days, and gives a band: high, medium or low. The signals are:
+
+- **Corrections:** the share of its facts that owners disputed or stewards corrected.
+- **Lateness:** how many days after a change took effect the source reported it. Examples are an end date that had passed when the source reported it, and a new effective date that had passed when the source last reported.
+- **Gaps:** fields decisions need that are missing, such as a person's employee ID or manager, a system's owner, or an authority's holder.
+- **Contradicted:** evidence sources disagree with it. This lowers a source to medium at most; a correction or dispute is what shows the evidence was right.
+- **Loads:** refused loads, and days since the last good one.
+
+Until a source has 20 facts in the domain and a committed load, it uses the **declared** rating given when it was registered (`fidelity`: high, medium or low, which can come from the maturity assessment). With none declared, it counts as high. `GET /api/v1/fidelity` gives the bands, the signals and, signal by signal, the reasons; `GET /api/v1/sources` shows each band; the steward screen's **Sources** tab shows both.
+
+Fidelity never makes an unsuited source authoritative. It changes how far VeroMesh relies on the authoritative one:
+
+- **Low:** the decision check consults the source's owner role rather than allowing, with the reasons, whenever it relies on the source: HR for the principal's employment, or the source of the authority in force. With no owner role it refuses. Every decision records the bands it relied on in `basis.fidelity`.
+- **Medium and low:** attestations of the source's facts expire sooner, at half and a quarter of the cycle.
+- **Lateness margin:** when an identity system removes an employed person's access and their HR source usually reports changes late, an `access-removed-hr-may-be-late` finding goes to HR's owner. The person's agents already consult the next authority up.
+- **Ties:** between two sources of one category, the declared rating breaks a tie before recency does.
+
 **Versioned publish.** Every change to the effective model (a commit, a single-entity write, a steward correction, a settled proposal) is a publish. It is recorded on the decision log as a `publish` entry with the model version it made, the source and the changeset, and the write's response carries `modelVersion`. Every decision quotes the version it was made on (`basis.modelVersion`). `GET /api/v1/model/versions` lists the publishes. An auditor goes from any decision to the publish behind it, and reads the model as it was then with `asOf`.
 
 The result is materialized in an **effective graph** (`https://veromesh.ai/graph/effective`), recomputed for the touched entities on every commit and attestation. Validation, impact queries, the agent gateway and DataHub publishing read the effective graph instead of the union, so a disagreement between sources is no longer a model violation. Instead it is a **conflict**: two sources assert different non-empty values for the same field. Conflicts are listed by the API and, from Phase 2, routed to the entity's owner.

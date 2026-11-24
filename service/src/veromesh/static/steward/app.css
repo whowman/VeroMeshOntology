@@ -85,3 +85,6 @@ td.nowrap { white-space: nowrap; }
 .banner.bad { border-color: var(--danger); color: var(--danger); background: rgba(232, 96, 74, .08); }
 .nav-link { color: var(--teal); text-decoration: none; font-size: 14px; margin-right: 16px; }
 .nav-link:hover { text-decoration: underline; }
+.kind.band-high { background: rgba(78, 203, 160, .14); color: var(--teal); }
+.kind.band-medium { background: rgba(232, 168, 74, .14); color: var(--warn); }
+.kind.band-low { background: rgba(232, 96, 74, .16); color: var(--danger); }

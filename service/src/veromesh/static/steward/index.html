@@ -27,6 +27,7 @@
   <button role="tab" data-tab="facts" data-steward>Facts to confirm <span id="facts-count" class="count"></span></button>
   <button role="tab" data-tab="log" data-steward>Decisions</button>
   <button role="tab" data-tab="measures" data-steward>Measures</button>
+  <button role="tab" data-tab="sources" data-steward>Sources</button>
   <button role="tab" data-tab="coverage" data-steward>Data elements <span id="suggest-count" class="count"></span></button>
 </nav>
 
@@ -57,6 +58,10 @@
   <section id="tab-measures" class="tab" hidden>
     <p class="lead">From the decision log. Working definitions: see <code>followup.py</code>.</p>
     <div id="measures" class="tiles"></div>
+  </section>
+  <section id="tab-sources" class="tab" hidden>
+    <p class="lead">How well each source is kept, for each question it decides: high, medium or low, measured over the last 90 days (corrections, lateness, gaps, contradictions, loads), or the rating declared until there is history. Low makes agents consult the source's owner.</p>
+    <div id="sources"></div>
   </section>
   <section id="tab-coverage" class="tab" hidden>
     <p class="lead">The data element inventory: is each element defined, owned, sourced, classified, bound to catalog columns and attested? Columns the catalog marks for an element wait below for you to bind or reject.</p>

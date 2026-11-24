@@ -36,6 +36,9 @@ Worked out from the model:
   roles someone fills, an authority or an agent's principal, and the change waits for
   attestation (the proposal step, proposals.py). To the proposing source's owner and to
   the people asked to attest it (``about.attestBy``).
+- ``access-removed-hr-may-be-late`` (high): an identity system removed an employed
+  person's access, and the HR source that lists them usually reports changes late (its
+  fidelity's lateness): confirm whether they have left. To the HR source's owner.
 - ``objective-conflict-unsettled`` (medium): two objectives conflict, neither has priority,
   and they share no parent objective whose owner could settle it. To both owners.
 """
@@ -48,7 +51,7 @@ import re
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
-from . import changesets, domains
+from . import changesets, domains, fidelity
 from . import entities as E
 from . import provenance as P
 from .decide import employment_status
@@ -213,6 +216,24 @@ def _compute(store: RDFStore) -> list[dict]:
                 source=iam_sources[0],
                 owner_role=owner(iam_sources[0]),
             )
+            # The lateness margin (fidelity): where HR usually reports leavers late, access
+            # removed first is an urgent question for HR, not just information.
+            for hr_src in sorted(
+                holding & {s for s, c in cats.items() if c in (emp.get("authoritative") or [])}
+            ):
+                late = fidelity.lateness_days(store, hr_src)
+                if late >= 1:
+                    add(
+                        "access-removed-hr-may-be-late",
+                        "high",
+                        {"type": "people", "id": rid},
+                        f"{', '.join(iam_sources)} removed {who}'s access, and {hr_src} usually reports "
+                        f"changes {late:g} days late: confirm whether {who} has left. Their agents consult "
+                        "the next authority up until HR answers.",
+                        source=hr_src,
+                        owner_role=owner(hr_src),
+                        about={"lateDays": late},
+                    )
 
     for (t, rid), r in sorted(resolved.items()):
         for f, cands in sorted(r.conflicts.items()):
