@@ -8,7 +8,8 @@ rest (``reported``), for example purchase orders their buyer approved.
 Worked out from the model:
 
 - ``access-without-employment`` (high): no HR source lists the person, yet a system
-  that grants access (an ``iam`` or ``erp`` source) still does. A leaver whose account
+  that grants access still does: an ``iam`` or ``erp`` source, or any source registered
+  with ``grantsAccess`` (an ITSM's active users or agent seats). A leaver whose account
   or ERP role outlived their employment, or someone who never had an HR record. One
   finding per system, to that system's owner. Contractors (no employee ID, held by the
   employment domain's ``contractors`` category) are not findings.
@@ -187,7 +188,8 @@ def _compute(store: RDFStore) -> list[dict]:
         who = r.values.get("name") or rid
         if status == "ended":
             for src in sorted(holding):
-                if cats.get(src) in ACCESS_CATEGORIES:
+                ga = (reg.get(src) or {}).get("grantsAccess")
+                if ga or (ga is None and cats.get(src) in ACCESS_CATEGORIES):
                     add(
                         "access-without-employment",
                         "high",

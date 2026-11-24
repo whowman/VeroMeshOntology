@@ -104,6 +104,9 @@ class SourceIn(BaseModel):
     description: str | None = None
     # Domain -> the source this one takes it from (e.g. AP limits copied from Workday levels).
     derivedFrom: dict[str, str] | None = None
+    # People this source holds can sign in to or act in its system (an ITSM's active users or
+    # agent seats). Default: identity and ERP sources do, others do not.
+    grantsAccess: bool | None = None
 
 
 class AttestationIn(BaseModel):
@@ -533,7 +536,13 @@ def create_app(
         """Register a source's category (hr, iam, cmdb, erp, catalog, governance, spreadsheet), owner role and description."""
         try:
             out = prov.register_source(
-                s.store, name, body.category, body.ownerRole, body.description, body.derivedFrom
+                s.store,
+                name,
+                body.category,
+                body.ownerRole,
+                body.description,
+                body.derivedFrom,
+                body.grantsAccess,
             )
         except ValueError as e:
             raise HTTPException(422, str(e)) from e

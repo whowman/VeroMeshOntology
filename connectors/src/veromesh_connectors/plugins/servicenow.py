@@ -9,7 +9,15 @@ What it reads (``/api/now/table/{table}``, basic authentication or an OAuth toke
 * ``sys_user``: the people, with ``employee_number`` (synced from HR), ``user_name``, name and
   email; every active user, and every user named as an application's owner even if inactive.
 
-What it writes, as source ``servicenow`` (category ``cmdb``):
+What it writes, in two sources (``import`` loads both):
+
+* ``servicenow`` (category ``cmdb``): the applications, their owner roles, and the people they
+  name as owners (active or not);
+* ``servicenow-users`` (category ``cmdb``, registered with ``grantsAccess``): every active user,
+  because an active ServiceNow user can still sign in and act there. A leaver HR no longer lists
+  shows as access without employment until the weekly sync deactivates them.
+
+In detail:
 
 * **systems**: ID = the application's number (e.g. APM0001000), the CMDB ID (its sys_id),
   name, criticality (1 critical, 2 high, 3 medium, 4 low), lifecycle (installed: active;
@@ -100,8 +108,13 @@ class ServiceNowCmdbConnector(BatchConnector):
     name = "servicenow"
     kind = "connector"
 
-    def __init__(self, client: ServiceNowClient, *, people: list[dict] | None = None) -> None:
+    def __init__(
+        self, client: ServiceNowClient, *, people: list[dict] | None = None, part: str = "cmdb"
+    ) -> None:
         super().__init__()
+        if part not in ("cmdb", "users"):
+            raise ValueError("part is cmdb or users")
+        self.part = part
         self.client = client
         people = people or []
         self.by_employee = {str(p["employeeId"]): p for p in people if p.get("employeeId")}
@@ -113,7 +126,7 @@ class ServiceNowCmdbConnector(BatchConnector):
         return f"ServiceNow CMDB: {len(self.apps)} business applications"
 
     def fingerprint(self) -> str | None:
-        return "servicenow-cmdb"
+        return f"servicenow-{self.part}"
 
     def _pid(self, u: dict) -> str:
         num, local = str(u.get("employee_number") or "").strip(), local_id(str(u.get("user_name") or ""))
@@ -121,6 +134,18 @@ class ServiceNowCmdbConnector(BatchConnector):
         return known["id"] if known else (num or local)
 
     def read(self, schema: list[dict]) -> Iterable[Record]:
+        if self.part == "users":
+            seen: dict[str, str] = {}
+            for u in self.client.rows("sys_user", "active=true"):
+                pid = self._pid(u)
+                if pid and pid not in seen:
+                    seen[pid] = u.get("user_name") or u["sys_id"]
+                    yield Record(
+                        ref=f"ServiceNow user {u.get('user_name')}",
+                        data={"user": u, "roles": []},
+                        type="people",
+                    )
+            return
         self.apps = list(self.client.rows("cmdb_ci_business_app"))
         owners: dict[str, list[str]] = {}  # sys_user sys_id -> owner role IDs
         for a in self.apps:
@@ -129,9 +154,10 @@ class ServiceNowCmdbConnector(BatchConnector):
                 if uid := _ref(a.get(field)):
                     owners.setdefault(uid, []).append(f"{_slug(num)}.{kind}")
             yield Record(ref=f"ServiceNow business application {num}", data=a, type="systems")
-        users = {u["sys_id"]: u for u in self.client.rows("sys_user", "active=true")}
-        missing = [uid for uid in owners if uid not in users]
-        for uid in missing:  # an owner who is no longer active: the CMDB still names them
+        users: dict[str, dict] = {}
+        for uid in owners:  # the people the CMDB names as owners, active or not
+            if uid in users:
+                continue
             try:
                 users[uid] = self.client.api.get(
                     f"{TABLE}/sys_user/{uid}", {"sysparm_exclude_reference_link": "true"}

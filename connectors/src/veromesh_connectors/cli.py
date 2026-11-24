@@ -12,6 +12,7 @@
     veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
     veromesh-connect erp exceptions --since 2026-11-01
     veromesh-connect servicenow import --url https://acme.service-now.com
+    veromesh-connect halo import --url https://acme.haloitsm.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
     veromesh-connect cleanup [--older-than-hours 24]
@@ -32,6 +33,8 @@ Source systems:
                                             https://login.microsoftonline.com
     ORACLE_URL, ORACLE_USER, ORACLE_PASSWORD
                                             Oracle Fusion Cloud (basic authentication)
+    HALO_URL, HALO_CLIENT_ID, HALO_CLIENT_SECRET (HALO_TENANT for hosted instances)
+                                            HaloITSM (OAuth client credentials)
     SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD (or SERVICENOW_TOKEN)
                                             ServiceNow (basic authentication or an OAuth token)
 """
@@ -216,14 +219,58 @@ def servicenow_client(args, http: httpx.Client | None = None) -> ServiceNowClien
     return ServiceNowClient(SourceApi("ServiceNow", t, auth))
 
 
+def halo_import(api: ApiSession, args) -> int:
+    from .plugins import HaloClient, HaloConnector
+
+    url = _need(args.url, "--url", "HALO_URL").rstrip("/")
+    http = getattr(args, "source_http", None)
+    t = _source_transport(url, "HaloITSM", http)
+    tenant = os.environ.get("HALO_TENANT")
+    auth = ClientCredentials(
+        t,
+        f"{url}/auth/token" + (f"?tenant={tenant}" if tenant else ""),
+        os.environ.get("HALO_CLIENT_ID", ""),
+        os.environ.get("HALO_CLIENT_SECRET", ""),
+        "all",
+    )
+    client = HaloClient(SourceApi("HaloITSM", t, auth))
+    people, systems = api.entities("people"), api.entities("systems")
+    source = args.source or "halo"
+    ok = (
+        Runner(api, _out)
+        .run(
+            HaloConnector(client, people=people, systems=systems),
+            RunOptions(source=source, mode=args.mode, dry_run=args.dry_run),
+        )
+        .ok
+    )
+    agents_source = args.agents_source or f"{source}-agents"
+    ok = (
+        Runner(api, _out)
+        .run(
+            HaloConnector(client, people=people, part="agents"),
+            RunOptions(source=agents_source, mode=args.mode, dry_run=args.dry_run),
+        )
+        .ok
+        and ok
+    )
+    return 0 if ok else 1
+
+
 def servicenow_import(api: ApiSession, args) -> int:
     from .plugins.servicenow import duplicates
 
-    conn = ServiceNowCmdbConnector(
-        servicenow_client(args, getattr(args, "source_http", None)), people=api.entities("people")
-    )
+    client = servicenow_client(args, getattr(args, "source_http", None))
+    known = api.entities("people")
+    conn = ServiceNowCmdbConnector(client, people=known)
     source = args.source or "servicenow"
     ok = Runner(api, _out).run(conn, RunOptions(source=source, mode=args.mode, dry_run=args.dry_run)).ok
+    users = ServiceNowCmdbConnector(client, people=known, part="users")
+    users_source = args.users_source or f"{source}-users"
+    ok = (
+        Runner(api, _out).run(users, RunOptions(source=users_source, mode=args.mode, dry_run=args.dry_run)).ok
+        and ok
+    )
     if ok and not args.dry_run:
         found = duplicates(conn.apps)
         api.call("PUT", f"/findings/reported/{source}", json=found)
@@ -492,8 +539,24 @@ def parser() -> argparse.ArgumentParser:
     sni.add_argument(
         "--url", default=os.environ.get("SERVICENOW_URL"), help="https://<instance>.service-now.com"
     )
+    sni.add_argument(
+        "--users-source",
+        help="source for the active users (default <source>-users; register it with grantsAccess)",
+    )
     load_flags(sni)
     sni.set_defaults(fn=servicenow_import)
+
+    ha = sub.add_parser("halo", help="HaloITSM: business applications and agents").add_subparsers(
+        dest="action", required=True
+    )
+    hai = ha.add_parser("import", help="Load business applications and their owners, and the enabled agents")
+    hai.add_argument("--url", default=os.environ.get("HALO_URL"), help="https://<instance>.haloitsm.com")
+    hai.add_argument(
+        "--agents-source",
+        help="source for the agents (default <source>-agents; register it with grantsAccess)",
+    )
+    load_flags(hai)
+    hai.set_defaults(fn=halo_import)
 
     sub.add_parser("sources", help="Sources loaded into the model").set_defaults(fn=sources)
     r = sub.add_parser("runs", help="Recent connector runs (changesets), newest first")

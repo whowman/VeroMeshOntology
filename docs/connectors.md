@@ -155,7 +155,8 @@ Guidelines:
 | CSV | `csv import <file or folder>` | One file per entity type (named after it, or `--type`), or any columns with `--mapping` |
 | Workday | `workday import \| changes` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each |
 | Microsoft Entra ID | `entra import \| changes` | Users, managers, role groups and AI agents through Microsoft Graph; changes through delta queries |
-| ServiceNow CMDB | `servicenow import` | Business applications as systems (criticality, lifecycle), an owner role per application's business and technical owner, filled by the people ServiceNow names; likely duplicate applications reported as findings |
+| ServiceNow CMDB | `servicenow import` | Business applications as systems (criticality, lifecycle), an owner role per application's business and technical owner, filled by the people ServiceNow names; active users (who can sign in) as a second source; likely duplicate applications reported as findings |
+| HaloITSM | `halo import` | Business applications (matched to systems VeroMesh already holds by name) and their owners; enabled agent seats as a second source |
 | Oracle Fusion Cloud ERP | `erp import \| exceptions` | Who can act in the ERP (active accounts and their roles); approval exceptions (purchase orders their buyer approved, invoices approved above the approver's limit or without a co-approver) reported as findings |
 
 Tests for the SDK and the connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode. The Workday, Entra ID and Oracle ERP connectors are tested against small fakes of the public APIs, and against the VeroMesh test harness (a simulated company with each system's quirks) when it is installed: `test_against_harness.py`.
@@ -214,7 +215,19 @@ veromesh-connect servicenow import --url https://acme.service-now.com
 - **Sign-in:** an integration user with read access to `cmdb_ci_business_app` and `sys_user` (basic authentication), or an OAuth access token.
 - **Full load** (`import`): the Table API, `/api/now/table/cmdb_ci_business_app` and `/api/now/table/sys_user` (active users, and every user named as an owner even if inactive), 1,000 a page (`sysparm_limit`, `sysparm_offset`). Run it after HR and Entra ID, because it matches users to the people VeroMesh already holds.
 - **Writes:** systems (ID = the application's number, the CMDB ID its sys_id, name, criticality 1 to 4 as critical, high, medium, low, lifecycle active or retired) and, because ownership in VeroMesh sits with a role, one role per application's business owner (`owned_by`) and technical owner (`managed_by`), named "Business owner of ..." and "Technical owner of ...". People: matched by employee number, else by user name (a contractor), with the owner roles they fill, and their legal name and email. No employee ID: ServiceNow copies it from HR.
+- **Two sources:** `servicenow` holds the applications, their owner roles and the people they name (active or not); `servicenow-users` (`--users-source`) holds every active user. Register the second with `grantsAccess: true`: an active ServiceNow user can still sign in and act there, so a leaver who is still active shows as access without employment.
 - **Findings:** `duplicate-system`, two applications with the same owners, vendor, kind and support group under different names, reported with `PUT /api/v1/findings/reported/servicenow`. An owner whose HR record has gone shows in VeroMesh's own findings as `owner-has-left`.
-- **ServiceNow Enterprise Architecture** keeps business capabilities in the same CMDB. Loading them, and HaloITSM, are next.
+- **ServiceNow Enterprise Architecture** keeps business capabilities in the same CMDB; loading them is next.
 
-Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP, `cmdb` for ServiceNow) so precedence applies; see `docs/provenance.md`.
+### HaloITSM
+
+```bash
+export HALO_CLIENT_ID=... HALO_CLIENT_SECRET=...   # HALO_TENANT=<tenant> for a Halo-hosted instance
+veromesh-connect halo import --url https://acme.haloitsm.com
+```
+
+- **Sign-in:** an API application registered in Halo (Configuration, Integrations, Halo API) with client credentials and the `all` scope, at `/auth/token`.
+- **Full load** (`import`): `/api/Asset` (assets of type "Business Application") and `/api/Agent`, 100 a page (`pageinate`, `page_size`, `page_no`, `record_count`). Run it after HR, Entra ID and ServiceNow, because it matches names and emails to what VeroMesh already holds.
+- **Writes:** `halo`: systems (under the ID of the system VeroMesh already holds with the same name, so ServiceNow and Halo describe one system; else the inventory number), criticality and lifecycle, and the business owner from the "Business Owner" custom field (a name or an email, matched to one person) filling the same owner role the ServiceNow connector uses; an owner that matches no one is reported. `halo-agents` (`--agents-source`): every enabled agent seat, matched by email; register it with `grantsAccess: true`, so an IT leaver whose seat was not freed shows as access without employment.
+
+Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP, `cmdb` for ServiceNow and HaloITSM, with `grantsAccess` on `servicenow-users` and `halo-agents`) so precedence applies; see `docs/provenance.md`.
