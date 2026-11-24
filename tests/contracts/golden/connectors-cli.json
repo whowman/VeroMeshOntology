@@ -88,6 +88,21 @@
         "--limit"
       ]
     },
+    "servicenow": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "sources": {
       "args": [],
       "options": []

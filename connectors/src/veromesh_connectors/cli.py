@@ -11,6 +11,7 @@
     veromesh-connect entra changes --state entra-delta.json
     veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
     veromesh-connect erp exceptions --since 2026-11-01
+    veromesh-connect servicenow import --url https://acme.service-now.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
     veromesh-connect cleanup [--older-than-hours 24]
@@ -31,6 +32,8 @@ Source systems:
                                             https://login.microsoftonline.com
     ORACLE_URL, ORACLE_USER, ORACLE_PASSWORD
                                             Oracle Fusion Cloud (basic authentication)
+    SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD (or SERVICENOW_TOKEN)
+                                            ServiceNow (basic authentication or an OAuth token)
 """
 
 from __future__ import annotations
@@ -54,6 +57,8 @@ from .plugins import (
     GraphClient,
     OracleClient,
     OracleErpConnector,
+    ServiceNowClient,
+    ServiceNowCmdbConnector,
     SpreadsheetConnector,
     WorkdayChangesConnector,
     WorkdayClient,
@@ -196,6 +201,34 @@ def oracle_client(args, http: httpx.Client | None = None) -> OracleClient:
     user = _need(os.environ.get("ORACLE_USER"), "ORACLE_USER", "the environment")
     auth = BasicAuth(user, os.environ.get("ORACLE_PASSWORD", ""))
     return OracleClient(SourceApi("Oracle Fusion", t, auth))
+
+
+def servicenow_client(args, http: httpx.Client | None = None) -> ServiceNowClient:
+    from .plugins import BearerToken
+
+    url = _need(args.url, "--url", "SERVICENOW_URL")
+    t = _source_transport(url, "ServiceNow", http)
+    if os.environ.get("SERVICENOW_TOKEN"):
+        auth = BearerToken(os.environ["SERVICENOW_TOKEN"])
+    else:
+        user = _need(os.environ.get("SERVICENOW_USER"), "SERVICENOW_USER", "the environment")
+        auth = BasicAuth(user, os.environ.get("SERVICENOW_PASSWORD", ""))
+    return ServiceNowClient(SourceApi("ServiceNow", t, auth))
+
+
+def servicenow_import(api: ApiSession, args) -> int:
+    from .plugins.servicenow import duplicates
+
+    conn = ServiceNowCmdbConnector(
+        servicenow_client(args, getattr(args, "source_http", None)), people=api.entities("people")
+    )
+    source = args.source or "servicenow"
+    ok = Runner(api, _out).run(conn, RunOptions(source=source, mode=args.mode, dry_run=args.dry_run)).ok
+    if ok and not args.dry_run:
+        found = duplicates(conn.apps)
+        api.call("PUT", f"/findings/reported/{source}", json=found)
+        _out(f"Reported {len(found)} likely duplicate systems for source '{source}'.")
+    return 0 if ok else 1
 
 
 def erp_import(api: ApiSession, args) -> int:
@@ -449,6 +482,18 @@ def parser() -> argparse.ArgumentParser:
     erx.add_argument("--source")
     erx.add_argument("--dry-run", action="store_true")
     erx.set_defaults(fn=erp_exceptions)
+
+    sn = sub.add_parser(
+        "servicenow", help="ServiceNow CMDB: business applications and their owners"
+    ).add_subparsers(dest="action", required=True)
+    sni = sn.add_parser(
+        "import", help="Load business applications, their owner roles, and ServiceNow's people"
+    )
+    sni.add_argument(
+        "--url", default=os.environ.get("SERVICENOW_URL"), help="https://<instance>.service-now.com"
+    )
+    load_flags(sni)
+    sni.set_defaults(fn=servicenow_import)
 
     sub.add_parser("sources", help="Sources loaded into the model").set_defaults(fn=sources)
     r = sub.add_parser("runs", help="Recent connector runs (changesets), newest first")

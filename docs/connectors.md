@@ -155,6 +155,7 @@ Guidelines:
 | CSV | `csv import <file or folder>` | One file per entity type (named after it, or `--type`), or any columns with `--mapping` |
 | Workday | `workday import \| changes` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each |
 | Microsoft Entra ID | `entra import \| changes` | Users, managers, role groups and AI agents through Microsoft Graph; changes through delta queries |
+| ServiceNow CMDB | `servicenow import` | Business applications as systems (criticality, lifecycle), an owner role per application's business and technical owner, filled by the people ServiceNow names; likely duplicate applications reported as findings |
 | Oracle Fusion Cloud ERP | `erp import \| exceptions` | Who can act in the ERP (active accounts and their roles); approval exceptions (purchase orders their buyer approved, invoices approved above the approver's limit or without a co-approver) reported as findings |
 
 Tests for the SDK and the connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode. The Workday, Entra ID and Oracle ERP connectors are tested against small fakes of the public APIs, and against the VeroMesh test harness (a simulated company with each system's quirks) when it is installed: `test_against_harness.py`.
@@ -203,4 +204,17 @@ veromesh-connect erp exceptions --url https://acme.fa.us2.oraclecloud.com --sinc
 - **Exceptions** (`exceptions`): purchase orders (`purchaseOrders`, buyer and approver) and invoice approvals (`invoices`, `invoiceApprovalsAndNotificationsHistory`) on or after `--since`, checked against the authorities and co-approval tiers in VeroMesh; reported with `PUT /api/v1/findings/reported/erp`, each run replacing the last. Roles are the ones VeroMesh holds today, so someone who has since changed role can show, and an approver who has left since cannot be checked.
 - **What Oracle does not publish:** the invoice approval rules themselves (amounts and approver levels are BPM approval rules set up in Functional Setup Manager, with no REST resource to read them). The ERP team exports the limits in force into the standard workbook (Authorities and Co-approvals sheets) and loads it as a source registered as `erp`: the workflow closest to the decision decides, and a difference from the governance workbook is an **out of sync** finding.
 
-Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP) so precedence applies; see `docs/provenance.md`.
+### ServiceNow CMDB
+
+```bash
+export SERVICENOW_USER=... SERVICENOW_PASSWORD=...   # or SERVICENOW_TOKEN=<OAuth access token>
+veromesh-connect servicenow import --url https://acme.service-now.com
+```
+
+- **Sign-in:** an integration user with read access to `cmdb_ci_business_app` and `sys_user` (basic authentication), or an OAuth access token.
+- **Full load** (`import`): the Table API, `/api/now/table/cmdb_ci_business_app` and `/api/now/table/sys_user` (active users, and every user named as an owner even if inactive), 1,000 a page (`sysparm_limit`, `sysparm_offset`). Run it after HR and Entra ID, because it matches users to the people VeroMesh already holds.
+- **Writes:** systems (ID = the application's number, the CMDB ID its sys_id, name, criticality 1 to 4 as critical, high, medium, low, lifecycle active or retired) and, because ownership in VeroMesh sits with a role, one role per application's business owner (`owned_by`) and technical owner (`managed_by`), named "Business owner of ..." and "Technical owner of ...". People: matched by employee number, else by user name (a contractor), with the owner roles they fill, and their legal name and email. No employee ID: ServiceNow copies it from HR.
+- **Findings:** `duplicate-system`, two applications with the same owners, vendor, kind and support group under different names, reported with `PUT /api/v1/findings/reported/servicenow`. An owner whose HR record has gone shows in VeroMesh's own findings as `owner-has-left`.
+- **ServiceNow Enterprise Architecture** keeps business capabilities in the same CMDB. Loading them, and HaloITSM, are next.
+
+Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP, `cmdb` for ServiceNow) so precedence applies; see `docs/provenance.md`.

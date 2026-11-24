@@ -137,3 +137,28 @@ def test_oracle_erp_accounts_and_approval_exceptions(http, company, tmp_path, mo
     assert got("approved-over-limit", "invoice") == {
         d["about"]["invoice"] for d in key if d["kind"] == "approved-over-limit"
     }
+
+
+def test_servicenow_cmdb_systems_and_owner_roles(http, company, monkeypatch):
+    truth, h = company
+    monkeypatch.setenv("SERVICENOW_USER", "admin")
+    monkeypatch.setenv("SERVICENOW_PASSWORD", "harness")
+    load(http, h)
+    for name, cat in (("workday", "hr"), ("entra", "iam"), ("servicenow", "cmdb")):
+        assert http.put(f"/api/v1/sources/{name}", json={"category": cat}).status_code == 200
+    assert (
+        main(
+            [*API, "servicenow", "import", "--url", "http://testserver/servicenow"], http=http, source_http=h
+        )
+        == 0
+    )
+    systems = {s["id"]: s for s in http.get("/api/v1/systems", params={"source": "servicenow"}).json()}
+    assert len(systems) == len(truth.systems) + 1  # one application is in the CMDB twice
+    ehr = next(s for s in systems.values() if s["name"] == truth.systems["EHR"].name)
+    assert ehr["businessOwner"] == f"{ehr['id']}.BusinessOwner" and ehr["criticality"] == "critical"
+    people = {p["id"]: p for p in http.get("/api/v1/people").json()}
+    owner = truth.people[truth.systems["EHR"].business_owner]
+    roles = people[owner.employee_id].get("rolesFilled") or []
+    assert ehr["businessOwner"] in (roles if isinstance(roles, list) else [roles])
+    dups = http.get("/api/v1/findings", params={"kind": "duplicate-system"}).json()["findings"]
+    assert len(dups) == 1 and dups[0]["about"]["names"][1] == "Epic"
