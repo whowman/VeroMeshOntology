@@ -22,7 +22,11 @@ def test_the_shipped_domains(ctx):
         "data-meaning",
     ]
     assert d["employment"]["authoritative"] == ["hr"] and d["employment"]["contractors"] == "iam"
-    assert d["authority-in-force"]["authoritative"] == ["erp", "governance"]  # closest to the decision first
+    assert d["authority-in-force"]["authoritative"] == [
+        "erp",
+        "hr",
+        "governance",
+    ]  # the workflows in force first
     assert not any(x.get("changed") for x in d.values())
 
 

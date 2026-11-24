@@ -157,6 +157,23 @@
     "workday": {
       "args": [],
       "commands": {
+        "approvals": {
+          "args": [],
+          "options": [
+            "--url",
+            "--tenant",
+            "--report-owner",
+            "--report",
+            "--role-map",
+            "--no-roles",
+            "--process-map",
+            "--policy",
+            "--currency",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        },
         "changes": {
           "args": [],
           "options": [
@@ -182,6 +199,7 @@
             "--role-map",
             "--no-roles",
             "--via ['raas', 'rest']",
+            "--manager-role",
             "--source",
             "--mode ['replace', 'merge']",
             "--dry-run"

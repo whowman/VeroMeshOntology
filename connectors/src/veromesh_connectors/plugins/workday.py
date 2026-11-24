@@ -97,6 +97,11 @@ def from_report(row: dict) -> dict:
         "hireDate": row.get("Hire_Date", ""),
         "terminationDate": row.get("Termination_Date", ""),
         "active": str(row.get("Active_Status", "1")) in ("1", "true", "True"),
+        # Optional columns: placement (for an authority's scope) and role-based security
+        # groups the worker is assigned (HR Partner, Compensation Partner...), ';'-separated.
+        "department": row.get("Supervisory_Organization", ""),
+        "costCentre": row.get("Cost_Center", ""),
+        "orgRoles": [g.strip() for g in str(row.get("Organization_Roles") or "").split(";") if g.strip()],
     }
 
 
@@ -117,6 +122,9 @@ def from_rest(w: dict) -> dict:
         "hireDate": w.get("hireDate") or "",
         "terminationDate": w.get("terminationDate") or "",
         "active": bool(w.get("active", True)),
+        "department": (w.get("primarySupervisoryOrganization") or {}).get("descriptor", ""),
+        "costCentre": "",
+        "orgRoles": [],
     }
 
 
@@ -126,6 +134,8 @@ class _WorkerMapping:
     roles: bool
     role_map: dict[str, str]
     today: date
+    manager_role: str | None = None
+    managers: set[str] = set()
 
     def gone(self, w: dict) -> bool:
         end = w.get("terminationDate")
@@ -146,11 +156,27 @@ class _WorkerMapping:
             person["email"] = w["email"]
         if w["managerEmployeeId"]:
             person["reportsTo"] = w["managerEmployeeId"]
+        for key in ("department", "costCentre"):
+            if w.get(key):
+                person[key] = w[key]
         items = []
+        filled = []
         role = self.role_of(w["title"])
         if role:
-            person["rolesFilled"] = role
+            filled.append(role)
             items.append(Item(type="roles", entity={"id": role, "name": w["title"]}, ref=record.ref))
+        # Role-based groups (an HR Partner), and the manager group for anyone with reports:
+        # the groups Workday's business processes name as initiators and approvers.
+        groups = list(w.get("orgRoles") or [])
+        if self.manager_role and emp in self.managers:
+            groups.append(self.manager_role)
+        for g in groups:
+            gid = self.role_map.get(g) or role_id(g)
+            if gid and gid not in filled:
+                filled.append(gid)
+                items.append(Item(type="roles", entity={"id": gid, "name": g}, ref=record.ref))
+        if filled:
+            person["rolesFilled"] = filled[0] if len(filled) == 1 else filled
         end = w.get("terminationDate")
         items.insert(
             0,
@@ -180,6 +206,7 @@ class WorkdayConnector(_WorkerMapping, BatchConnector):
         roles: bool = True,
         role_map: dict[str, str] | None = None,
         today: date | None = None,
+        manager_role: str | None = None,
     ) -> None:
         super().__init__()
         if via not in ("raas", "rest"):
@@ -187,6 +214,7 @@ class WorkdayConnector(_WorkerMapping, BatchConnector):
         self.client, self.via = client, via
         self.report_owner, self.report = report_owner, report
         self.roles, self.role_map = roles, dict(role_map or {})
+        self.manager_role, self.managers = manager_role, set()
         self.today = today or date.today()
         self.left_out = 0
         self.dropped_managers: list[str] = []
@@ -233,6 +261,7 @@ class WorkdayConnector(_WorkerMapping, BatchConnector):
                 w["managerEmployeeId"] = by_wid.get(w["managerWid"], "")
             current.append(w)
         here = {w["employeeId"] for w in current}
+        self.managers = {w["managerEmployeeId"] for w in current if w["managerEmployeeId"] in here}
         for w in current:
             m = w["managerEmployeeId"]
             if m and m not in here:
@@ -297,3 +326,153 @@ class WorkdayChangesConnector(_WorkerMapping, EventConnector):
             yield Event(
                 id=eid, records=[Record(ref=f"Workday worker {emp} ({process})", data=w, type="people")]
             )
+
+
+# ---------------------------------------------------------------- business processes
+
+
+#: Workday business process types to VeroMesh actions (override with ``process_map``).
+PROCESS_ACTIONS = {
+    "Request Compensation Change": "AdjustPay",
+    "Promote Employee Inbound": "PromoteEmployee",
+    "Hire": "HireEmployee",
+    "Termination": "TerminateEmployee",
+}
+#: A rule's measure (the condition field) to a VeroMesh limit kind.
+MEASURES = {
+    "Percent_Change": "percent",
+    "Grade_Steps": "grade-steps",
+    "Headcount": "headcount",
+    "Amount": "amount",
+}
+#: The organization a business process runs over, to an authority's scope.
+SCOPES = {
+    "Supervisory Organization": "reporting-line",
+    "Supervisory Organization and Subordinates": "reporting-line",
+    "Organization": "department",
+    "Cost Center": "cost-centre",
+    "Company": "any",
+    "": "any",
+}
+#: Approver groups Workday names by relation to the worker, not by assignment.
+RELATIONS = {"Manager": "manager", "Manager's Manager": "manager-of-manager"}
+APPROVAL_COLUMNS = ("Business_Process_Type", "Rule_Type", "Security_Group")
+
+
+class WorkdayApprovalsConnector(BatchConnector):
+    """The approval rules of Workday business processes, from a custom report over their
+    definitions (RaaS, default ``VeroMesh_Approval_Rules``). One row per rule:
+
+    * ``Rule_Type`` ``Initiator``: ``Security_Group`` may start the process, up to
+      ``Condition_Above`` of ``Condition_Measure`` (Percent_Change, Grade_Steps, Headcount,
+      Amount), over ``Organization_Scope``. Becomes an authority held by the group's role,
+      ID ``{role}-{action}``.
+    * ``Rule_Type`` ``Approval``: step ``Step_Order`` asks ``Security_Group`` (Manager,
+      Manager's Manager, or an assigned group such as HR Partner), when the measure is above
+      ``Condition_Above`` (empty: always). Becomes a co-approval on every initiator's
+      authority for the process.
+
+    Register the source with category ``hr``: for decisions about people the business
+    process is the workflow in force (the authority-in-force domain)."""
+
+    name = "workday-approvals"
+    kind = "connector"
+
+    def __init__(
+        self,
+        client: WorkdayClient,
+        *,
+        report_owner: str = "ISU_VeroMesh",
+        report: str = "VeroMesh_Approval_Rules",
+        process_map: dict[str, str] | None = None,
+        role_map: dict[str, str] | None = None,
+        policy: str | None = None,
+        currency: str = "USD",
+    ) -> None:
+        super().__init__()
+        self.client, self.report_owner, self.report = client, report_owner, report
+        self.process_map = {**PROCESS_ACTIONS, **(process_map or {})}
+        self.role_map = dict(role_map or {})
+        self.policy, self.currency = policy, currency
+        self.skipped: list[str] = []
+
+    def describe(self) -> str:
+        note = (
+            f"; {len(self.skipped)} rules for processes not mapped ({', '.join(sorted(set(self.skipped))[:5])})"
+            if self.skipped
+            else ""
+        )
+        return f"Workday business process rules, report {self.report_owner}/{self.report}{note}"
+
+    def fingerprint(self) -> str | None:
+        return f"workday-approvals:{self.client.tenant}"
+
+    def role(self, group: str) -> str:
+        return self.role_map.get(group) or role_id(group)
+
+    def read(self, schema: list[dict]) -> Iterable[Record]:
+        rows = self.client.report(self.report_owner, self.report)
+        if rows:
+            missing = [c for c in APPROVAL_COLUMNS if c not in rows[0]]
+            if missing:
+                self.problems.append(f"report {self.report} has no column {', '.join(missing)}")
+                return
+        initiators: dict[str, list[str]] = {}
+        approvals = []
+        for i, row in enumerate(rows):
+            bp = str(row.get("Business_Process_Type") or "").strip()
+            action = self.process_map.get(bp)
+            if not action:
+                self.skipped.append(bp)
+                continue
+            ref = f"Workday rule {i + 1} ({bp})"
+            if str(row.get("Rule_Type")).strip().lower() == "initiator":
+                yield Record(ref=ref, data={"bp": bp, "action": action, **row}, type="authorities")
+                initiators.setdefault(action, []).append(self.role(str(row["Security_Group"]).strip()))
+            else:
+                approvals.append((ref, bp, action, row))
+        for ref, bp, action, row in approvals:
+            for holder in initiators.get(action, []):
+                yield Record(
+                    ref=ref, data={"bp": bp, "action": action, "holder": holder, **row}, type="co-approvals"
+                )
+
+    def map(self, record: Record, schema: list[dict]) -> list[Item]:
+        r = record.data
+        group = str(r.get("Security_Group") or "").strip()
+        if not group:
+            raise MappingError("rule has no security group", record.ref)
+        above = str(r.get("Condition_Above") or "").strip()
+        kind = MEASURES.get(str(r.get("Condition_Measure") or "").strip(), None)
+        if record.type == "authorities":
+            role = self.role(group)
+            auth = {
+                "id": f"{role}-{r['action']}",
+                "name": f"{group}: {r['bp'].lower()}" + (f" up to {above} {kind}" if above and kind else ""),
+                "holder": role,
+                "actionsCovered": [r["action"]],
+                "scope": SCOPES.get(str(r.get("Organization_Scope") or "").strip(), "any"),
+            }
+            if above and kind == "amount":
+                auth |= {"limitAmount": above, "currency": self.currency}
+            elif above and kind:
+                auth |= {"limitKind": kind, "limitValue": above}
+            if self.policy:
+                auth["delegatedBy"] = self.policy
+            return [
+                Item(type="roles", entity={"id": role, "name": group}, ref=record.ref),
+                Item(type="actions", entity={"id": r["action"], "name": r["bp"]}, ref=record.ref),
+                Item(type="authorities", entity=auth, ref=record.ref),
+            ]
+        co = {"authority": f"{r['holder']}-{r['action']}"}
+        if group in RELATIONS:
+            co["approverRelation"] = RELATIONS[group]
+            items = []
+        else:
+            co["approverRole"] = self.role(group)
+            items = [Item(type="roles", entity={"id": co["approverRole"], "name": group}, ref=record.ref)]
+        if str(r.get("Step_Order") or "").strip():
+            co["step"] = str(r["Step_Order"]).strip()
+        if above:
+            co["aboveAmount"] = above
+        return [*items, Item(type="co-approvals", entity=co, ref=record.ref)]

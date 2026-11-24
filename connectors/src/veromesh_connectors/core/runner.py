@@ -64,7 +64,8 @@ class Runner:
                 errors.append(f"{exc.ref or rec.ref}: {exc}")
                 continue
             for it in produced:
-                key = (it.type, it.id)
+                # Rows with no ID (co-approvals, impacts) are told apart by their content.
+                key = (it.type, it.id or json.dumps(it.entity, sort_keys=True, default=str))
                 prior = items.get(key)
                 if prior is None:
                     items[key] = it

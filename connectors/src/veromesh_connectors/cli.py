@@ -7,6 +7,7 @@
     veromesh-connect csv import exports/ --source cmdb          # one file per entity type
     veromesh-connect workday import --url https://wd2-impl-services1.workday.com --tenant acme [--via rest]
     veromesh-connect workday changes --since 2026-11-01
+    veromesh-connect workday approvals --tenant acme --role-map groups.yaml
     veromesh-connect entra import --tenant <tenant ID> [--role-group-prefix SG-] [--agent-tag AIAgent]
     veromesh-connect entra changes --state entra-delta.json
     veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
@@ -322,8 +323,25 @@ def workday_import(api: ApiSession, args) -> int:
         report=args.report,
         roles=not args.no_roles,
         role_map=role_map,
+        manager_role=args.manager_role,
     )
     opts = RunOptions(source=args.source or "workday", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def workday_approvals(api: ApiSession, args) -> int:
+    from .plugins.workday import WorkdayApprovalsConnector
+
+    conn = WorkdayApprovalsConnector(
+        workday_client(args, getattr(args, "source_http", None)),
+        report_owner=args.report_owner,
+        report=args.report,
+        process_map=_load_mapping(args.process_map) if args.process_map else None,
+        role_map=_load_mapping(args.role_map) if args.role_map else None,
+        policy=args.policy,
+        currency=args.currency,
+    )
+    opts = RunOptions(source=args.source or "workday-approvals", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
@@ -464,7 +482,7 @@ def parser() -> argparse.ArgumentParser:
         sp.add_argument("--tenant", default=os.environ.get("WORKDAY_TENANT"))
         sp.add_argument("--report-owner", default="ISU_VeroMesh", help="Owner of the custom report (RaaS)")
         sp.add_argument("--report", default=report, help="Custom report name (RaaS)")
-        sp.add_argument("--role-map", help="YAML object: business title -> role ID")
+        sp.add_argument("--role-map", help="YAML object: business title or security group -> role ID")
         sp.add_argument("--no-roles", action="store_true", help="Do not write roles from business titles")
 
     wd = sub.add_parser("workday", help="Workday HCM: workers, positions, managers").add_subparsers(
@@ -475,8 +493,23 @@ def parser() -> argparse.ArgumentParser:
     wi.add_argument(
         "--via", choices=("raas", "rest"), default="raas", help="Custom report (default) or REST API"
     )
+    wi.add_argument(
+        "--manager-role",
+        help="Role every worker with direct reports fills (the group business processes call Manager), e.g. Manager",
+    )
     load_flags(wi)
     wi.set_defaults(fn=workday_import)
+    wa = wd.add_parser(
+        "approvals", help="Load business process approval rules (promotions, pay, hires, terminations)"
+    )
+    workday_flags(wa, "VeroMesh_Approval_Rules")
+    wa.add_argument("--process-map", help="YAML object: business process type -> action ID")
+    wa.add_argument(
+        "--policy", help="Policy ID the rules are delegated by (e.g. the delegation of authority policy)"
+    )
+    wa.add_argument("--currency", default="USD", help="Currency of amount conditions")
+    load_flags(wa)
+    wa.set_defaults(fn=workday_approvals)
     wc = wd.add_parser("changes", help="Apply worker changes entered since a date, one event each")
     workday_flags(wc, "VeroMesh_Worker_Changes")
     wc.add_argument("--since", required=True, help="YYYY-MM-DD: changes entered on or after")

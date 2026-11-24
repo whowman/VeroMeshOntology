@@ -133,6 +133,8 @@ class CheckIn(BaseModel):
     action: str  # action ID, e.g. ApproveSupplierInvoice
     amount: str | float | None = None
     currency: str | None = None
+    about: str | None = None  # person ID the action is about (promoted, given a raise, hired, let go)
+    value: str | float | None = None  # what it amounts to when not money: percent, grade steps, headcount
     note: str | None = None
     # Only with sign-in off, or for an administrator testing a check on an agent's behalf:
     agent: str | None = None
@@ -994,6 +996,8 @@ def create_app(
             subject=subject,
             amount=body.amount,
             currency=body.currency,
+            about=body.about,
+            value=body.value,
             on=on,
             note=body.note,
             require_attested=c.decision_requires_attested,
@@ -1119,7 +1123,9 @@ def create_app(
         """The signed-in person (or, with sign-in off, the one named) and the roles they fill."""
         pid, _ = attester_for(s, c, who, given)
         p = changesets.get_entity(s.store, "people", pid, c.instance_base) or {}
-        return pid, p.get("rolesFilled", [])
+        roles = p.get("rolesFilled", [])
+        roles = [roles] if isinstance(roles, str) else list(roles)
+        return pid, [*roles, f"person:{pid}"]  # an approval chain may name them as a person
 
     def may_view(s: VeromeshService, c: Settings, who: auth.Caller, d: dict) -> None:
         """Stewards, the decision's agent, its principal and the people consulted or informed."""
@@ -1136,6 +1142,7 @@ def create_app(
                 roles = (changesets.get_entity(s.store, "people", pid, c.instance_base) or {}).get(
                     "rolesFilled", []
                 )
+                roles = [*([roles] if isinstance(roles, str) else roles), f"person:{pid}"]
                 involved = {x["role"] for x in d.get("consult", [])} | {
                     x["role"] for x in (d.get("basis") or {}).get("inform", [])
                 }

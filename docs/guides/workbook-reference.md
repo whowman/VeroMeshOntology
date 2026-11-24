@@ -104,6 +104,8 @@ Only role-relevant facts. Anything else is rejected by the validation rules.
 | Email |  | text | Work email. Used to match the person to their sign-in. Personal: shown only to those who need it. |
 | Roles filled |  | ID of Roles (several, separated by `;`) | IDs of the roles the person holds today. |
 | Reports to |  | ID of People | ID of the person's manager. Personal: shown only to those who need it. |
+| Department |  | text | Department or supervisory organization code, from HR. Used for an authority's scope. |
+| Cost centre |  | text | Cost centre code, from HR or finance. Used for an authority's scope. |
 
 # Governance sheets
 
@@ -158,6 +160,10 @@ Grants to decide or act, with their limits.
 | Within capability |  | ID of Capabilities | ID of the capability the authority is limited to. Empty: wherever its actions apply. |
 | Limit amount |  | number | The largest amount the holder may decide for one action, in the currency given. Empty: no amount limit. |
 | Currency |  | text | ISO 4217 code, e.g. USD. |
+| Limit kind |  | one of: `amount`, `percent`, `grade-steps`, `headcount` | amount (money, the default), percent (e.g. a raise), grade-steps (a promotion) or headcount (hires). |
+| Limit value |  | number | For a limit kind other than amount: the largest value the holder may decide, e.g. 10 (percent). |
+| Scope |  | one of: `any`, `reporting-line`, `department`, `cost-centre` | Over whom: any (default), reporting-line (people below the holder), department or cost-centre. |
+| Scope unit |  | text | For department or cost-centre scope: the unit's code. Empty: the holder's own. |
 | Valid from |  | date (YYYY-MM-DD) | First day the authority holds (YYYY-MM-DD). Empty: from now. |
 | Valid until |  | date (YYYY-MM-DD) | Last day the authority holds (YYYY-MM-DD). Empty: until withdrawn. |
 | Delegated by |  | ID of People or Roles or Policies | Who granted it: a person, a role, or the policy that establishes it. |
@@ -165,13 +171,15 @@ Grants to decide or act, with their limits.
 
 ## Co-approvals
 
-Second sign-offs required above an amount. One row per tier. Rows have no ID of their own: each belongs to the row it names.
+Further sign-offs: a second sign-off above an amount, or the steps of an approval chain. One row per tier or step. Rows have no ID of their own: each belongs to the row it names.
 
 | Column | Required | Holds | What it means |
 | --- | --- | --- | --- |
 | Authority | yes | ID of Authorities | ID of the authority that requires this co-approval. |
-| Approver role | yes | ID of Roles | ID of the role whose second sign-off is needed. |
-| Above amount | yes | number | Applies to actions above this amount, in the authority's currency. |
+| Approver role |  | ID of Roles | ID of the role whose sign-off is needed. Give this or an approver relation. |
+| Approver relation |  | one of: `manager`, `manager-of-manager`, `principal-manager` | Instead of a role: manager or manager-of-manager of the person the action is about, or principal-manager. |
+| Step |  | number | Order in an approval chain (1, 2, ...): the decision lists its sign-offs in this order. Empty: first. |
+| Above amount |  | number | Applies above this amount (or, for another limit kind, this value). Empty: always. |
 
 ## Agents
 

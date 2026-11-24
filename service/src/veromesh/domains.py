@@ -61,9 +61,11 @@ DEFAULTS: dict[str, dict] = {
         "question": "What limit does the workflow that runs the decision enforce?",
         # The authority closest to the decision decides (decided 23 November): the workflow
         # in force first, the granted policy next. Where they differ the effective value is
-        # the one in force, and the difference is a conflict: out of sync.
-        "authoritative": ["erp", "governance"],
-        "evidence": ["iam", "hr", "spreadsheet"],
+        # the one in force, and the difference is a conflict: out of sync. The workflow is the
+        # ERP's approval rules for money, and HR's business processes (Workday: promotions,
+        # pay changes, hires, terminations) for decisions about people (step 6b).
+        "authoritative": ["erp", "hr", "governance"],
+        "evidence": ["iam", "spreadsheet"],
         "fields": {
             "authorities": [
                 "holder",
@@ -75,8 +77,12 @@ DEFAULTS: dict[str, dict] = {
                 "delegatedBy",
                 "parentAuthority",
                 "withinCapability",
+                "limitKind",
+                "limitValue",
+                "scope",
+                "scopeUnit",
             ],
-            "co-approvals": ["authority", "approverRole", "aboveAmount"],
+            "co-approvals": ["authority", "approverRole", "approverRelation", "step", "aboveAmount"],
         },
     },
     "ai-approval": {

@@ -792,7 +792,7 @@ ACCOUNTABILITY: dict[str, tuple[str, ...]] = {
         "limitKind",
         "limitValue",
     ),
-    "co-approvals": ("approverRole", "aboveAmount"),
+    "co-approvals": ("approverRole", "approverRelation", "step", "aboveAmount"),
     "agents": ("actsFor",),
 }
 

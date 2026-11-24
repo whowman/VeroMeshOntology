@@ -128,6 +128,8 @@ vms:PersonShape
     sh:property [ sh:path vmo:holds ; sh:class vmo:DelegatedAuthority ] ;
     sh:property [ sh:path vmo:performs ; sh:class vmo:Action ] ;
     sh:property [ sh:path org:reportsTo ; sh:class vmo:Person ] ;
+    sh:property [ sh:path vmo:department ; sh:datatype xsd:string ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:costCentre ; sh:datatype xsd:string ; sh:maxCount 1 ] ;
     sh:property [ sh:path vmo:employeeId ; sh:minCount 1 ; sh:severity sh:Warning ;
                   sh:message "Person has no employee ID, so matching across HR and identity systems is unreliable." ] .
 
@@ -154,6 +156,17 @@ vms:DelegatedAuthorityShape
     sh:property [ sh:path vmo:validUntil ; sh:datatype xsd:date ; sh:maxCount 1 ] ;
     sh:property [ sh:path vmo:boundedSubsetOf ; sh:class vmo:DelegatedAuthority ; sh:maxCount 1 ] ;
     sh:property [ sh:path vmo:requiresCoApproval ; sh:class vmo:CoApproval ] ;
+    sh:property [ sh:path vmo:limitKind ; sh:in ( "amount" "percent" "grade-steps" "headcount" ) ; sh:maxCount 1 ;
+                  sh:message "Limit kind is amount, percent, grade-steps or headcount." ] ;
+    sh:property [ sh:path vmo:authorityScope ; sh:in ( "any" "reporting-line" "department" "cost-centre" ) ; sh:maxCount 1 ;
+                  sh:message "Scope is any, reporting-line, department or cost-centre." ] ;
+    sh:sparql [
+        sh:message "A limit kind other than amount needs a limit value." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE { $this vmo:limitKind ?k . FILTER(?k != "amount")
+                                 FILTER NOT EXISTS { $this vmo:limitValue ?v } }
+        """ ] ;
     sh:property [ sh:path vmo:delegatedBy ; sh:minCount 1 ; sh:severity sh:Warning ;
                   sh:message "Authority does not record who delegated it." ] ;
     sh:sparql [
@@ -172,6 +185,28 @@ vms:DelegatedAuthorityShape
               ?parent vmo:limitAmount ?parentAmount .
               OPTIONAL { $this vmo:limitAmount ?amount }
               FILTER (!BOUND(?amount) || ?amount > ?parentAmount)
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset exceeds its parent: limit {?value} is above the parent's {?parentValue} ({?kind}), or the parent has a limit and this has none." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?value ?parentValue ?kind WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              ?parent vmo:limitValue ?parentValue ; vmo:limitKind ?kind .
+              OPTIONAL { $this vmo:limitValue ?value }
+              FILTER (!BOUND(?value) || ?value > ?parentValue)
+            }
+        """ ] ;
+    sh:sparql [
+        sh:message "Bounded subset limits {?kind}, but its parent limits {?parentKind}." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this ?kind ?parentKind WHERE {
+              $this vmo:boundedSubsetOf ?parent .
+              OPTIONAL { $this vmo:limitKind ?k } OPTIONAL { ?parent vmo:limitKind ?pk }
+              BIND (COALESCE(?k, "amount") AS ?kind) BIND (COALESCE(?pk, "amount") AS ?parentKind)
+              FILTER (?kind != ?parentKind)
             }
         """ ] ;
     sh:sparql [
@@ -276,10 +311,22 @@ vms:DelegatedAuthorityWarningsShape
 vms:CoApprovalShape
     a sh:NodeShape ;
     sh:targetClass vmo:CoApproval ;
-    sh:property [ sh:path vmo:approverRole ; sh:class vmo:Role ; sh:minCount 1 ; sh:maxCount 1 ;
-                  sh:message "A co-approval names exactly one approver role." ] ;
+    sh:property [ sh:path vmo:approverRole ; sh:class vmo:Role ; sh:maxCount 1 ;
+                  sh:message "A co-approval names at most one approver role." ] ;
+    sh:property [ sh:path vmo:approverRelation ; sh:in ( "manager" "manager-of-manager" "principal-manager" ) ; sh:maxCount 1 ;
+                  sh:message "Approver relation is manager, manager-of-manager or principal-manager." ] ;
+    sh:sparql [
+        sh:message "A co-approval names exactly one approver: an approver role or an approver relation." ;
+        sh:prefixes <https://veromesh.ai/ontology/org/shapes> ;
+        sh:select """
+            SELECT $this WHERE {
+              OPTIONAL { $this vmo:approverRole ?r } OPTIONAL { $this vmo:approverRelation ?x }
+              FILTER (BOUND(?r) = BOUND(?x))
+            }
+        """ ] ;
     sh:property [ sh:path vmo:aboveAmount ; sh:or ( [ sh:datatype xsd:decimal ] [ sh:datatype xsd:integer ] ) ;
-                  sh:minCount 1 ; sh:maxCount 1 ; sh:message "A co-approval needs one amount it applies above." ] ;
+                  sh:maxCount 1 ; sh:message "A co-approval applies above at most one amount." ] ;
+    sh:property [ sh:path vmo:chainStep ; sh:or ( [ sh:datatype xsd:decimal ] [ sh:datatype xsd:integer ] ) ; sh:maxCount 1 ] ;
     sh:property [ sh:path [ sh:inversePath vmo:requiresCoApproval ] ; sh:minCount 1 ;
                   sh:message "A co-approval must belong to an authority." ] .
 

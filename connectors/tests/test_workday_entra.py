@@ -82,11 +82,66 @@ WORKERS = [
 ]
 
 
+# Business process rules, as a custom report over their definitions lays them out.
+RULES = [
+    {
+        "Business_Process_Type": "Request Compensation Change",
+        "Rule_Type": "Initiator",
+        "Security_Group": "Manager",
+        "Condition_Measure": "Percent_Change",
+        "Condition_Above": "5",
+        "Organization_Scope": "Supervisory Organization",
+    },
+    {
+        "Business_Process_Type": "Request Compensation Change",
+        "Rule_Type": "Initiator",
+        "Security_Group": "HR Partner",
+        "Condition_Measure": "Percent_Change",
+        "Condition_Above": "12",
+        "Organization_Scope": "Company",
+    },
+    {
+        "Business_Process_Type": "Request Compensation Change",
+        "Rule_Type": "Approval",
+        "Security_Group": "Manager's Manager",
+        "Step_Order": "1",
+        "Condition_Measure": "Percent_Change",
+        "Condition_Above": "3",
+    },
+    {
+        "Business_Process_Type": "Promote Employee Inbound",
+        "Rule_Type": "Initiator",
+        "Security_Group": "Manager",
+        "Condition_Measure": "Grade_Steps",
+        "Condition_Above": "1",
+        "Organization_Scope": "Supervisory Organization",
+    },
+    {
+        "Business_Process_Type": "Promote Employee Inbound",
+        "Rule_Type": "Approval",
+        "Security_Group": "HR Partner",
+        "Step_Order": "2",
+    },
+    {
+        "Business_Process_Type": "Promote Employee Inbound",
+        "Rule_Type": "Approval",
+        "Security_Group": "Manager's Manager",
+        "Step_Order": "1",
+    },
+    {
+        "Business_Process_Type": "Move Worker",
+        "Rule_Type": "Initiator",
+        "Security_Group": "Manager",
+    },  # not mapped
+]
+
+
 class FakeWorkday(Fake):
     def __init__(self):
         super().__init__()
         self.changes: list[dict] = []
         self.workers = {w[0]: w for w in WORKERS}
+        self.rules = list(RULES)
 
     def rest(self, w):
         emp, name, title, mgr, end = w
@@ -122,6 +177,8 @@ class FakeWorkday(Fake):
                     }
                 )
             return respond({"Report_Entry": rows})
+        if path.endswith("/VeroMesh_Approval_Rules"):
+            return respond({"Report_Entry": self.rules})
         if path.endswith("/VeroMesh_Worker_Changes"):
             return respond(
                 {"Report_Entry": [c for c in self.changes if c["Entered_On"] >= q["Updated_From"]]}
@@ -419,3 +476,29 @@ def test_ids():
     assert role_id("Accounts Payable Manager") == "accounts-payable-manager"
     assert local_id("Jane.Doe@contoso.com") == "jane.doe"
     assert agent_id("Invoice Assistant") == "InvoiceAssistant" and agent_id("AP bot") == "APBot"
+
+
+def test_business_process_rules_become_authorities_and_approval_chains(http):
+    wd = FakeWorkday()
+    main(workday("import", "--manager-role", "Manager"), http=http, source_http=wd.client())
+    people = {p["id"]: p for p in http.get("/api/v1/people").json()}
+    assert "manager" in people["E2"]["rolesFilled"]  # E2 has reports: fills the Manager group
+    assert "manager" not in (people["E3"].get("rolesFilled") or [])
+    http.put("/api/v1/sources/workday-approvals", json={"category": "hr"})
+    assert main(workday("approvals"), http=http, source_http=wd.client()) == 0
+    auths = {a["id"]: a for a in http.get("/api/v1/authorities").json()}
+    pay = auths["manager-AdjustPay"]
+    assert pay["holder"] == "manager" and pay["limitKind"] == "percent" and float(pay["limitValue"]) == 5
+    assert pay["scope"] == "reporting-line"
+    assert auths["hr-partner-AdjustPay"]["scope"] == "any"
+    assert auths["manager-PromoteEmployee"]["limitKind"] == "grade-steps"
+    co = http.get("/api/v1/co-approvals").json()
+    chain = sorted(
+        (c["authority"], str(c.get("step")), c.get("approverRelation") or c.get("approverRole")) for c in co
+    )
+    assert ("manager-PromoteEmployee", "1", "manager-of-manager") in {
+        (a, s.split(".")[0], r) for a, s, r in chain
+    }
+    assert ("manager-PromoteEmployee", "2", "hr-partner") in {(a, s.split(".")[0], r) for a, s, r in chain}
+    above = [c for c in co if c["authority"] == "manager-AdjustPay"]
+    assert above and float(above[0]["aboveAmount"]) == 3
