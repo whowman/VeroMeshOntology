@@ -38,6 +38,7 @@ from . import (
     incremental,
     licence,
     mcp_server,
+    modelmeasures,
     querylog,
     suggest,
     usage,
@@ -588,6 +589,12 @@ def create_app(
         domains.activate(s.store)
         rebuilt = prov.rebuild(s.store, c.instance_base)
         return {"domain": name, **out, "rebuilt": rebuilt}
+
+    @app.get("/api/v1/measures/model", dependencies=need(auth.READ), tags=["governance"])
+    def measures_model(s: Svc) -> dict:
+        """Measures of the model: M2, the share of facts sourced automatically from systems, and
+        M6, change latency from each source to the model (median and 90th percentile, hours)."""
+        return modelmeasures.model_measures(s.store)
 
     @app.get("/api/v1/findings", dependencies=need(auth.READ), tags=["governance"])
     def findings_list(

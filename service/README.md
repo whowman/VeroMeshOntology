@@ -123,6 +123,7 @@ All writes go through changesets (`src/veromesh/changesets.py`); entity types an
 | `GET /api/v1/decisions/{id}/status` | Where a decision stands (allowed, pending, approved, rejected, refused), may the agent act, who answered, what was done. For the agent, its principal, the owners involved and stewards |
 | `POST /api/v1/decisions/{id}/overrides` | A person answers or overrules, as themselves: `{"verdict": "approved"\|"rejected", "role"?, "note"?}` |
 | `POST /api/v1/decisions/{id}/outcome` | The agent reports what it did: `{"outcome": "done"\|"not_done", "note"?}` |
+| `GET /api/v1/measures/model` | The model's own measures: M2, the share of facts sourced automatically from systems (HR, identity, ERP, CMDB, catalog) rather than by hand, and M6, change latency from each source's record timestamp to the model (median and 90th percentile, hours) |
 | `GET /api/v1/findings` | What needs attention (access without employment, employed without access, out of sync, ended references, domains with no deciding source, and what connectors report), each routed to an owner role and the people in it. Filters `kind`, `severity`, `ownerRole`, `source` |
 | `PUT /api/v1/findings/reported/{source}` | A connector's findings for its source (stewards and connectors); each run replaces the last |
 | `GET /api/v1/domains` | Which source category decides each question (source weighting): authoritative and evidence categories per domain, the fields it covers, whether this organization changed it |

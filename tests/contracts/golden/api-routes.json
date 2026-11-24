@@ -221,6 +221,12 @@
       "200"
     ]
   },
+  "GET /api/v1/measures/model": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/schema": {
     "params": [],
     "status": [
