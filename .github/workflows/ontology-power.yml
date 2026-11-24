@@ -3,9 +3,15 @@
 # zero: its pods stop, their disks and data stay. On brings the nodes back and waits until
 # VeroMesh answers. Runs from main, with no approval; the identity may scale that one node
 # pool and nothing else. From a phone: the GitHub app > Actions > Ontology on/off > Run.
+# It also turns the tool off every night (the schedule below).
 name: Ontology on/off
 
 on:
+  # Every night at 11 PM Eastern (04:00 UTC; midnight during daylight saving time), turn it
+  # off, so a day of testing never runs on overnight. Off when already off changes nothing.
+  # To change the time, edit the cron line (UTC; https://crontab.guru).
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       action:
@@ -41,10 +47,10 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: ${{ inputs.action }}
+      - name: ${{ inputs.action || 'off (nightly)' }}
         run: |
           now=$(az aks nodepool show -g "$RG" --cluster-name "$AKS" -n "$POOL" --query count -o tsv)
-          case "${{ inputs.action }}" in
+          case "${{ inputs.action || 'off' }}" in
             off)
               [ "$now" = 0 ] || az aks nodepool scale -g "$RG" --cluster-name "$AKS" -n "$POOL" --node-count 0 -o none
               echo "The ontology tool is off. The assessment is untouched; the ontology's data stays on its disks (about \$8 a month)." >> "$GITHUB_STEP_SUMMARY" ;;

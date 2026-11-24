@@ -57,6 +57,7 @@ The ontology tool runs on its own node pool (`veromesh`), so it can be turned of
 
 - **Off** scales the pool to zero nodes. VeroMesh, Fuseki and DataHub stop. Their data stays on its disks, and so does the decision log on the PostgreSQL server. Turning it back on brings everything back as it was.
 - **Cost:** off, about $8 a month (the disks that keep its data). On, about $0.27 an hour; running it 40 hours a month comes to roughly $20 with the disks. Azure bills the nodes by the hour.
+- **Off every night:** the workflow also turns the tool off at 11 PM Eastern (04:00 UTC, so midnight during daylight saving time), so a day of testing never runs on overnight. Turn it on again when you need it. To change the time, edit the `cron` line in `.github/workflows/ontology-power.yml`. GitHub may start a scheduled run a few minutes late, and it pauses schedules in a repository with no activity for 60 days (Actions shows a button to turn it back on).
 - **No approval needed:** the on/off workflow runs from `main` with its own identity, `id-github-ontology-power`. That identity may scale this one node pool and nothing else: not the assessment's nodes, and not deploys.
 - **A deploy** needs the tool on: the deploy workflow stops with a message if it is off.
 - **Never stop the whole cluster** (`az aks stop`): that would take the assessment's live site down too.
