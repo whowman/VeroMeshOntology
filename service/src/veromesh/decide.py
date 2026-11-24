@@ -113,24 +113,31 @@ class Model:
         for them; ``ended`` otherwise. With no hr source: ``unknown`` (no rule applies)."""
         cats = prov.categories(self._store)
         emp = domains.activate(self._store)["employment"]
-        hr = {s for s, c in cats.items() if c in (emp.get("authoritative") or [])}
-        if not hr:
-            return "unknown"
-        contractors = emp.get("contractors")
-        iam = {s for s, c in cats.items() if c == "iam"}
-        holding = self.sources_holding("people", pid)
         person = self.get("people", pid) or {}
-        if holding & hr:
-            if iam and not holding & iam and person.get("employeeId"):
-                return "no-access"
-            return "employed"
-        if contractors and not person.get("employeeId") and any(cats.get(x) == contractors for x in holding):
-            return "contractor"
-        return "ended"
+        return employment_status(
+            self.sources_holding("people", pid), cats, emp, bool(person.get("employeeId"))
+        )
 
     def owner_roles(self, type_: str, rid: str) -> list[str]:
         e = self.get(type_, rid) or {}
         return sorted({e[k] for k in OWNER_FIELDS if e.get(k)})
+
+
+def employment_status(holding: set[str], cats: dict[str, str], emp: dict, has_employee_id: bool) -> str:
+    """Whether a person is employed, from the sources that hold them (Model.employment,
+    and the findings, which judge everyone at once)."""
+    hr = {s for s, c in cats.items() if c in (emp.get("authoritative") or [])}
+    if not hr:
+        return "unknown"
+    contractors = emp.get("contractors")
+    iam = {s for s, c in cats.items() if c == "iam"}
+    if holding & hr:
+        if iam and not holding & iam and has_employee_id:
+            return "no-access"
+        return "employed"
+    if contractors and not has_employee_id and any(cats.get(x) == contractors for x in holding):
+        return "contractor"
+    return "ended"
 
 
 def _dec(value) -> Decimal | None:

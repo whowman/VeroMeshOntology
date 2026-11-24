@@ -32,6 +32,7 @@ from . import (
     decisions,
     domains,
     entities,
+    findings,
     followup,
     gcsetup,
     incremental,
@@ -99,6 +100,8 @@ class SourceIn(BaseModel):
     category: str
     ownerRole: str | None = None
     description: str | None = None
+    # Domain -> the source this one takes it from (e.g. AP limits copied from Workday levels).
+    derivedFrom: dict[str, str] | None = None
 
 
 class AttestationIn(BaseModel):
@@ -514,7 +517,12 @@ def create_app(
     @app.put("/api/v1/sources/{name}", dependencies=need(auth.ADMIN), tags=["governance"])
     def source_register(s: Svc, c: Cfg, name: str, body: SourceIn) -> dict:
         """Register a source's category (hr, iam, cmdb, erp, catalog, governance, spreadsheet), owner role and description."""
-        out = prov.register_source(s.store, name, body.category, body.ownerRole, body.description)
+        try:
+            out = prov.register_source(
+                s.store, name, body.category, body.ownerRole, body.description, body.derivedFrom
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
         prov.refresh_effective(s.store, c.instance_base)
         return out
 
@@ -567,6 +575,39 @@ def create_app(
         domains.activate(s.store)
         rebuilt = prov.rebuild(s.store, c.instance_base)
         return {"domain": name, **out, "rebuilt": rebuilt}
+
+    @app.get("/api/v1/findings", dependencies=need(auth.READ), tags=["governance"])
+    def findings_list(
+        s: Svc,
+        c: Cfg,
+        kind: str | None = None,
+        severity: str | None = None,
+        ownerRole: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """What needs someone's attention, each routed to its owner role and the people in it:
+        access without employment, employed without access, out of sync, references to ended
+        entities, domains with no deciding source, and what connectors report."""
+        try:
+            return findings.findings(
+                s.store, c.instance_base, kind=kind, severity=severity, owner_role=ownerRole, source=source
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+
+    @app.put(
+        "/api/v1/findings/reported/{source}",
+        dependencies=need(auth.STEWARD_OR_CONNECTOR),
+        tags=["governance"],
+    )
+    def findings_report(s: Svc, source: str, body: Annotated[list, Body()]) -> dict:
+        """Replace the findings a connector reports for its source (each run states all it found),
+        for example purchase orders approved by their own buyer."""
+        try:
+            n = findings.set_reported(s.store, source, body)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        return {"source": source, "findings": n}
 
     @app.get("/api/v1/conflicts", dependencies=need(auth.STEWARD), tags=["governance"])
     def conflicts(s: Svc, type: str | None = None) -> list[dict]:

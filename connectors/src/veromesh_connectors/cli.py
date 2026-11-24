@@ -9,6 +9,8 @@
     veromesh-connect workday changes --since 2026-11-01
     veromesh-connect entra import --tenant <tenant ID> [--role-group-prefix SG-] [--agent-tag AIAgent]
     veromesh-connect entra changes --state entra-delta.json
+    veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
+    veromesh-connect erp exceptions --since 2026-11-01
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
     veromesh-connect cleanup [--older-than-hours 24]
@@ -27,6 +29,8 @@ Source systems:
     ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET,
     ENTRA_GRAPH_URL / ENTRA_LOGIN_URL      defaults https://graph.microsoft.com and
                                             https://login.microsoftonline.com
+    ORACLE_URL, ORACLE_USER, ORACLE_PASSWORD
+                                            Oracle Fusion Cloud (basic authentication)
 """
 
 from __future__ import annotations
@@ -43,10 +47,13 @@ from . import __version__
 from .core import ApiError, ApiSession, ClientCredentials, Runner, RunOptions, StaticToken, Transport
 from .core.source import SOURCE_RETRY, RefreshToken, SourceApi, SourceError
 from .plugins import (
+    BasicAuth,
     CsvConnector,
     EntraChangesConnector,
     EntraConnector,
     GraphClient,
+    OracleClient,
+    OracleErpConnector,
     SpreadsheetConnector,
     WorkdayChangesConnector,
     WorkdayClient,
@@ -181,6 +188,49 @@ def graph_client(args, http: httpx.Client | None = None) -> GraphClient:
         "https://graph.microsoft.com/.default",
     )
     return GraphClient(SourceApi("Microsoft Graph", graph, auth))
+
+
+def oracle_client(args, http: httpx.Client | None = None) -> OracleClient:
+    url = _need(args.url, "--url", "ORACLE_URL")
+    t = _source_transport(url, "Oracle Fusion", http)
+    user = _need(os.environ.get("ORACLE_USER"), "ORACLE_USER", "the environment")
+    auth = BasicAuth(user, os.environ.get("ORACLE_PASSWORD", ""))
+    return OracleClient(SourceApi("Oracle Fusion", t, auth))
+
+
+def erp_import(api: ApiSession, args) -> int:
+    conn = OracleErpConnector(
+        oracle_client(args, getattr(args, "source_http", None)),
+        role_map=_load_mapping(args.role_map) if args.role_map else None,
+        people=api.entities("people"),
+    )
+    opts = RunOptions(source=args.source or "erp", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def erp_exceptions(api: ApiSession, args) -> int:
+    from datetime import date
+
+    from .plugins.oracle_erp import exceptions
+
+    found = exceptions(
+        oracle_client(args, getattr(args, "source_http", None)),
+        date.fromisoformat(args.since),
+        people=api.entities("people"),
+        authorities=api.entities("authorities"),
+        co_approvals=api.entities("co-approvals"),
+    )
+    kinds: dict[str, int] = defaultdict(int)
+    for f in found:
+        kinds[f["kind"]] += 1
+    summary = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "none"
+    if args.dry_run:
+        _out(f"Found {len(found)} approval exceptions ({summary}); dry run, nothing sent.")
+        return 0
+    source = args.source or "erp"
+    api.call("PUT", f"/findings/reported/{source}", json=found)
+    _out(f"Reported {len(found)} approval exceptions for source '{source}' ({summary}).")
+    return 0
 
 
 def workday_import(api: ApiSession, args) -> int:
@@ -381,6 +431,24 @@ def parser() -> argparse.ArgumentParser:
     ec.add_argument("--source")
     ec.add_argument("--dry-run", action="store_true")
     ec.set_defaults(fn=entra_changes)
+
+    def erp_flags(sp):
+        sp.add_argument("--url", default=os.environ.get("ORACLE_URL"), help="Oracle Fusion Cloud host")
+
+    er = sub.add_parser(
+        "erp", help="Oracle Fusion Cloud ERP: who can act, approval exceptions"
+    ).add_subparsers(dest="action", required=True)
+    eri = er.add_parser("import", help="Load every active ERP account linked to a person")
+    erp_flags(eri)
+    eri.add_argument("--role-map", help="YAML object: Oracle role code -> role ID (roles filled in the ERP)")
+    load_flags(eri)
+    eri.set_defaults(fn=erp_import)
+    erx = er.add_parser("exceptions", help="Report approval exceptions since a date as findings")
+    erp_flags(erx)
+    erx.add_argument("--since", required=True, help="YYYY-MM-DD: purchase orders and approvals on or after")
+    erx.add_argument("--source")
+    erx.add_argument("--dry-run", action="store_true")
+    erx.set_defaults(fn=erp_exceptions)
 
     sub.add_parser("sources", help="Sources loaded into the model").set_defaults(fn=sources)
     r = sub.add_parser("runs", help="Recent connector runs (changesets), newest first")

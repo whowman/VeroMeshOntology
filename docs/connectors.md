@@ -155,12 +155,13 @@ Guidelines:
 | CSV | `csv import <file or folder>` | One file per entity type (named after it, or `--type`), or any columns with `--mapping` |
 | Workday | `workday import \| changes` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each |
 | Microsoft Entra ID | `entra import \| changes` | Users, managers, role groups and AI agents through Microsoft Graph; changes through delta queries |
+| Oracle Fusion Cloud ERP | `erp import \| exceptions` | Who can act in the ERP (active accounts and their roles); approval exceptions (purchase orders their buyer approved, invoices approved above the approver's limit or without a co-approver) reported as findings |
 
-Tests for the SDK and the connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode. The Workday and Entra ID connectors are tested against small fakes of the public APIs, and against the VeroMesh test harness (a simulated company with each system's quirks) when it is installed: `test_against_harness.py`.
+Tests for the SDK and the connectors run against the real API in-process (`connectors/tests`), including retries, token refresh, crash-resume, concurrent edits and event mode. The Workday, Entra ID and Oracle ERP connectors are tested against small fakes of the public APIs, and against the VeroMesh test harness (a simulated company with each system's quirks) when it is installed: `test_against_harness.py`.
 
 ### Source systems' APIs
 
-Connectors that call a source system's API use `core/source.py`: `SourceApi` reads JSON with the same transport as the VeroMesh side (backoff, `Retry-After`; for reads a 500 is retried too) and renews the source's OAuth token once on a 401. Grants: `ClientCredentials` (Entra ID) and `RefreshToken` (Workday). A source that refuses a request or cannot be reached is reported as a `SourceError` naming the system.
+Connectors that call a source system's API use `core/source.py`: `SourceApi` reads JSON with the same transport as the VeroMesh side (backoff, `Retry-After`; for reads a 500 is retried too) and renews the source's OAuth token once on a 401. Grants: `ClientCredentials` (Entra ID), `RefreshToken` (Workday) and `BasicAuth` (Oracle Fusion's integration user). A source that refuses a request or cannot be reached is reported as a `SourceError` naming the system.
 
 ### Workday
 
@@ -188,4 +189,18 @@ veromesh-connect entra changes --tenant <tenant ID> --role-group-prefix SG- --st
 - **Writes:** people (ID = `employeeId`, the same as the HR system, so both sources describe one person; for accounts with no employee ID, such as contractors, the user principal name's local part, which the service warns about), roles from role groups, and agents (the client ID they sign in with, and the owner they act for). Disabled accounts are left out, along with references to them. An agent whose owners have all left is left out too, so the decision check refuses it.
 - **Changes** (`changes`): Graph delta queries. The first run records the current position in the state file; later runs apply each changed user as one event (with their manager and role groups), and delete removed or disabled accounts. The position is saved only when every event applied, so a refused event is retried. A leaver who is still the principal of an agent is refused until the agent is reassigned or the next full load leaves it out.
 
-Register each source once with its category (`hr` for Workday, `iam` for Entra ID) so precedence applies; see `docs/provenance.md`.
+### Oracle Fusion Cloud ERP
+
+```bash
+export ORACLE_USER=... ORACLE_PASSWORD=...
+veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com --role-map erp-roles.yaml
+veromesh-connect erp exceptions --url https://acme.fa.us2.oraclecloud.com --since 2026-11-01
+```
+
+- **Sign-in:** an integration user with basic authentication, able to read user accounts, purchase orders, invoices and their approval history.
+- **Full load** (`import`): `/hcmRestApi/resources/11.13.18.05/userAccounts?expand=userAccountRoles`, 500 a page (`limit`, `offset`, `hasMore`). Run it after HR and Entra ID, because it matches accounts to the people VeroMesh already holds.
+- **Writes:** people, one per account that is not suspended and is linked to a person: the person number when it is an employee ID VeroMesh knows, else the user name's local part when that is a person VeroMesh holds (a contractor, as Entra ID names them), else the person number. With `--role-map` (an object of Oracle role codes to role IDs, such as `ORA_AP_ACCOUNTS_PAYABLE_MANAGER_JOB: APManager`), the roles they fill in the ERP. No employee ID (the ERP is not the record of employment), and the name VeroMesh already holds, because Oracle's accounts carry none. A leaver whose ERP account is still active therefore shows as **access without employment** (`GET /api/v1/findings`).
+- **Exceptions** (`exceptions`): purchase orders (`purchaseOrders`, buyer and approver) and invoice approvals (`invoices`, `invoiceApprovalsAndNotificationsHistory`) on or after `--since`, checked against the authorities and co-approval tiers in VeroMesh; reported with `PUT /api/v1/findings/reported/erp`, each run replacing the last. Roles are the ones VeroMesh holds today, so someone who has since changed role can show, and an approver who has left since cannot be checked.
+- **What Oracle does not publish:** the invoice approval rules themselves (amounts and approver levels are BPM approval rules set up in Functional Setup Manager, with no REST resource to read them). The ERP team exports the limits in force into the standard workbook (Authorities and Co-approvals sheets) and loads it as a source registered as `erp`: the workflow closest to the decision decides, and a difference from the governance workbook is an **out of sync** finding.
+
+Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP) so precedence applies; see `docs/provenance.md`.

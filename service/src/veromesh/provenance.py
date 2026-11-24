@@ -302,23 +302,33 @@ def _categories(store: RDFStore) -> dict[str, str]:
 
 def registry(store: RDFStore) -> dict[str, dict]:
     res = store.query(
-        f"""SELECT ?name ?cat ?owner ?desc WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
+        f"""SELECT ?name ?cat ?owner ?desc ?derived WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{
               ?s <{VMP.name}> ?name ; <{VMP.category}> ?cat .
-              OPTIONAL {{ ?s <{VMP.ownerRole}> ?owner }} OPTIONAL {{ ?s <{VMP.description}> ?desc }} }} }}"""
+              OPTIONAL {{ ?s <{VMP.ownerRole}> ?owner }} OPTIONAL {{ ?s <{VMP.description}> ?desc }}
+              OPTIONAL {{ ?s <{VMP.derivedFrom}> ?derived }} }} }}"""
     )
     return {
         b["name"]["value"]: {
             "category": b["cat"]["value"],
             "ownerRole": b.get("owner", {}).get("value"),
             "description": b.get("desc", {}).get("value"),
+            "derivedFrom": json.loads(b["derived"]["value"]) if b.get("derived") else {},
         }
         for b in res["results"]["bindings"]
     }
 
 
 def register_source(
-    store: RDFStore, name: str, category: str, owner_role: str | None = None, description: str | None = None
+    store: RDFStore,
+    name: str,
+    category: str,
+    owner_role: str | None = None,
+    description: str | None = None,
+    derived_from: dict[str, str] | None = None,
 ) -> dict:
+    """Register a source. ``derived_from`` maps a domain to the source this one takes it
+    from (an AP workflow whose limits are copied from Workday levels): where the two
+    differ the findings report "out of sync" to this source's owner (issue #67)."""
     from .changesets import check_source
 
     check_source(name)
@@ -332,13 +342,29 @@ def register_source(
         extra += f" ; <{VMP.ownerRole}> {literal(owner_role)}"
     if description:
         extra += f" ; <{VMP.description}> {literal(description)}"
+    if derived_from:
+        from . import domains
+
+        known = domains.current(store)
+        bad = sorted(d for d in derived_from if d not in known)
+        if bad:
+            raise ValueError(f"derivedFrom: no domain {', '.join(bad)}. Domains: {', '.join(known)}.")
+        if name in derived_from.values():
+            raise ValueError("derivedFrom: a source cannot be derived from itself.")
+        extra += f" ; <{VMP.derivedFrom}> {literal(json.dumps(derived_from, sort_keys=True))}"
     store.update(
         f"""DELETE {{ GRAPH <{REGISTRY_GRAPH}> {{ <{s}> ?p ?o }} }} WHERE {{ GRAPH <{REGISTRY_GRAPH}> {{ <{s}> ?p ?o }} }} ;
             INSERT DATA {{ GRAPH <{REGISTRY_GRAPH}> {{
               <{s}> a <{VMP.Source}>, <{PROV.SoftwareAgent}> ; <{VMP.name}> {literal(name)} ;
                 <{VMP.category}> {literal(category)}{extra} . }} }}"""
     )
-    return {"source": name, "category": category, "ownerRole": owner_role, "description": description}
+    return {
+        "source": name,
+        "category": category,
+        "ownerRole": owner_role,
+        "description": description,
+        "derivedFrom": derived_from or {},
+    }
 
 
 # ---------------------------------------------------------------------------- claims
