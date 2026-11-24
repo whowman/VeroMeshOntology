@@ -528,6 +528,22 @@
         "targets": [
           "people"
         ]
+      },
+      {
+        "help": "Department or supervisory organization code, from HR. Used for an authority's scope.",
+        "key": "department",
+        "kind": "text",
+        "label": "Department",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "Cost centre code, from HR or finance. Used for an authority's scope.",
+        "key": "costCentre",
+        "kind": "text",
+        "label": "Cost centre",
+        "multi": false,
+        "required": false
       }
     ],
     "help": "Only role-relevant facts. Anything else is rejected by the validation rules.",
@@ -605,6 +621,50 @@
         "required": false
       },
       {
+        "help": "amount (money, the default), percent (e.g. a raise), grade-steps (a promotion) or headcount (hires).",
+        "key": "limitKind",
+        "kind": "str_enum",
+        "label": "Limit kind",
+        "multi": false,
+        "required": false,
+        "values": [
+          "amount",
+          "percent",
+          "grade-steps",
+          "headcount"
+        ]
+      },
+      {
+        "help": "For a limit kind other than amount: the largest value the holder may decide, e.g. 10 (percent).",
+        "key": "limitValue",
+        "kind": "decimal",
+        "label": "Limit value",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "Over whom: any (default), reporting-line (people below the holder), department or cost-centre.",
+        "key": "scope",
+        "kind": "str_enum",
+        "label": "Scope",
+        "multi": false,
+        "required": false,
+        "values": [
+          "any",
+          "reporting-line",
+          "department",
+          "cost-centre"
+        ]
+      },
+      {
+        "help": "For department or cost-centre scope: the unit's code. Empty: the holder's own.",
+        "key": "scopeUnit",
+        "kind": "text",
+        "label": "Scope unit",
+        "multi": false,
+        "required": false
+      },
+      {
         "help": "First day the authority holds (YYYY-MM-DD). Empty: from now.",
         "key": "validFrom",
         "kind": "date",
@@ -672,26 +732,47 @@
         ]
       },
       {
-        "help": "ID of the role whose second sign-off is needed.",
+        "help": "ID of the role whose sign-off is needed. Give this or an approver relation.",
         "key": "approverRole",
         "kind": "ref",
         "label": "Approver role",
         "multi": false,
-        "required": true,
+        "required": false,
         "targets": [
           "roles"
         ]
       },
       {
-        "help": "Applies to actions above this amount, in the authority's currency.",
+        "help": "Instead of a role: manager or manager-of-manager of the person the action is about, or principal-manager.",
+        "key": "approverRelation",
+        "kind": "str_enum",
+        "label": "Approver relation",
+        "multi": false,
+        "required": false,
+        "values": [
+          "manager",
+          "manager-of-manager",
+          "principal-manager"
+        ]
+      },
+      {
+        "help": "Order in an approval chain (1, 2, ...): the decision lists its sign-offs in this order. Empty: first.",
+        "key": "step",
+        "kind": "decimal",
+        "label": "Step",
+        "multi": false,
+        "required": false
+      },
+      {
+        "help": "Applies above this amount (or, for another limit kind, this value). Empty: always.",
         "key": "aboveAmount",
         "kind": "decimal",
         "label": "Above amount",
         "multi": false,
-        "required": true
+        "required": false
       }
     ],
-    "help": "Second sign-offs required above an amount. One row per tier.",
+    "help": "Further sign-offs: a second sign-off above an amount, or the steps of an approval chain. One row per tier or step.",
     "keyed": false,
     "label": "Co-approvals",
     "type": "co-approvals"

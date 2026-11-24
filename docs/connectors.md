@@ -153,7 +153,7 @@ Guidelines:
 | --- | --- | --- |
 | Spreadsheet | `spreadsheet template \| import \| export` | The VeroMesh workbook: one sheet per entity type, generated from the API's schema; export writes a source back out for editing |
 | CSV | `csv import <file or folder>` | One file per entity type (named after it, or `--type`), or any columns with `--mapping` |
-| Workday | `workday import \| changes` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each |
+| Workday | `workday import \| changes \| approvals` | Workers, positions and managers from Workday's public APIs; changes since a date, one event each; business process approval rules |
 | Microsoft Entra ID | `entra import \| changes` | Users, managers, role groups and AI agents through Microsoft Graph; changes through delta queries |
 | ServiceNow CMDB | `servicenow import` | Business applications as systems (criticality, lifecycle), an owner role per application's business and technical owner, filled by the people ServiceNow names; active users (who can sign in) as a second source; likely duplicate applications reported as findings |
 | HaloITSM | `halo import` | Business applications (matched to systems VeroMesh already holds by name) and their owners; enabled agent seats as a second source |
@@ -171,11 +171,14 @@ Connectors that call a source system's API use `core/source.py`: `SourceApi` rea
 export WORKDAY_CLIENT_ID=... WORKDAY_CLIENT_SECRET=... WORKDAY_REFRESH_TOKEN=...
 veromesh-connect workday import --url https://wd2-impl-services1.workday.com --tenant acme
 veromesh-connect workday changes --since 2026-11-01      # prints the --since for the next run
+veromesh-connect workday approvals --tenant acme --role-map groups.yaml   # business process rules
 ```
 
 - **Sign-in:** an API client registered in Workday, with a refresh token for the integration system user (without `WORKDAY_REFRESH_TOKEN`, client credentials), at `/ccx/oauth2/{tenant}/token`.
 - **Full load** (`import`): by default the custom report `ISU_VeroMesh/VeroMesh_Workers` through Reports as a Service (`--report-owner`, `--report`); it needs the columns `Employee_ID`, `Preferred_Name`, `Email_Primary_Work`, `Business_Title`, `Manager_Employee_ID`, `Hire_Date`, `Termination_Date` and `Active_Status`. `--via rest` reads `/ccx/api/v1/{tenant}/workers` instead, 100 a page.
 - **Writes:** people (ID = employee ID; the preferred name; email; manager; the role filled; valid from the hire date and until a termination date ahead) and a role per business title (`--role-map` maps titles to existing role IDs; `--no-roles` writes none). Workers whose termination has taken effect are left out. A manager who is not in the run (a contractor) is left out of the reference, and the run says how many.
+- **Placement and groups:** optional report columns `Supervisory_Organization` and `Cost_Center` give each person's department and cost centre (an authority's scope), and `Organization_Roles` the role-based security groups assigned to them (HR Partner), ';'-separated, as roles. `--manager-role Manager` gives everyone with direct reports the group business processes call Manager.
+- **Business processes** (`approvals`, step 6b): the custom report `VeroMesh_Approval_Rules` over the business process definitions, one row per rule (`Business_Process_Type`, `Rule_Type` Initiator or Approval, `Security_Group`, `Condition_Measure` Percent_Change, Grade_Steps, Headcount or Amount, `Condition_Above`, `Organization_Scope`, `Step_Order`). An initiator becomes an authority held by the group's role (`{role}-{action}`) with its limit and scope (Supervisory Organization: the reporting line; Organization: the department; Cost Center; Company: anyone). An approval step becomes a co-approval on each initiator's authority: Manager and Manager's Manager as relations to the worker, other groups as roles. Processes map to actions (`--process-map`; by default Request Compensation Change → AdjustPay, Promote Employee Inbound → PromoteEmployee, Hire → HireEmployee, Termination → TerminateEmployee). Register the source (`workday-approvals`) as `hr`: for decisions about people the business process is the workflow in force.
 - **Changes** (`changes`): the report `VeroMesh_Worker_Changes` with `Updated_From`, by the date each business process was entered, so a termination entered late is still picked up. Each event fetches the worker and upserts them; a termination that has taken effect deletes them. Overlapping runs are safe: each event is applied once.
 
 ### Microsoft Entra ID

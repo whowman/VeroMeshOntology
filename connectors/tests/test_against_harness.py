@@ -11,6 +11,7 @@ company whose truth it knows, with each system's quirks recorded as defects.
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -45,7 +46,15 @@ def company():
 
 
 def load(http, h) -> None:
-    assert main([*API, *WORKDAY], http=http, source_http=h) == 0
+    import tempfile
+
+    groups = Path(tempfile.mkdtemp()) / "groups.yaml"  # Workday security groups to model roles
+    groups.write_text("Manager: PeopleManager\nHR Partner: HRPartner\n")
+    wd = [*WORKDAY, "--manager-role", "Manager", "--role-map", str(groups)]
+    assert main([*API, *wd], http=http, source_http=h) == 0
+    # The business process rules (promotions, pay, hires, terminations) the workbook's agents rely on.
+    approvals = ["workday", "approvals", *WORKDAY[2:], "--role-map", str(groups)]
+    assert main([*API, *approvals], http=http, source_http=h) == 0
     assert (
         main([*API, "entra", "import", *GRAPH, "--role-group-prefix", "SG-"], http=http, source_http=h) == 0
     )

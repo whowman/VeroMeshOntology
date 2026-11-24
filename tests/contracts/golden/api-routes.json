@@ -545,6 +545,12 @@
   "POST /api/v1/decisions/check": {
     "body": {
       "application/json": {
+        "about?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
         "action": "string",
         "agent?": {
           "anyOf": [
@@ -574,6 +580,13 @@
         "onDate?": {
           "anyOf": [
             "string",
+            "null"
+          ]
+        },
+        "value?": {
+          "anyOf": [
+            "string",
+            "number",
             "null"
           ]
         }

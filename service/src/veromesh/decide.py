@@ -162,8 +162,86 @@ def _valid(a: dict, day: date) -> str | None:
     return None
 
 
-def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) -> dict | None:
-    """The authority a role holds for ``action`` that covers ``amt`` on ``day``, with the
+def _below(m: Model, person: str, boss: str) -> bool:
+    """Is ``person`` in ``boss``'s reporting line (below them, not them)?"""
+    seen = {person}
+    cur = person
+    for _ in range(50):
+        up = (m.get("people", cur) or {}).get("reportsTo")
+        if not up or up in seen:
+            return False
+        if up == boss:
+            return True
+        seen.add(up)
+        cur = up
+    return False
+
+
+def _holder_people(m: Model, holder: str | None, principal: str | None = None) -> list[str]:
+    """The people an authority's holder stands for: a person; a role's fillers; an agent's principal."""
+    if not holder:
+        return []
+    if m.get("people", holder) is not None:
+        return [holder]
+    if m.get("roles", holder) is not None:
+        return [p["id"] if isinstance(p, dict) else p for p in m.people_in(holder)]
+    ag = m.get("agents", holder)
+    if ag is not None and ag.get("actsFor"):
+        return [ag["actsFor"]]
+    return [principal] if principal else []
+
+
+def _scope_problem(m: Model, a: dict, holders: list[str], about: str | None) -> str | None:
+    """Why ``about`` is outside the authority's scope (over whom it may be used), or None."""
+    scope = a.get("scope") or "any"
+    if scope == "any":
+        return None
+    if not about:
+        return f"its scope is {scope}: give the person the action is about"
+    p = m.get("people", about)
+    if p is None:
+        return f"no person '{about}' in the model"
+    who = p.get("name") or about
+    if scope == "reporting-line":
+        if any(_below(m, about, h) for h in holders):
+            return None
+        names = ", ".join(m.name("people", h) for h in holders) or "nobody"
+        return f"{who} is outside its scope (the reporting line of {names})"
+    key = "department" if scope == "department" else "costCentre"
+    units = {a["scopeUnit"]} if a.get("scopeUnit") else {(m.get("people", h) or {}).get(key) for h in holders}
+    units.discard(None)
+    if p.get(key) in units:
+        return None
+    label = "department" if key == "department" else "cost centre"
+    return f"{who} ({label} {p.get(key) or 'none'}) is outside its scope ({label} {', '.join(sorted(units)) or 'unknown'})"
+
+
+def _limit_problem(a: dict, amt, cur, val) -> str | None:
+    """Why the amount or value is above the authority's limit (or cannot be compared), or None."""
+    kind = a.get("limitKind") or "amount"
+    if kind == "amount":
+        limit = _dec(a.get("limitAmount"))
+        if amt is not None and limit is not None:
+            if (a.get("currency") or "").upper() != cur:
+                return f"its limit is in {a.get('currency')}, the amount in {cur}"
+            if amt > limit:
+                return f"{_money(amt)} {cur} is above its limit of {_money(limit)} {cur}"
+        return None
+    limit = _dec(a.get("limitValue"))
+    if limit is None:
+        return None
+    if val is None:
+        return f"its limit is {_money(limit)} {kind}: give the value"
+    if val > limit:
+        return f"{_money(val)} {kind} is above its limit of {_money(limit)} {kind}"
+    return None
+
+
+def _next_authority(
+    m: Model, action: str, amt, cur, day: date, skip: set[str], val=None, about: str | None = None
+) -> dict | None:
+    """The authority a role holds for ``action`` that covers ``amt`` (or ``val``, for a
+    limit that is not money) on ``day``, and whose scope takes in ``about``, with the
     smallest limit: the next authority up from the agent's. A role with people in it
     comes before a vacant one, so a decision does not wait on a post nobody fills."""
     found = []
@@ -173,15 +251,68 @@ def _next_authority(m: Model, action: str, amt, cur, day: date, skip: set[str]) 
             continue
         if any(_valid(x, day) for x in _chain(m, a)):
             continue
-        limit = _dec(a.get("limitAmount"))
-        if (
-            amt is not None
-            and limit is not None
-            and ((a.get("currency") or "").upper() != cur or amt > limit)
-        ):
+        if _limit_problem(a, amt, cur, val):
             continue  # with no amount, any authority for the action covers it
+        if _scope_problem(m, a, _holder_people(m, holder), about):
+            continue
+        kind = a.get("limitKind") or "amount"
+        limit = _dec(a.get("limitAmount") if kind == "amount" else a.get("limitValue"))
         found.append((not m.people_in(holder), limit is None, limit or Decimal(0), a["id"], a))
     return min(found, key=lambda f: f[:4])[4] if found else None
+
+
+def _sign_offs(
+    m: Model, auth: dict, amt, cur, val, about: str | None, principal: str | None
+) -> tuple[list, list]:
+    """The co-approvals and approval-chain steps the authority (and those it derives from)
+    asks for this action: consult entries in step order, and why any cannot be named."""
+    kind = auth.get("limitKind") or "amount"
+    measure = amt if kind == "amount" else val
+    unit = cur if kind == "amount" else kind
+    rows = []
+    for t in m.by("co-approvals", "authority", *[x["id"] for x in _chain(m, auth)]):
+        above = _dec(t.get("aboveAmount"))
+        if above is not None and (measure is None or measure <= above):
+            continue
+        rows.append((_dec(t.get("step")) or Decimal(0), t, above))
+    rows.sort(key=lambda r: (r[0], r[1].get("approverRole") or r[1].get("approverRelation") or ""))
+    out, missing = [], []
+    for step, t, above in rows:
+        why = f"co-approval required above {_money(above)} {unit}" if above is not None else "approval chain"
+        if step:
+            why = f"step {_money(step)} of the approval chain" + (
+                f", above {_money(above)} {unit}" if above is not None else ""
+            )
+        if t.get("approverRole"):
+            e = _consult_entry(m, t["approverRole"], why)
+        else:
+            rel = t.get("approverRelation")
+            start = principal if rel == "principal-manager" else about
+            if not start:
+                missing.append(
+                    f"the approval chain asks for the {rel} of the person the action is about: give them"
+                )
+                continue
+            boss = (m.get("people", start) or {}).get("reportsTo")
+            if boss and rel == "manager-of-manager":
+                boss = (m.get("people", boss) or {}).get("reportsTo")
+            if not boss:
+                missing.append(
+                    f"{m.name('people', start)} has no {rel.replace('principal-', '')} in the model"
+                )
+                continue
+            e = {
+                "role": f"person:{boss}",
+                "roleName": f"{m.name('people', boss)} ({rel.replace('-', ' ')} of {m.name('people', start)})",
+                "people": [{"id": boss, "name": m.name("people", boss)}],
+                "person": boss,
+                "why": why,
+            }
+        if step:
+            e["step"] = int(step) if step == int(step) else float(step)
+        if not any(x["role"] == e["role"] for x in out):
+            out.append(e)
+    return out, missing
 
 
 def _objective_owners(m: Model, obj: dict, kpis: set[str]) -> list[str]:
@@ -352,8 +483,15 @@ def check(
     require_attested: bool = True,
     require_use_case: bool = False,
     unmapped_impact: str = "consult",
+    about: str | None = None,
+    value=None,
 ) -> dict:
     """Decide, append the decision to the log, and return the log entry plus who to inform.
+
+    ``about``: the person the action is about (the employee promoted, given a raise, hired
+    or let go), for an authority's scope and an approval chain's relations. ``value``: what
+    the action amounts to when it is not money (a raise's percent, a promotion's grade
+    steps, a hire's headcount), compared with a limit of that kind.
 
     ``require_use_case``: refuse an agent no current approved AI use case covers for the action
     (the governance board's decision gates the agent). ``unmapped_impact``: what an action with
@@ -379,6 +517,8 @@ def check(
             require_attested,
             require_use_case,
             unmapped_impact,
+            about,
+            value,
         )
 
 
@@ -396,11 +536,20 @@ def _check(
     require_attested,
     require_use_case=False,
     unmapped_impact="consult",
+    about=None,
+    value=None,
 ) -> dict:
     m = Model(store, base)
     day = on or clock.today()
     amt = _dec(amount)
+    val = _dec(value)
     cur = currency.upper() if currency else None
+    if value not in (None, "") and val is None:
+        raise ValueError("The value must be a number.")
+    if val is not None and val < 0:
+        raise ValueError("The value cannot be negative.")
+    if about and m.get("people", about) is None:
+        raise prov_not_found(f"No person '{about}' in the model.")
     if amt is not None and amt < 0:
         raise ValueError("The amount cannot be negative.")
     if amt is not None and not cur:
@@ -415,6 +564,10 @@ def _check(
     basis: dict = {"onDate": day.isoformat()}
     if hasattr(store, "version"):  # the published model this decision was made on (pinned for the check)
         basis["modelVersion"] = store.version()
+    if about:
+        basis["about"] = about
+    if val is not None:
+        basis["value"] = str(val)
 
     # 1. For whom
     ag = m.get("agents", agent)
@@ -471,12 +624,13 @@ def _check(
                 why.append(f"{label} {v}")
             if action not in link.get("actionsCovered", []):
                 why.append(f"{label} does not cover '{act_name}'")
-        limit = _dec(a.get("limitAmount"))
-        if amt is not None and limit is not None:
-            if (a.get("currency") or "").upper() != cur:
-                why.append(f"its limit is in {a.get('currency')}, the amount in {cur}")
-            elif amt > limit:
-                why.append(f"{_money(amt)} {cur} is above its limit of {_money(limit)} {cur}")
+        over = _limit_problem(a, amt, cur, val)
+        if over:
+            why.append(over)
+        # Over whom: the agent works within its principal's place in the organization.
+        out_of_scope = _scope_problem(m, a, _holder_people(m, agent, principal), about)
+        if out_of_scope:
+            why.append(out_of_scope)
         problems[a["id"]] = why
         if not why and used is None:
             used = a["id"]
@@ -494,21 +648,21 @@ def _check(
         over_limit = any("above its limit" in w for w in problems[a["id"]])
         only_limit = over_limit and all("above its limit" in w for w in problems[a["id"]])
         skip = {x["id"] for x in held} | principal_auths
-        nxt = _next_authority(m, action, amt, cur, day, skip=skip) if only_limit and amt is not None else None
+        measured = amt is not None or val is not None
+        nxt = (
+            _next_authority(m, action, amt, cur, day, skip=skip, val=val, about=about)
+            if only_limit and measured
+            else None
+        )
         if nxt is not None:
             why = (
                 f"{'; '.join(problems[a['id']])} (the agent's authority); within "
                 f"'{nxt.get('name') or nxt['id']}'"
             )
             consult.append(_consult_entry(m, nxt["holder"], why))
-            for t in m.by("co-approvals", "authority", *[x["id"] for x in _chain(m, nxt)]):
-                above = _dec(t.get("aboveAmount"))
-                if above is not None and amt is not None and amt > above:
-                    consult.append(
-                        _consult_entry(
-                            m, t["approverRole"], f"co-approval required above {_money(above)} {cur}"
-                        )
-                    )
+            more, missing = _sign_offs(m, nxt, amt, cur, val, about, principal)
+            consult.extend(e for e in more if e["role"] not in {c["role"] for c in consult})
+            refuse.extend(missing)
             reasons.append(
                 f"Above the agent's authority: {'; '.join(problems[a['id']])}. "
                 f"Consult the next authority up: {m.name('roles', nxt['holder'])}."
@@ -524,7 +678,9 @@ def _check(
                 }
 
     if suspended and not refuse and "nextAuthority" not in basis:
-        nxt = _next_authority(m, action, amt, cur, day, skip={x["id"] for x in held} | principal_auths)
+        nxt = _next_authority(
+            m, action, amt, cur, day, skip={x["id"] for x in held} | principal_auths, val=val, about=about
+        )
         who = m.name("people", principal)
         if nxt is not None:
             consult.append(
@@ -548,9 +704,16 @@ def _check(
     if used:
         auth = m.get("authorities", used)
         lim = _dec(auth.get("limitAmount"))
+        kind = auth.get("limitKind") or "amount"
+        if kind != "amount":
+            lim, unit = _dec(auth.get("limitValue")), kind
+        else:
+            unit = auth.get("currency")
+        scope = auth.get("scope") or "any"
         reasons.append(
             f"Within '{auth.get('name') or used}'"
-            + (f" (limit {_money(lim)} {auth.get('currency')})" if lim is not None else "")
+            + (f" (limit {_money(lim)} {unit})" if lim is not None else "")
+            + (f", for {m.name('people', about)} (scope {scope})" if about and scope != "any" else "")
             + f", valid on {day.isoformat()}."
         )
         basis["authority"] = used
@@ -566,17 +729,15 @@ def _check(
                     + (f" (and {len(b['reasons']) - 5} more)" if len(b["reasons"]) > 5 else "")
                     + "."
                 )
-        # 5. Co-approval
-        if amt is not None:
-            chain_ids = [x["id"] for x in _chain(m, auth)]
-            for t in m.by("co-approvals", "authority", *chain_ids):
-                above = _dec(t.get("aboveAmount"))
-                if above is not None and amt > above:
-                    consult.append(
-                        _consult_entry(
-                            m, t["approverRole"], f"co-approval required above {_money(above)} {cur}"
-                        )
-                    )
+        # 5. Co-approval and approval chains: second sign-offs above an amount or value, and
+        # the steps a business process asks for (the employee's manager, their manager...).
+        more, missing = _sign_offs(m, auth, amt, cur, val, about, principal)
+        consult.extend(e for e in more if e["role"] not in {c["role"] for c in consult})
+        refuse.extend(missing)
+        if any("step" in e for e in more):
+            basis["approvalChain"] = [
+                {"step": e.get("step"), "role": e["role"], "people": e["people"]} for e in more
+            ]
 
     # 6. Impact
     if not refuse:

@@ -84,6 +84,14 @@ def _name(what: str) -> Col:
 
 
 OBJECTIVE_LEVELS = ("enterprise", "function", "capability", "process")
+#: Over whom an authority may be used (step 6b): anyone, the holder's reporting line (the
+#: people below them), or a department or cost centre (the scope unit, else the holder's own).
+AUTHORITY_SCOPES = ("any", "reporting-line", "department", "cost-centre")
+#: What an authority's limit counts: money (limit amount and currency), or a percent (a raise),
+#: grade steps (a promotion) or headcount (hires), compared with the value a check gives.
+LIMIT_KINDS = ("amount", "percent", "grade-steps", "headcount")
+#: A chain step's approver relative to the person the action is about, or to the principal.
+APPROVER_RELATIONS = ("manager", "manager-of-manager", "principal-manager")
 
 
 def _owner() -> Col:
@@ -365,6 +373,18 @@ SHEETS: tuple[Sheet, ...] = (
                 personal=True,
                 help="ID of the person's manager.",
             ),
+            Col(
+                "Department",
+                "text",
+                VMO.department,
+                help="Department or supervisory organization code, from HR. Used for an authority's scope.",
+            ),
+            Col(
+                "Cost centre",
+                "text",
+                VMO.costCentre,
+                help="Cost centre code, from HR or finance. Used for an authority's scope.",
+            ),
         ),
         help="Only role-relevant facts. Anything else is rejected by the validation rules.",
     ),
@@ -406,6 +426,32 @@ SHEETS: tuple[Sheet, ...] = (
                 help="The largest amount the holder may decide for one action, in the currency given. Empty: no amount limit.",
             ),
             Col("Currency", "text", VMO.limitCurrency, help="ISO 4217 code, e.g. USD."),
+            Col(
+                "Limit kind",
+                "str_enum",
+                VMO.limitKind,
+                values=LIMIT_KINDS,
+                help="amount (money, the default), percent (e.g. a raise), grade-steps (a promotion) or headcount (hires).",
+            ),
+            Col(
+                "Limit value",
+                "decimal",
+                VMO.limitValue,
+                help="For a limit kind other than amount: the largest value the holder may decide, e.g. 10 (percent).",
+            ),
+            Col(
+                "Scope",
+                "str_enum",
+                VMO.authorityScope,
+                values=AUTHORITY_SCOPES,
+                help="Over whom: any (default), reporting-line (people below the holder), department or cost-centre.",
+            ),
+            Col(
+                "Scope unit",
+                "text",
+                VMO.scopeUnit,
+                help="For department or cost-centre scope: the unit's code. Empty: the holder's own.",
+            ),
             Col(
                 "Valid from",
                 "date",
@@ -453,19 +499,30 @@ SHEETS: tuple[Sheet, ...] = (
                 "ref",
                 VMO.approverRole,
                 ("Roles",),
-                required=True,
-                help="ID of the role whose second sign-off is needed.",
+                help="ID of the role whose sign-off is needed. Give this or an approver relation.",
+            ),
+            Col(
+                "Approver relation",
+                "str_enum",
+                VMO.approverRelation,
+                values=APPROVER_RELATIONS,
+                help="Instead of a role: manager or manager-of-manager of the person the action is about, or principal-manager.",
+            ),
+            Col(
+                "Step",
+                "decimal",
+                VMO.chainStep,
+                help="Order in an approval chain (1, 2, ...): the decision lists its sign-offs in this order. Empty: first.",
             ),
             Col(
                 "Above amount",
                 "decimal",
                 VMO.aboveAmount,
-                required=True,
-                help="Applies to actions above this amount, in the authority's currency.",
+                help="Applies above this amount (or, for another limit kind, this value). Empty: always.",
             ),
         ),
         keyed=False,
-        help="Second sign-offs required above an amount. One row per tier.",
+        help="Further sign-offs: a second sign-off above an amount, or the steps of an approval chain. One row per tier or step.",
     ),
     Sheet(
         "Agents",

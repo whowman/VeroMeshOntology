@@ -426,6 +426,62 @@ vmo:dataCategory
 # Attributes
 # -----------------------------------------------------------------------------
 
+vmo:department
+    a owl:DatatypeProperty ;
+    rdfs:label "department" ;
+    rdfs:domain vmo:Person ;
+    rdfs:range xsd:string ;
+    skos:definition "The department or supervisory organization a person belongs to, by code (from HR)." .
+
+vmo:costCentre
+    a owl:DatatypeProperty ;
+    rdfs:label "cost centre" ;
+    rdfs:domain vmo:Person ;
+    rdfs:range xsd:string ;
+    skos:definition "The cost centre a person is charged to, by code." .
+
+vmo:limitKind
+    a owl:DatatypeProperty ;
+    rdfs:label "limit kind" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:string ;
+    skos:definition "What the limit counts: amount (money), percent, grade-steps or headcount." .
+
+vmo:limitValue
+    a owl:DatatypeProperty ;
+    rdfs:label "limit value" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:decimal ;
+    skos:definition "For a limit kind other than amount, the largest value the holder may decide." .
+
+vmo:authorityScope
+    a owl:DatatypeProperty ;
+    rdfs:label "scope" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:string ;
+    skos:definition "Over whom the authority may be used: any, reporting-line, department or cost-centre." .
+
+vmo:scopeUnit
+    a owl:DatatypeProperty ;
+    rdfs:label "scope unit" ;
+    rdfs:domain vmo:DelegatedAuthority ;
+    rdfs:range xsd:string ;
+    skos:definition "The department or cost centre a scoped authority covers; empty: the holder's own." .
+
+vmo:approverRelation
+    a owl:DatatypeProperty ;
+    rdfs:label "approver relation" ;
+    rdfs:domain vmo:CoApproval ;
+    rdfs:range xsd:string ;
+    skos:definition "An approver named by relation: manager or manager-of-manager of the person the action is about, or principal-manager." .
+
+vmo:chainStep
+    a owl:DatatypeProperty ;
+    rdfs:label "step" ;
+    rdfs:domain vmo:CoApproval ;
+    rdfs:range xsd:decimal ;
+    skos:definition "The order of a sign-off in an approval chain." .
+
 vmo:objectiveLevel
     a owl:DatatypeProperty ;
     rdfs:label "level" ;

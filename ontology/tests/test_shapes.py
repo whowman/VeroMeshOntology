@@ -160,7 +160,7 @@ CASES = [
         "co-approval without an approver role",
         "DELETE { ?c vmo:approverRole ?r } WHERE { ex:ApApprovalAuthority vmo:requiresCoApproval ?c . ?c vmo:approverRole ?r }",
         "Violation",
-        "exactly one approver role",
+        "exactly one approver",
     ),
     (
         "delegator does not hold the authority they granted",

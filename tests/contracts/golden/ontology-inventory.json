@@ -133,13 +133,19 @@
         {
           "class": "vmo:Role",
           "maxCount": "1",
-          "minCount": "1",
           "path": "vmo:approverRole"
         },
         {
           "maxCount": "1",
-          "minCount": "1",
           "path": "vmo:aboveAmount"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:approverRelation"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:chainStep"
         },
         {
           "minCount": "1",
@@ -147,7 +153,7 @@
         }
       ],
       "severity": "",
-      "sparqlRules": 0,
+      "sparqlRules": 1,
       "target": [
         "vmo:CoApproval"
       ]
@@ -294,7 +300,15 @@
         },
         {
           "maxCount": "1",
+          "path": "vmo:authorityScope"
+        },
+        {
+          "maxCount": "1",
           "path": "vmo:limitAmount"
+        },
+        {
+          "maxCount": "1",
+          "path": "vmo:limitKind"
         },
         {
           "minCount": "1",
@@ -307,7 +321,7 @@
         }
       ],
       "severity": "",
-      "sparqlRules": 7,
+      "sparqlRules": 10,
       "target": [
         "vmo:DelegatedAuthority"
       ]
@@ -461,6 +475,16 @@
         {
           "class": "vmo:Role",
           "path": "vmo:fills"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmo:costCentre"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmo:department"
         },
         {
           "datatype": "xsd:string",
@@ -870,6 +894,15 @@
           "xsd:date"
         ]
       },
+      "vmo:approverRelation": {
+        "domain": [
+          "vmo:CoApproval"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmo:approverRole": {
         "domain": [
           "vmo:CoApproval"
@@ -886,6 +919,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:System"
+        ]
+      },
+      "vmo:authorityScope": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
         ]
       },
       "vmo:betterWhen": {
@@ -943,6 +985,15 @@
         "kind": "owl:DatatypeProperty",
         "range": [
           "xsd:string"
+        ]
+      },
+      "vmo:chainStep": {
+        "domain": [
+          "vmo:CoApproval"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
         ]
       },
       "vmo:cmdbId": {
@@ -1008,6 +1059,15 @@
           "vmo:DataElement"
         ]
       },
+      "vmo:costCentre": {
+        "domain": [
+          "vmo:Person"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmo:coversAction": {
         "domain": [
           "vmo:DelegatedAuthority"
@@ -1067,6 +1127,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "(vmo:Person or vmo:Policy or vmo:Role)"
+        ]
+      },
+      "vmo:department": {
+        "domain": [
+          "vmo:Person"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
         ]
       },
       "vmo:email": {
@@ -1187,6 +1256,24 @@
         "kind": "owl:DatatypeProperty",
         "range": [
           "xsd:string"
+        ]
+      },
+      "vmo:limitKind": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmo:limitValue": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:decimal"
         ]
       },
       "vmo:materialityThreshold": {
@@ -1357,6 +1444,15 @@
         "kind": "owl:ObjectProperty",
         "range": [
           "vmo:System"
+        ]
+      },
+      "vmo:scopeUnit": {
+        "domain": [
+          "vmo:DelegatedAuthority"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
         ]
       },
       "vmo:sensitivity": {

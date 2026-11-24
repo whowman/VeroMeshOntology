@@ -63,14 +63,14 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Process | A business process realizing a capability | owner, systems it runs on | Process repository |
 | Person | A human filling roles; principal for agents | name, employee ID, email, roles, reporting line, nothing else | HR, identity |
 | Role | A job role or position; ownership attaches here | name, who fills it, authority held | HR |
-| Delegated authority | A grant to decide or act | holder, actions covered, capability scope, limit and currency, co-approval tiers, validity dates, delegated by (person, role or policy), parent grant | ERP approval matrix, credentialing, credit authority |
+| Delegated authority | A grant to decide or act | holder, actions covered, capability scope, limit and currency (or a limit of another kind: percent, grade steps, headcount), scope over whom (reporting line, department, cost centre), co-approval tiers and approval chain steps, validity dates, delegated by (person, role or policy), parent grant | ERP approval matrix, HR business processes (Workday), credentialing, credit authority |
 | AI agent | Software that acts for exactly one person | principal, authority held, actions performed, data consumed, system, sign-in client ID | Agent registry, identity provider |
 | Action | A type of consequential action | process, KPIs and capabilities affected, materiality thresholds | Process owners |
 | Data product | Governed, owned data with known producers and consumers | owner, system, lineage (feeds), elements, sensitivity, catalog URN | DataHub |
 | System | An application or platform | business and technical owner, CMDB ID, criticality, lifecycle, regulatory scope | CMDB |
 | Approved AI use case (governance) | A governance board's decision that an AI use may run. Outside the 12 core types: it records a board decision about agents, not a new kind of authority | approving board (a role), status (approved, conditional, suspended, retired), agents covered, actions allowed, approved on, review by, conditions | AI review board register or minutes (source category `governance`) |
 
-Four supporting types: **Impact** (attaches a materiality threshold to "action affects KPI"), **Co-approval** (a second sign-off by a role above an amount), **Business data element** (a business-level data item) and **Column binding** (a DataHub column holds a data element; one per column, kept per source so it can be attested or disputed like any fact).
+Four supporting types: **Impact** (attaches a materiality threshold to "action affects KPI"), **Co-approval** (a further sign-off above an amount or value, or a step of an approval chain: by a role, or by the manager or manager's manager of the person the action is about), **Business data element** (a business-level data item) and **Column binding** (a DataHub column holds a data element; one per column, kept per source so it can be attested or disputed like any fact).
 
 **Decision criteria** (24 November 2026). Objectives form a cascade (parent objective, level) and carry a priority and the objectives they conflict with, so an agent knows which measure wins when two pull against each other and who settles it: the owner of the nearest common parent objective. KPIs with a health threshold show whether a capability is degraded. The decision check uses both (`service/README.md`, steps 7 and 8).
 
@@ -83,7 +83,8 @@ Four supporting types: **Impact** (attaches a materiality threshold to "action a
 | An agent acts for exactly one person | Violation |
 | An agent's authority is a bounded subset of an authority its principal holds, directly or through a role | Violation |
 | A bounded subset never exceeds its parent: limit, currency, actions, validity dates, capability scope, and it keeps every co-approval its parent requires | Violation |
-| A co-approval names exactly one approver role and one amount | Violation |
+| A co-approval names exactly one approver: a role or a relation; at most one amount | Violation |
+| A limit kind other than amount has a limit value; a bounded subset limits the same kind as its parent, no more | Violation |
 | An agent only performs actions one of its authorities covers | Violation |
 | Each authority has exactly one holder and covers at least one action; a limit needs a currency; validity cannot end before it starts | Violation |
 | Only role-relevant facts may be recorded about a person (closed shape: no performance data, no informal networks) | Violation |
