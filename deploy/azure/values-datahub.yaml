@@ -26,3 +26,15 @@ datahub-mae-consumer:
   nodeSelector: {workload: veromesh}
 datahub-mce-consumer:
   nodeSelector: {workload: veromesh}
+# DataHub's one-off set-up jobs on the same nodes, so nothing of the ontology tool ever
+# runs on the assessment's nodes (and all of it stops when the pool is off).
+elasticsearchSetupJob:
+  nodeSelector: {workload: veromesh}
+kafkaSetupJob:
+  nodeSelector: {workload: veromesh}
+postgresqlSetupJob:
+  nodeSelector: {workload: veromesh}
+datahubUpgrade:
+  nodeSelector: {workload: veromesh}
+datahubSystemUpdate:
+  nodeSelector: {workload: veromesh}
