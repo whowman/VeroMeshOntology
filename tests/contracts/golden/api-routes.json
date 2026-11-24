@@ -185,6 +185,15 @@
       "200"
     ]
   },
+  "GET /api/v1/fidelity": {
+    "params": [
+      "source? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/findings": {
     "params": [
       "kind? (query)",
@@ -885,6 +894,12 @@
           ]
         },
         "description?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "fidelity?": {
           "anyOf": [
             "string",
             "null"

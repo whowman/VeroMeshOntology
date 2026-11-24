@@ -182,6 +182,31 @@ async function showMeasures() {
   } catch (e) { box.replaceChildren(el("div", "empty", e.message)); }
 }
 
+// ------------------------------------------------------------------ sources and fidelity
+
+async function showSources() {
+  const box = $("#sources");
+  box.replaceChildren(el("p", "lead", "Loading…"));
+  try {
+    const all = await api("/api/v1/fidelity");
+    const table = el("table");
+    const head = el("tr");
+    for (const h of ["Source", "Decides", "Band", "Measured", "Why"]) head.append(el("th", "", h));
+    table.append(head);
+    for (const [source, domains] of Object.entries(all)) {
+      for (const [domain, f] of Object.entries(domains)) {
+        const tr = el("tr");
+        tr.append(el("td", "", source), el("td", "", domain));
+        const td = el("td");
+        td.append(el("span", `kind band-${f.band}`, f.band));
+        tr.append(td, el("td", "", f.measured ? `yes (${f.signals.facts} facts)` : `declared ${f.declared}`), el("td", "", (f.reasons || []).join("; ") || "–"));
+        table.append(tr);
+      }
+    }
+    box.replaceChildren(table.children.length > 1 ? table : el("div", "empty", "No registered source decides a domain yet."));
+  } catch (e) { box.replaceChildren(el("div", "empty", e.message)); }
+}
+
 // ------------------------------------------------------------------ data elements
 
 const CHECKS = [["defined", "Defined"], ["owned", "Owned"], ["sourced", "Sourced"], ["classified", "Classified"], ["bound", "Bound"], ["attested", "Attested"]];
@@ -288,7 +313,7 @@ function suggestionCard(s) {
 
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, coverage: showCoverage };
+const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, sources: showSources, coverage: showCoverage };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));

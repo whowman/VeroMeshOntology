@@ -106,6 +106,8 @@ Refuse if any step refuses, else consult if anyone must be consulted, else allow
 
 **MCP.** `/mcp` serves VeroMesh as an MCP server (Streamable HTTP, stateless, JSON responses) for Copilot Studio, Claude or any MCP client, behind the same sign-in and need-to-know rules as the REST routes; each tool calls the function behind a REST route (`src/veromesh/mcp_server.py`). The server's instructions tell the agent to call `check_action` before any consequential action and follow the answer. Setting up a Copilot Studio agent: [docs/copilot-studio.md](../docs/copilot-studio.md).
 
+**Fidelity.** How well each source is kept, per domain it decides (high, medium, low), measured from corrections, lateness, gaps, contradictions and loads, or declared at registration (`fidelity`) until there is history. Low makes the decision check consult the source's owner; `GET /api/v1/fidelity`, and the steward screen's Sources tab. See [docs/provenance.md](../docs/provenance.md).
+
 **Proposals and publishes.** Accountability changes wait for attestation (`GET /api/v1/proposals`, `POST /api/v1/proposals/{type}/{id}/{field}`), and every change to the model is a publish with a model version that decisions quote (`basis.modelVersion`, `GET /api/v1/model/versions`). See [docs/provenance.md](../docs/provenance.md).
 
 **Reads are logged.** Every read by an agent (REST `GET`, and the MCP read tools) is appended to the decision log as a `query` entry: the caller, the agent and principal its client ID resolves to, what was read, and the purpose it gave (the `X-VeroMesh-Purpose` header, or the tools' `purpose` argument). A read without a purpose is answered and logged without one. `VEROMESH_QUERY_LOG` sets whose reads are logged.

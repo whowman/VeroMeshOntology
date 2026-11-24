@@ -32,6 +32,7 @@ from . import (
     decisions,
     domains,
     entities,
+    fidelity,
     findings,
     followup,
     gcsetup,
@@ -109,6 +110,8 @@ class SourceIn(BaseModel):
     # People this source holds can sign in to or act in its system (an ITSM's active users or
     # agent seats). Default: identity and ERP sources do, others do not.
     grantsAccess: bool | None = None
+    # The declared fidelity rating (high, medium, low), used until the source is measured.
+    fidelity: str | None = None
 
 
 class ProposalVerdictIn(BaseModel):
@@ -460,8 +463,21 @@ def create_app(
 
     @app.get("/api/v1/sources", dependencies=need(auth.READ), tags=["model"])
     def model_sources(s: Svc) -> list[dict]:
-        """Sources in the model, with kind, file, last update and the changeset that wrote them."""
-        return changesets.list_sources(s.store)
+        """Sources in the model, with kind, file, last update and the changeset that wrote them,
+        and their fidelity band per domain they decide."""
+        bands = fidelity.sources(s.store)
+        out = changesets.list_sources(s.store)
+        for src in out:
+            per = bands.get(src.get("source")) or {}
+            src["fidelity"] = {d: v["band"] for d, v in per.items()}
+        return out
+
+    @app.get("/api/v1/fidelity", dependencies=need(auth.READ), tags=["governance"])
+    def source_fidelity(s: Svc, source: str | None = None) -> dict:
+        """How well each source is kept, per domain it decides: band (high, medium, low), measured
+        or declared, the signals behind it and, signal by signal, why."""
+        bands = fidelity.sources(s.store)
+        return {k: v for k, v in bands.items() if not source or k == source}
 
     @app.get("/api/v1/examples/procure-to-pay", dependencies=need(auth.READ), tags=["model"])
     def model_example(c: Cfg) -> dict:
@@ -578,6 +594,7 @@ def create_app(
                 body.description,
                 body.derivedFrom,
                 body.grantsAccess,
+                body.fidelity,
             )
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
