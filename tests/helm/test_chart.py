@@ -842,10 +842,10 @@ def test_prerequisites_overlay_matches_the_local_stack():
     docs = render(DATAHUB_OVERLAYS / "prerequisites-values.yaml", chart=chart, name="prerequisites")
     names = {d["metadata"]["name"] for d in by_kind(docs, "StatefulSet")}
     assert "prerequisites-postgresql" in names, names
-    # Bitnami no longer publishes these PostgreSQL tags under bitnami/: the legacy copy.
+    # Bitnami no longer publishes the chart's own PostgreSQL tag: a pinned archive build.
     pg = next(d for d in by_kind(docs, "StatefulSet") if d["metadata"]["name"] == "prerequisites-postgresql")
     images = [c["image"] for c in pg["spec"]["template"]["spec"]["containers"]]
-    assert all("/bitnamilegacy/postgresql:" in i for i in images if "postgresql" in i), images
+    assert "docker.io/bitnamiarchive/postgresql:14.9.0-debian-11-r61" in images, images
     assert not any("mysql" in n for n in names), names
     assert any("opensearch" in n for n in names), names
     assert any("kafka" in n for n in names), names

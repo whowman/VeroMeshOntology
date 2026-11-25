@@ -18,10 +18,12 @@ mysql:
 
 postgresql:
   enabled: true
-  # Bitnami stopped publishing these PostgreSQL tags on docker.io/bitnami; the same tags
-  # stay available, unchanged, under bitnamilegacy. The chart's tag is kept.
+  # Bitnami no longer publishes the chart's PostgreSQL tag (14.3.0-debian-10-r8) anywhere,
+  # bitnamilegacy included. This is the newest PostgreSQL 14 build Bitnami's archive keeps.
+  # An install with its own registry copies it there (deploy/azure/setup.sh does).
   image:
-    repository: bitnamilegacy/postgresql
+    repository: bitnamiarchive/postgresql
+    tag: 14.9.0-debian-11-r61
   auth:
     existingSecret: postgresql-secrets
 

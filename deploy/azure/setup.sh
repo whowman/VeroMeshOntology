@@ -122,6 +122,17 @@ step_pool() {
       --node-osdisk-size 64 --labels workload=veromesh -o none
 }
 
+step_images() {
+  say "Images the dev install pulls from $ACR rather than Docker Hub"
+  # DataHub's PostgreSQL (deploy/helm/datahub/prerequisites-values.yaml): Bitnami's archive
+  # build, copied once; the deploy workflow points the chart at the registry.
+  local tag
+  tag=$(sed -n 's/^ *tag: *//p' "$(dirname "$0")/../helm/datahub/prerequisites-values.yaml" | head -n 1)
+  exists az acr repository show -n "$ACR" --image "bitnami/postgresql:$tag" ||
+    az acr import -n "$ACR" --source "docker.io/bitnamiarchive/postgresql:$tag" --image "bitnami/postgresql:$tag" -o none
+  echo "  bitnami/postgresql:$tag"
+}
+
 step_vault() {
   say "Key Vault $KV"
   exists az keyvault show -n "$KV" ||
@@ -401,7 +412,7 @@ step_show() {
 
 case "${1:-}" in
   all)
-    step_prereqs; step_quota; step_pool; step_vault; step_database; step_secrets; step_gateway
+    step_prereqs; step_quota; step_pool; step_images; step_vault; step_database; step_secrets; step_gateway
     step_entra; step_github; step_power_identity; step_show
     say "Done. Next: Scott's DNS record, then Actions > Deploy to Azure (dev) > Run workflow."
     ;;
