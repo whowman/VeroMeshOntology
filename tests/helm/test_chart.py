@@ -890,3 +890,15 @@ def test_usage_reports_are_signed_with_a_kept_key_and_named_for_the_customer():
     assert "VEROMESH_LICENCE" not in env  # none by default: loaded on the Administration page
     smtp = prod["VEROMESH_USAGE_SMTP_PASSWORD"]["valueFrom"]["secretKeyRef"]
     assert smtp == {"name": "veromesh-usage-mail", "key": "smtp-password", "optional": True}
+
+
+def test_azure_datahub_overlay_keeps_the_theme_and_passes_the_system_secret():
+    """Helm replaces lists: the Azure overlay's extraEnvs must repeat the base overlay's."""
+    base = yaml.safe_load((DATAHUB_OVERLAYS / "datahub-values.yaml").read_text())
+    azure = yaml.safe_load((ROOT / "deploy/azure/values-datahub.yaml").read_text())
+    for component in ("datahub-gms", "datahub-frontend", "acryl-datahub-actions"):
+        env = {e["name"]: e for e in azure[component]["extraEnvs"]}
+        for e in (base.get(component) or {}).get("extraEnvs", []):
+            assert env.get(e["name"]) == e, (component, e["name"])
+        ref = env["DATAHUB_SYSTEM_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]
+        assert ref == {"name": "datahub-auth-secrets", "key": "system_client_secret"}, component

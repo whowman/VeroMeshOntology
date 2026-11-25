@@ -9,16 +9,56 @@ global:
       enabled: false
 datahub-gms:
   nodeSelector: {workload: veromesh}
+  # DataHub 1.8 needs the system client's secret even with token authentication off, and
+  # chart 1.1.9 passes it only when authentication is on: pass it here. Helm replaces lists,
+  # so the theme settings from datahub-values.yaml are repeated (tests/helm checks they match).
+  extraEnvs:
+    - name: REACT_APP_CUSTOM_THEME_ID
+      value: veromesh.theme.json
+    - name: REACT_APP_LOGO_URL
+      value: assets/veromesh/veromesh-mark.svg
+    - name: REACT_APP_FAVICON_URL
+      value: assets/veromesh/favicon.ico
+    - name: REACT_APP_TITLE
+      value: VeroMesh
+    - name: DATAHUB_SYSTEM_CLIENT_ID
+      value: __datahub_system
+    - name: DATAHUB_SYSTEM_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef: {name: datahub-auth-secrets, key: system_client_secret}
   resources:
     requests: {cpu: 250m, memory: 1536Mi}
     limits: {memory: 2Gi}
 datahub-frontend:
   nodeSelector: {workload: veromesh}
+  # DataHub 1.8 needs the system client's secret even with token authentication off, and
+  # chart 1.1.9 passes it only when authentication is on: pass it here. Helm replaces lists,
+  # so the theme settings from datahub-values.yaml are repeated (tests/helm checks they match).
+  extraEnvs:
+    - name: REACT_APP_CUSTOM_THEME_ID
+      value: veromesh.theme.json
+    - name: REACT_APP_LOGO_URL
+      value: assets/veromesh/veromesh-mark.svg
+    - name: REACT_APP_FAVICON_URL
+      value: assets/veromesh/favicon.ico
+    - name: REACT_APP_TITLE
+      value: VeroMesh
+    - name: DATAHUB_SYSTEM_CLIENT_ID
+      value: __datahub_system
+    - name: DATAHUB_SYSTEM_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef: {name: datahub-auth-secrets, key: system_client_secret}
   resources:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 1Gi}
 acryl-datahub-actions:
   nodeSelector: {workload: veromesh}
+  extraEnvs:  # as for GMS above
+    - name: DATAHUB_SYSTEM_CLIENT_ID
+      value: __datahub_system
+    - name: DATAHUB_SYSTEM_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef: {name: datahub-auth-secrets, key: system_client_secret}
   resources:
     requests: {cpu: 50m, memory: 256Mi}
     limits: {memory: 512Mi}

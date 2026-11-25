@@ -89,11 +89,10 @@ jobs:
           # would replace the whole init container list).
           service_version=$(sed -n 's/^version = "\(.*\)"/\1/p' service/pyproject.toml)
           sed -e "s|image: veromesh/datahub-model-plugin:.*|image: $REGISTRY/veromesh/datahub-model-plugin:$service_version|" \
-              -e "s|repository: veromesh/datahub-frontend-react|repository: $REGISTRY/veromesh/datahub-frontend-react|" \
-              deploy/helm/datahub/datahub-values.yaml > "$RUNNER_TEMP/datahub-values.yaml"
+                deploy/helm/datahub/datahub-values.yaml > "$RUNNER_TEMP/datahub-values.yaml"
           helm upgrade --install datahub datahub/datahub -n "$NAMESPACE" --version "$DATAHUB_CHART_VERSION" \
             -f "$RUNNER_TEMP/datahub-values.yaml" -f deploy/azure/values-datahub.yaml \
-            --set "datahub-frontend.image.tag=$DATAHUB_VERSION" \
+            --set "datahub-frontend.image.registry=$REGISTRY" --set "datahub-frontend.image.tag=$DATAHUB_VERSION" \
             --wait --timeout 30m
 
       - name: VeroMesh
