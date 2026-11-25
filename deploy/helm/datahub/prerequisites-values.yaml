@@ -26,6 +26,9 @@ postgresql:
     tag: 14.9.0-debian-11-r61
   auth:
     existingSecret: postgresql-secrets
+    # DataHub's own database, created when PostgreSQL first starts: DataHub's system
+    # update creates its tables but not the database (datahub-values.yaml names it).
+    database: datahub
 
 opensearch:
   enabled: true
