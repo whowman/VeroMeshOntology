@@ -200,6 +200,20 @@
             "--dry-run"
           ]
         },
+        "goals": {
+          "args": [],
+          "options": [
+            "--url",
+            "--tenant",
+            "--report-owner",
+            "--report",
+            "--role-map",
+            "--no-roles",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        },
         "import": {
           "args": [],
           "options": [

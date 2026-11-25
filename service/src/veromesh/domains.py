@@ -119,6 +119,15 @@ DEFAULTS: dict[str, dict] = {
         "evidence": ["governance", "spreadsheet"],
         "fields": {"capabilities": ["name", "definition", "ownerRole", "parentCapability"]},
     },
+    "objectives": {
+        "question": "Which objectives are there, how do they cascade, and which role owns each?",
+        # The HR suite's goals (Workday Talent) by default; the governance workbook is
+        # evidence, and still the home of priorities and of which objectives pull against
+        # each other (fields no domain covers). Changeable like every domain.
+        "authoritative": ["hr"],
+        "evidence": ["governance", "spreadsheet"],
+        "fields": {"objectives": ["name", "definition", "ownerRole", "level", "parentObjective"]},
+    },
     "data-meaning": {
         "question": "What does this data mean, and who answers for it?",
         "authoritative": ["catalog", "steward"],

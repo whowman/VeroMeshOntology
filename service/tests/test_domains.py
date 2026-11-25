@@ -20,6 +20,7 @@ def test_the_shipped_domains(ctx):
         "ai-approval",
         "systems",
         "capabilities",
+        "objectives",
         "data-meaning",
     ]
     assert d["capabilities"]["authoritative"] == ["ea"]  # the EA tool keeps the capability map
