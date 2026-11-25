@@ -49,7 +49,7 @@ SOURCE_BASE = "https://veromesh.ai/source/"
 CHANGESET_BASE = "https://veromesh.ai/changeset/"
 
 STEWARD_SOURCE = "steward"
-CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "spreadsheet", "steward", "ended")
+CATEGORIES = ("hr", "iam", "cmdb", "erp", "catalog", "governance", "ea", "spreadsheet", "steward", "ended")
 #: The system source that keeps a minimal record of what a source dropped while another
 #: source still refers to it (issue #67): ranked below every other source, never hr.
 ENDED_SOURCE = "ended"
@@ -65,6 +65,8 @@ RANKING: dict[str, list[str]] = {
     "authorities": ["erp", "iam", "spreadsheet"],
     "co-approvals": ["erp", "iam", "spreadsheet"],
     "ai-use-cases": ["governance", "spreadsheet"],
+    # Enterprise architecture (ServiceNow EA, SAP LeanIX) keeps the capability map.
+    "capabilities": ["ea", "governance", "spreadsheet"],
 }
 DEFAULT_RANKING = ["spreadsheet"]
 

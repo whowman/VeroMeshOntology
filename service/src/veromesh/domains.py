@@ -110,6 +110,15 @@ DEFAULTS: dict[str, dict] = {
             "systems": ["name", "cmdbId", "businessOwner", "technicalOwner", "criticality", "lifecycle"]
         },
     },
+    "capabilities": {
+        "question": "Which business capabilities are there, how do they nest, and which role owns each?",
+        # Decided 25 November 2026: the enterprise architecture tool (ServiceNow EA, SAP
+        # LeanIX) keeps the capability map; the workbook is evidence. An organization whose
+        # map lives elsewhere changes this domain (PUT /api/v1/domains/capabilities).
+        "authoritative": ["ea"],
+        "evidence": ["governance", "spreadsheet"],
+        "fields": {"capabilities": ["name", "definition", "ownerRole", "parentCapability"]},
+    },
     "data-meaning": {
         "question": "What does this data mean, and who answers for it?",
         "authoritative": ["catalog", "steward"],

@@ -107,6 +107,17 @@
     "servicenow": {
       "args": [],
       "commands": {
+        "ea": {
+          "args": [],
+          "options": [
+            "--url",
+            "--id-field",
+            "--parent-field",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        },
         "import": {
           "args": [],
           "options": [

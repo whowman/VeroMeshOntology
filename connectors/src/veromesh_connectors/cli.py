@@ -13,6 +13,7 @@
     veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
     veromesh-connect erp exceptions --since 2026-11-01
     veromesh-connect servicenow import --url https://acme.service-now.com
+    veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field number]
     veromesh-connect halo import --url https://acme.haloitsm.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
@@ -277,6 +278,19 @@ def servicenow_import(api: ApiSession, args) -> int:
         api.call("PUT", f"/findings/reported/{source}", json=found)
         _out(f"Reported {len(found)} likely duplicate systems for source '{source}'.")
     return 0 if ok else 1
+
+
+def servicenow_ea(api: ApiSession, args) -> int:
+    from .plugins import ServiceNowEaConnector
+
+    conn = ServiceNowEaConnector(
+        servicenow_client(args, getattr(args, "source_http", None)),
+        people=api.entities("people"),
+        id_field=args.id_field,
+        parent_field=args.parent_field,
+    )
+    opts = RunOptions(source=args.source or "servicenow-ea", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
 def erp_import(api: ApiSession, args) -> int:
@@ -564,7 +578,8 @@ def parser() -> argparse.ArgumentParser:
     erx.set_defaults(fn=erp_exceptions)
 
     sn = sub.add_parser(
-        "servicenow", help="ServiceNow CMDB: business applications and their owners"
+        "servicenow",
+        help="ServiceNow CMDB and Enterprise Architecture: business applications, capabilities and their owners",
     ).add_subparsers(dest="action", required=True)
     sni = sn.add_parser(
         "import", help="Load business applications, their owner roles, and ServiceNow's people"
@@ -578,6 +593,23 @@ def parser() -> argparse.ArgumentParser:
     )
     load_flags(sni)
     sni.set_defaults(fn=servicenow_import)
+    sne = sn.add_parser(
+        "ea",
+        help="Load the business capability map and its owner roles from ServiceNow Enterprise Architecture "
+        "(register the source with category ea)",
+    )
+    sne.add_argument(
+        "--url", default=os.environ.get("SERVICENOW_URL"), help="https://<instance>.service-now.com"
+    )
+    sne.add_argument(
+        "--id-field",
+        help="capability field to use as its ID (e.g. number); default: the name, as AccountsPayable",
+    )
+    sne.add_argument(
+        "--parent-field", default="parent", help="reference field to the parent capability (default parent)"
+    )
+    load_flags(sne)
+    sne.set_defaults(fn=servicenow_ea)
 
     ha = sub.add_parser("halo", help="HaloITSM: business applications and agents").add_subparsers(
         dest="action", required=True

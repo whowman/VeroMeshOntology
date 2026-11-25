@@ -58,7 +58,7 @@ stateDiagram-v2
   Disputed --> Unconfirmed: source changes the value
 ```
 
-**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `spreadsheet`, `steward`, and `ended` for the system source below), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
+**Source.** Registered once, with a **category** (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `ea` (enterprise architecture: the capability map), `spreadsheet`, `steward`, and `ended` for the system source below), an owner role and a description. Precedence is stated in terms of categories, so a customer's Workday and another customer's SAP SuccessFactors behave the same way. Steward corrections made in the review screen form their own source, `steward`.
 
 **Changeset** stays as it is; it becomes a `prov:Activity` that generated its claims.
 
@@ -83,6 +83,7 @@ For each entity and field, VeroMesh picks one source's values:
 | authority-in-force | What limit does the workflow enforce? | erp, then governance | iam, hr, spreadsheet | Authorities and co-approvals: the authority closest to the decision decides; a different granted value is a conflict (out of sync) |
 | ai-approval | Which agents may run, for what? | governance | spreadsheet | AI use cases; the actions an agent performs |
 | systems | Which systems exist, who owns them? | cmdb | catalog, spreadsheet | Systems |
+| capabilities | Which business capabilities are there, how do they nest, and which role owns each? | ea | governance, spreadsheet | Capabilities' names, definitions, parents and owner roles (decided 25 November 2026) |
 | data-meaning | What does this data mean? | catalog, steward | spreadsheet | Data elements' and products' definitions, owners, sensitivity |
 
 **Roles filled are combined** across live sources: HR's job roles and the identity system's or the workbook's approval roles both count, instead of one replacing the other. An organization changes any domain with `PUT /api/v1/domains/{name}` (administrators; only the keys given: `authoritative`, `evidence`, `contractors`, `union`, `fields`) and returns it to the default with `DELETE`. Each change is appended to the decision log's hash chain (kind `configuration`), and the effective model is rebuilt.
@@ -110,6 +111,7 @@ For each entity and field, VeroMesh picks one source's values:
 | Systems | cmdb > catalog > spreadsheet |
 | Delegated authority | erp > iam > spreadsheet |
 | Approved AI use cases | governance > spreadsheet |
+| Capabilities | ea > governance > spreadsheet |
 | Everything else | spreadsheet (the model's own home today) |
 
 **Steward corrections** are configured per field (decision 1):
