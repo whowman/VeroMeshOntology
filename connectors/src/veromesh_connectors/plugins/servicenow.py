@@ -248,3 +248,143 @@ def duplicates(apps: list[dict]) -> list[dict]:
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------- Enterprise Architecture
+
+CAPABILITY_TABLE = "cmdb_ci_business_capability"
+
+
+def pascal(name: str) -> str:
+    """'Accounts payable' -> 'AccountsPayable': the ID style of the workbook, so one capability
+    loaded from both is one entity."""
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    return "".join(w[:1].upper() + w[1:] for w in words)[:120]
+
+
+class ServiceNowEaConnector(BatchConnector):
+    """ServiceNow Enterprise Architecture: the business capability map and who owns each capability.
+
+    Reads ``cmdb_ci_business_capability`` through the Table API: name, ``short_description``,
+    the parent capability (``parent``, or another reference field), ``owned_by`` and
+    ``install_status``. Writes, as one source (category ``ea``, which decides the capabilities
+    domain by default):
+
+    * **capabilities**: ID from the name in the workbook's style ("Accounts payable" ->
+      AccountsPayable), or from a field (``id_field``, e.g. ``number``); name, definition, the
+      parent capability, and the owner **role**. Retired capabilities are left out.
+    * **roles**: "Owner of <capability>", one per owned capability: ownership sits with a role.
+    * **people**: each owner, filling their owner roles, matched to the people VeroMesh holds as
+      the CMDB connector matches them.
+
+    Two capabilities that would get the same ID are a source problem: nothing is sent until one
+    is renamed or IDs come from a unique field. A capability whose parent is retired or missing
+    is loaded at the top level.
+    """
+
+    name = "servicenow-ea"
+    kind = "connector"
+
+    def __init__(
+        self,
+        client: ServiceNowClient,
+        *,
+        people: list[dict] | None = None,
+        id_field: str | None = None,
+        parent_field: str = "parent",
+    ) -> None:
+        super().__init__()
+        self.client = client
+        self.id_field = id_field
+        self.parent_field = parent_field
+        people = people or []
+        self.by_employee = {str(p["employeeId"]): p for p in people if p.get("employeeId")}
+        self.by_id = {str(p["id"]): p for p in people}
+        self.caps: list[dict] = []
+        self.ids: dict[str, str] = {}  # sys_id -> capability ID
+
+    _pid = ServiceNowCmdbConnector._pid
+
+    def describe(self) -> str:
+        return f"ServiceNow EA: {len(self.caps)} business capabilities"
+
+    def fingerprint(self) -> str | None:
+        return "servicenow-ea"
+
+    def _assign_ids(self) -> None:
+        taken: dict[str, str] = {}
+        for c in self.caps:
+            raw = str(c.get(self.id_field) or "") if self.id_field else pascal(str(c.get("name") or ""))
+            cid = _slug(raw) or c["sys_id"]
+            if cid in taken:
+                self.problems.append(
+                    f"ServiceNow capabilities {taken[cid]} and {c['sys_id']} would both be {cid}: rename one, "
+                    "or take IDs from a field that is unique (--id-field number)"
+                )
+                cid = c["sys_id"]
+            taken[cid] = c["sys_id"]
+            self.ids[c["sys_id"]] = cid
+
+    def read(self, schema: list[dict]) -> Iterable[Record]:
+        self.caps = [
+            c for c in self.client.rows(CAPABILITY_TABLE) if str(c.get("install_status")) not in RETIRED
+        ]
+        self._assign_ids()
+        owners: dict[str, list[str]] = {}
+        for c in self.caps:
+            if uid := _ref(c.get("owned_by")):
+                owners.setdefault(uid, []).append(f"{self.ids[c['sys_id']]}.Owner")
+            yield Record(ref=f"ServiceNow business capability {c.get('name')}", data=c, type="capabilities")
+        seen: dict[str, str] = {}
+        for uid, roles in owners.items():
+            try:
+                u = self.client.api.get(
+                    f"{TABLE}/sys_user/{uid}", {"sysparm_exclude_reference_link": "true"}
+                )["result"]
+            except Exception:  # noqa: BLE001 — a dangling reference: reported, not fatal
+                self.problems.append(f"ServiceNow user {uid}, named as a capability owner, could not be read")
+                continue
+            pid = self._pid(u)
+            if not pid:
+                continue
+            if pid in seen:
+                self.problems.append(f"ServiceNow users {seen[pid]} and {u.get('user_name')} are both {pid}")
+                continue
+            seen[pid] = u.get("user_name") or uid
+            yield Record(
+                ref=f"ServiceNow user {u.get('user_name')}", data={"user": u, "roles": roles}, type="people"
+            )
+
+    def map(self, record: Record, schema: list[dict]) -> list[Item]:
+        if record.type == "capabilities":
+            c = record.data
+            cid = self.ids[c["sys_id"]]
+            name = c.get("name") or cid
+            e: dict = {"id": cid, "name": name}
+            if c.get("short_description"):
+                e["definition"] = c["short_description"]
+            parent = _ref(c.get(self.parent_field))
+            if parent in self.ids:  # a retired or missing parent: shown at the top level
+                e["parentCapability"] = self.ids[parent]
+            items = []
+            if _ref(c.get("owned_by")):
+                e["ownerRole"] = f"{cid}.Owner"
+                items.append(
+                    Item(
+                        type="roles",
+                        entity={"id": e["ownerRole"], "name": f"Owner of {name}"},
+                        ref=record.ref,
+                        observed_at=_now(),
+                    )
+                )
+            return [*items, Item(type="capabilities", entity=e, ref=record.ref, observed_at=_now())]
+        if record.type == "people":
+            u, roles = record.data["user"], sorted(set(record.data["roles"]))
+            pid = self._pid(u)
+            known = self.by_id.get(pid) or {}
+            e = {"id": pid, "name": u.get("name") or known.get("name") or pid}
+            if u.get("email"):
+                e["email"] = u["email"]
+            e["rolesFilled"] = roles if len(roles) > 1 else roles[0]
+            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+        raise MappingError(f"unexpected record type {record.type}", record.ref)

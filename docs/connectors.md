@@ -220,7 +220,18 @@ veromesh-connect servicenow import --url https://acme.service-now.com
 - **Writes:** systems (ID = the application's number, the CMDB ID its sys_id, name, criticality 1 to 4 as critical, high, medium, low, lifecycle active or retired) and, because ownership in VeroMesh sits with a role, one role per application's business owner (`owned_by`) and technical owner (`managed_by`), named "Business owner of ..." and "Technical owner of ...". People: matched by employee number, else by user name (a contractor), with the owner roles they fill, and their legal name and email. No employee ID: ServiceNow copies it from HR.
 - **Two sources:** `servicenow` holds the applications, their owner roles and the people they name (active or not); `servicenow-users` (`--users-source`) holds every active user. Register the second with `grantsAccess: true`: an active ServiceNow user can still sign in and act there, so a leaver who is still active shows as access without employment.
 - **Findings:** `duplicate-system`, two applications with the same owners, vendor, kind and support group under different names, reported with `PUT /api/v1/findings/reported/servicenow`. An owner whose HR record has gone shows in VeroMesh's own findings as `owner-has-left`.
-- **ServiceNow Enterprise Architecture** keeps business capabilities in the same CMDB; loading them is next.
+
+### ServiceNow Enterprise Architecture (capabilities)
+
+```bash
+curl -X PUT https://<veromesh>/api/v1/sources/servicenow-ea -d '{"category": "ea"}' ...   # once
+veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field number] [--parent-field parent]
+```
+
+- **Sign-in:** the same as the CMDB connector, with read access to `cmdb_ci_business_capability` and `sys_user`.
+- **Full load** (`ea`): the Table API, `/api/now/table/cmdb_ci_business_capability`, 1,000 a page, and each owner's `sys_user` record. Retired capabilities (install status retired or absent) are left out. Run it after HR, because it matches owners to the people VeroMesh already holds.
+- **Writes**, as source `servicenow-ea` (category `ea`): capabilities with their name, definition (`short_description`), parent capability (`parent`, or the field given with `--parent-field`) and owner **role** ("Owner of Accounts payable", ID `AccountsPayable.Owner`), and each owner filling it. A capability's ID comes from its name in the workbook's style ("Accounts payable" becomes `AccountsPayable`), so a capability the workbook also lists is one entity; `--id-field number` takes it from a field instead. Two capabilities that would get the same ID stop the load until one is renamed or a unique field is used. A capability whose parent is retired is loaded at the top level.
+- **Who decides:** by default the EA tool keeps the capability map (the `capabilities` domain: `ea` authoritative, then governance and the workbook as evidence), decided 25 November 2026. Where the workbook names a different owner, the EA's owner is in force and the difference is reported as **out of sync**. An organization whose map lives elsewhere changes the domain, for example `PUT /api/v1/domains/capabilities {"authoritative": ["spreadsheet"], "evidence": ["ea"]}`, and `DELETE` returns to the default.
 
 ### HaloITSM
 
@@ -233,4 +244,4 @@ veromesh-connect halo import --url https://acme.haloitsm.com
 - **Full load** (`import`): `/api/Asset` (assets of type "Business Application") and `/api/Agent`, 100 a page (`pageinate`, `page_size`, `page_no`, `record_count`). Run it after HR, Entra ID and ServiceNow, because it matches names and emails to what VeroMesh already holds.
 - **Writes:** `halo`: systems (under the ID of the system VeroMesh already holds with the same name, so ServiceNow and Halo describe one system; else the inventory number), criticality and lifecycle, and the business owner from the "Business Owner" custom field (a name or an email, matched to one person) filling the same owner role the ServiceNow connector uses; an owner that matches no one is reported. `halo-agents` (`--agents-source`): every enabled agent seat, matched by email; register it with `grantsAccess: true`, so an IT leaver whose seat was not freed shows as access without employment.
 
-Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP, `cmdb` for ServiceNow and HaloITSM, with `grantsAccess` on `servicenow-users` and `halo-agents`) so precedence applies; see `docs/provenance.md`.
+Register each source once with its category (`hr` for Workday, `iam` for Entra ID, `erp` for the ERP, `cmdb` for ServiceNow and HaloITSM, `ea` for ServiceNow EA and SAP LeanIX, with `grantsAccess` on `servicenow-users` and `halo-agents`) so precedence applies; see `docs/provenance.md`.

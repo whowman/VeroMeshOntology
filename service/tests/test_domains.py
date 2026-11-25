@@ -19,8 +19,10 @@ def test_the_shipped_domains(ctx):
         "authority-in-force",
         "ai-approval",
         "systems",
+        "capabilities",
         "data-meaning",
     ]
+    assert d["capabilities"]["authoritative"] == ["ea"]  # the EA tool keeps the capability map
     assert d["employment"]["authoritative"] == ["hr"] and d["employment"]["contractors"] == "iam"
     assert d["authority-in-force"]["authoritative"] == [
         "erp",

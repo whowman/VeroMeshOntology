@@ -4,7 +4,7 @@ from .csv_files import CsvConnector
 from .entra import EntraChangesConnector, EntraConnector, GraphClient
 from .halo import HaloClient, HaloConnector
 from .oracle_erp import BasicAuth, OracleClient, OracleErpConnector
-from .servicenow import BearerToken, ServiceNowClient, ServiceNowCmdbConnector
+from .servicenow import BearerToken, ServiceNowClient, ServiceNowCmdbConnector, ServiceNowEaConnector
 from .spreadsheet import SpreadsheetConnector, build_workbook
 from .workday import WorkdayChangesConnector, WorkdayClient, WorkdayConnector
 
@@ -14,6 +14,7 @@ __all__ = [
     "BearerToken",
     "ServiceNowClient",
     "ServiceNowCmdbConnector",
+    "ServiceNowEaConnector",
     "BasicAuth",
     "OracleClient",
     "OracleErpConnector",
