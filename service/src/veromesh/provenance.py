@@ -67,6 +67,8 @@ RANKING: dict[str, list[str]] = {
     "ai-use-cases": ["governance", "spreadsheet"],
     # Enterprise architecture (ServiceNow EA, SAP LeanIX) keeps the capability map.
     "capabilities": ["ea", "governance", "spreadsheet"],
+    # The HR suite's goals (Workday Talent) keep the objective cascade.
+    "objectives": ["hr", "governance", "spreadsheet"],
 }
 DEFAULT_RANKING = ["spreadsheet"]
 
