@@ -38,3 +38,12 @@ datahubUpgrade:
   nodeSelector: {workload: veromesh}
 datahubSystemUpdate:
   nodeSelector: {workload: veromesh}
+  # DataHub 1.8's system update needs the system client's secret even with token
+  # authentication off, and the chart passes it only when authentication is on. The
+  # chart still creates the secret (provisionSecrets) before the job runs.
+  extraEnvs:
+    - name: DATAHUB_SYSTEM_CLIENT_ID
+      value: __datahub_system
+    - name: DATAHUB_SYSTEM_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef: {name: datahub-auth-secrets, key: system_client_secret}
