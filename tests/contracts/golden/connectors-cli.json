@@ -97,6 +97,23 @@
       },
       "options": []
     },
+    "leanix": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--id-from ['name', 'externalId']",
+            "--owner-role",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "runs": {
       "args": [],
       "options": [

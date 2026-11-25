@@ -92,6 +92,14 @@ class SourceApi:
 
     def get(self, url: str, params: dict | None = None) -> dict:
         """``url`` is relative to the transport's base URL, or absolute (e.g. an @odata.nextLink)."""
+        return self._call("GET", url, params=params)
+
+    def post(self, url: str, body: dict) -> dict:
+        """POST a JSON body (a GraphQL query, for example) and read JSON back. Reads only:
+        a source is never changed through this API."""
+        return self._call("POST", url, json=body)
+
+    def _call(self, method: str, url: str, params: dict | None = None, json: dict | None = None) -> dict:
         r: httpx.Response | None = None
         for attempt in range(2):
             try:
@@ -106,7 +114,13 @@ class SourceApi:
                 headers = {}
             full = url if url.startswith(("http://", "https://")) else f"{self.t.base_url}{url}"
             try:
-                r = self.t.request("GET", full, params=params, headers=headers)
+                r = self.t.request(
+                    method,
+                    full,
+                    params=params,
+                    headers=headers,
+                    **({"json": json} if json is not None else {}),
+                )
             except TransportError as exc:
                 raise SourceError(self.system, 0, str(exc)) from exc
             self.calls += 1

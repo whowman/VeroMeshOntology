@@ -233,6 +233,18 @@ veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field nu
 - **Writes**, as source `servicenow-ea` (category `ea`): capabilities with their name, definition (`short_description`), parent capability (`parent`, or the field given with `--parent-field`) and owner **role** ("Owner of Accounts payable", ID `AccountsPayable.Owner`), and each owner filling it. A capability's ID comes from its name in the workbook's style ("Accounts payable" becomes `AccountsPayable`), so a capability the workbook also lists is one entity; `--id-field number` takes it from a field instead. Two capabilities that would get the same ID stop the load until one is renamed or a unique field is used. A capability whose parent is retired is loaded at the top level.
 - **Who decides:** by default the EA tool keeps the capability map (the `capabilities` domain: `ea` authoritative, then governance and the workbook as evidence), decided 25 November 2026. Where the workbook names a different owner, the EA's owner is in force and the difference is reported as **out of sync**. An organization whose map lives elsewhere changes the domain, for example `PUT /api/v1/domains/capabilities {"authoritative": ["spreadsheet"], "evidence": ["ea"]}`, and `DELETE` returns to the default.
 
+### SAP LeanIX (capabilities)
+
+```bash
+export LEANIX_API_TOKEN=...   # a technical user's API token (Administration, Technical Users)
+curl -X PUT https://<veromesh>/api/v1/sources/leanix -d '{"category": "ea"}' ...   # once
+veromesh-connect leanix import --url https://acme.leanix.net [--id-from externalId] [--owner-role "Business Owner"]
+```
+
+- **Sign-in:** the API token is exchanged at `/services/mtm/v1/oauth2/token` (basic authentication as `apitoken`, client credentials) for a short-lived access token; a technical user with read access to Business Capability fact sheets is enough.
+- **Full load** (`import`): the GraphQL API, `/services/pathfinder/v1/graphql`, `allFactSheets(factSheetType: BusinessCapability)` in pages of 200 (Relay cursors): name, description, status, the parent (`relToParent`) and the subscriptions. Archived fact sheets are left out. It only reads. Run it after HR, because owners are matched to people by email.
+- **Writes**, as source `leanix` (category `ea`), the same shape as ServiceNow EA: capabilities with name, definition, parent and owner role (`AccountsPayable.Owner`, "Owner of Accounts payable"), and each owner filling it. The owner is the RESPONSIBLE subscriber with the subscription role `--owner-role` (default "Business Owner"), else the first RESPONSIBLE subscriber; an owner whose email matches no one in VeroMesh is counted in the run's summary. IDs come from the name in the workbook's style, or the fact sheet's external ID (`--id-from externalId`); two capabilities that would share an ID stop the load. Because both EA connectors give a capability the same ID and owner role, an organization with ServiceNow EA and LeanIX gets one capability, with any disagreement between them reported as a conflict.
+
 ### HaloITSM
 
 ```bash
