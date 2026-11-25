@@ -49,6 +49,7 @@ POWER_ENVIRONMENT=azure-dev-power
 API_APP="VeroMesh Ontology API (dev)"
 UI_APP="VeroMesh steward screen (dev)"
 ROLES=(admin steward connector reader agent)
+AZ_CLI_APP=04b07795-8ddb-461a-bbee-02f9e1bf7b46   # Microsoft Azure CLI, the same in every tenant
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 exists() { "$@" >/dev/null 2>&1; }
@@ -268,6 +269,15 @@ step_entra() {
   fi
   exists az ad sp show --id "$api_id" || az ad sp create --id "$api_id" -o none
   scope_id=$(az ad app show --id "$api_id" --query "api.oauth2PermissionScopes[?value=='access_as_user'].id | [0]" -o tsv)
+  # Let the Azure CLI get a token as you for this API (az account get-access-token), for scripts
+  # such as scripts/copilot-test-setup.py. The whole api object is sent back, so nothing else changes.
+  if [[ -z $(az ad app show --id "$api_id" --query "api.preAuthorizedApplications[?appId=='$AZ_CLI_APP'].appId | [0]" -o tsv) ]]; then
+    graph PATCH "applications/$api_obj" "$(az ad app show --id "$api_id" --query api -o json | python3 -c "
+import json, sys
+a = json.load(sys.stdin)
+a['preAuthorizedApplications'] = (a.get('preAuthorizedApplications') or []) + [{'appId': '$AZ_CLI_APP', 'delegatedPermissionIds': ['$scope_id']}]
+print(json.dumps({'api': a}))")"
+  fi
   ui_id=$(az ad app list --display-name "$UI_APP" --query '[0].appId' -o tsv)
   [[ -n $ui_id ]] || ui_id=$(az ad app create --display-name "$UI_APP" --sign-in-audience AzureADMyOrg --query appId -o tsv)
   ui_obj=$(az ad app show --id "$ui_id" --query id -o tsv)

@@ -4,6 +4,8 @@ A Copilot Studio agent uses VeroMesh as an MCP tool. Before a consequential acti
 calls `check_action` and follows the answer: act and inform, consult the named owners
 first, or refuse. Every answer is in the decision log. This page sets up the procure-to-pay
 example's **invoice assistant**, acting for Dana (the AP manager), in a Microsoft tenant.
+For the Azure dev install, with its values filled in and a test script, see
+[copilot-studio-test.md](copilot-studio-test.md).
 
 Nothing here is Microsoft-only on the VeroMesh side: `/mcp` takes OpenID Connect tokens
 from whichever provider the install uses (`service/README.md`, "Sign-in").
