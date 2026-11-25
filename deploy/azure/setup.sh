@@ -95,7 +95,12 @@ step_quota() {
   local need family used limit
   need=$((POOL_COUNT * $(az vm list-skus -l "$LOCATION" --size "$POOL_SIZE" --query "[0].capabilities[?name=='vCPUs'].value | [0]" -o tsv)))
   family=$(az vm list-skus -l "$LOCATION" --size "$POOL_SIZE" --query '[0].family' -o tsv)
-  read -r used limit < <(az vm list-usage -l "$LOCATION" --query "[?name.value=='$family'].[currentValue, limit] | [0]" -o tsv)
+  # One row per match, tab-separated (a flattened "| [0]" would print one value per line).
+  read -r used limit < <(az vm list-usage -l "$LOCATION" --query "[?name.value=='$family'].[currentValue, limit]" -o tsv | head -n 1)
+  if [[ -z "$used" || -z "$limit" ]]; then
+    echo "  Could not read the $family quota in $LOCATION (az vm list-usage -l $LOCATION -o table)." >&2
+    exit 1
+  fi
   echo "  $family: $used of $limit vCPUs in use; this adds $need"
   if (( used + need > limit )); then
     echo "  Not enough quota: ask for $((used + need)) vCPUs in $family (Azure portal > Quotas), then run again." >&2
