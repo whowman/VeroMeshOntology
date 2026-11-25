@@ -138,8 +138,11 @@ step_vault() {
 
 step_database() {
   say "Database $DB and user $DB_USER on $PG_SERVER (the decision log)"
-  exists az postgres flexible-server db show -g "$RESOURCE_GROUP" -s "$PG_SERVER" -d "$DB" ||
-    az postgres flexible-server db create -g "$RESOURCE_GROUP" -s "$PG_SERVER" -d "$DB" -o none
+  # Azure CLI 2.86 replaced --database-name/-d with --name/-n; older CLIs have only the former.
+  local db_flag=--database-name
+  az postgres flexible-server db create -h 2>/dev/null | grep -qE -- '^ *--name( |$)' && db_flag=--name
+  exists az postgres flexible-server db show -g "$RESOURCE_GROUP" -s "$PG_SERVER" "$db_flag" "$DB" ||
+    az postgres flexible-server db create -g "$RESOURCE_GROUP" -s "$PG_SERVER" "$db_flag" "$DB" -o none
   kube
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   # The server is reachable only from the cluster's network: create the user from a pod.
