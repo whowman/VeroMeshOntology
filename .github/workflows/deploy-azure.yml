@@ -104,7 +104,7 @@ jobs:
             --set "fuseki.image.repository=$REGISTRY/veromesh/fuseki" --set "fuseki.image.tag=$TAG" \
             --set "backup.image.repository=$REGISTRY/veromesh/backup" --set "backup.image.tag=$TAG" \
             --set "api.auth.issuer=https://login.microsoftonline.com/$tenant/v2.0" \
-            --set "api.auth.audience=$api,api://$api" \
+            --set "api.auth.audience=$api\,api://$api" \
             --set "api.auth.uiClientId=${{ vars.UI_CLIENT_ID }}" \
             --set "api.auth.uiScope=openid profile email api://$api/access_as_user" \
             --set "backup.encryption.recipients={${{ vars.BACKUP_RECIPIENT }}}" \
