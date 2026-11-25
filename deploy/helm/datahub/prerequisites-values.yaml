@@ -18,6 +18,10 @@ mysql:
 
 postgresql:
   enabled: true
+  # Bitnami stopped publishing these PostgreSQL tags on docker.io/bitnami; the same tags
+  # stay available, unchanged, under bitnamilegacy. The chart's tag is kept.
+  image:
+    repository: bitnamilegacy/postgresql
   auth:
     existingSecret: postgresql-secrets
 
