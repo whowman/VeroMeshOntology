@@ -92,6 +92,11 @@ step_prereqs() {
 
 step_quota() {
   say "vCPU quota for $POOL_COUNT more $POOL_SIZE nodes"
+  # On a rerun the pool's own vCPUs are already counted as in use.
+  if exists az aks nodepool show -g "$RESOURCE_GROUP" --cluster-name "$AKS" -n "$POOL"; then
+    echo "  Node pool $POOL already exists; no more quota needed."
+    return
+  fi
   local need family used limit
   need=$((POOL_COUNT * $(az vm list-skus -l "$LOCATION" --size "$POOL_SIZE" --query "[0].capabilities[?name=='vCPUs'].value | [0]" -o tsv)))
   family=$(az vm list-skus -l "$LOCATION" --size "$POOL_SIZE" --query '[0].family' -o tsv)
