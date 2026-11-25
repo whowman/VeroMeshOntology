@@ -226,6 +226,25 @@ step_tls() {
   echo "  Installed. You can now delete $cert and $key from Cloud Shell."
 }
 
+# GitHub may present the repository by its fixed IDs instead of its name
+# (repo:<owner>@<owner id>/<repo>@<repo id>:...), as the assessment's setup.sh also allows.
+trust_github() { # identity, credential name, environment
+  local ids
+  exists az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$1" -n "$2" ||
+    az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$1" -n "$2" \
+      --issuer https://token.actions.githubusercontent.com --subject "repo:$GITHUB_REPO:environment:$3" \
+      --audiences api://AzureADTokenExchange -o none
+  ids=$(gh api "repos/$GITHUB_REPO" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null || true)
+  if [[ -n $ids ]]; then
+    exists az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$1" -n "$2-ids" ||
+      az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$1" -n "$2-ids" \
+        --issuer https://token.actions.githubusercontent.com --subject "repo:$ids:environment:$3" \
+        --audiences api://AzureADTokenExchange -o none
+  else
+    echo "  (sign in with 'gh auth login' and run again to also trust GitHub's ID-based subject)"
+  fi
+}
+
 graph() { az rest --method "$1" --uri "https://graph.microsoft.com/v1.0/$2" ${3:+--body "$3"} --headers Content-Type=application/json; }
 
 step_entra() {
@@ -274,10 +293,7 @@ step_github() {
   local principal cluster_id
   principal=$(az identity show -g "$RESOURCE_GROUP" -n "$ID_GITHUB" --query principalId -o tsv)
   cluster_id=$(az aks show -g "$RESOURCE_GROUP" -n "$AKS" --query id -o tsv)
-  exists az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$ID_GITHUB" -n github-env ||
-    az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$ID_GITHUB" -n github-env \
-      --issuer https://token.actions.githubusercontent.com --subject "repo:$GITHUB_REPO:environment:$ENVIRONMENT" \
-      --audiences api://AzureADTokenExchange -o none
+  trust_github "$ID_GITHUB" github-env "$ENVIRONMENT"
   assign AcrPush "$(az acr show -n "$ACR" --query id -o tsv)" "$principal" ServicePrincipal
   assign "Azure Kubernetes Service Cluster User Role" "$cluster_id" "$principal" ServicePrincipal
   assign "Azure Kubernetes Service RBAC Admin" "$cluster_id/namespaces/$NAMESPACE" "$principal" ServicePrincipal
@@ -298,10 +314,7 @@ step_power_identity() {
   local principal cluster_id
   principal=$(az identity show -g "$RESOURCE_GROUP" -n "$ID_POWER" --query principalId -o tsv)
   cluster_id=$(az aks show -g "$RESOURCE_GROUP" -n "$AKS" --query id -o tsv)
-  exists az identity federated-credential show -g "$RESOURCE_GROUP" --identity-name "$ID_POWER" -n github-power ||
-    az identity federated-credential create -g "$RESOURCE_GROUP" --identity-name "$ID_POWER" -n github-power \
-      --issuer https://token.actions.githubusercontent.com --subject "repo:$GITHUB_REPO:environment:$POWER_ENVIRONMENT" \
-      --audiences api://AzureADTokenExchange -o none
+  trust_github "$ID_POWER" github-power "$POWER_ENVIRONMENT"
   # Reading the cluster, and changing the one node pool: not the assessment's nodes.
   assign "Azure Kubernetes Service Cluster User Role" "$cluster_id" "$principal" ServicePrincipal
   assign "Azure Kubernetes Service Contributor Role" "$cluster_id/agentPools/$POOL" "$principal" ServicePrincipal
