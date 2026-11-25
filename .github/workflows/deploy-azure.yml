@@ -82,6 +82,7 @@ jobs:
           helm upgrade --install prerequisites datahub/datahub-prerequisites -n "$NAMESPACE" \
             --version "$DATAHUB_PREREQUISITES_CHART_VERSION" \
             -f deploy/helm/datahub/prerequisites-values.yaml -f deploy/azure/values-prerequisites.yaml \
+            --set postgresql.image.registry="$REGISTRY" --set postgresql.image.repository=bitnami/postgresql \
             --wait --timeout 20m
           # The DataHub images keep their own versions (build-images.sh): the plugin the
           # service's, the UI DataHub's. Point the overlay at the registry (helm --set
