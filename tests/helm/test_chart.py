@@ -63,20 +63,9 @@ def helm(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def render(
-    *values: str,
-    sets: tuple[str, ...] = (),
-    chart: Path | str = CHART,
-    name: str = "veromesh",
+    *values: str, sets: tuple[str, ...] = (), chart: Path | str = CHART, name: str = "veromesh"
 ) -> list[dict]:
-    args = [
-        "template",
-        name,
-        str(chart),
-        "--namespace",
-        "veromesh",
-        "--kube-version",
-        KUBE_VERSION,
-    ]
+    args = ["template", name, str(chart), "--namespace", "veromesh", "--kube-version", KUBE_VERSION]
     if not values and chart == CHART:
         args += WITH_KEY
     for v in values:
@@ -136,10 +125,7 @@ def pod_specs(docs: list[dict]) -> list[tuple[str, dict]]:
             out.append((f"{d['kind']}/{d['metadata']['name']}", d["spec"]["template"]["spec"]))
         elif d["kind"] == "CronJob":
             out.append(
-                (
-                    f"CronJob/{d['metadata']['name']}",
-                    d["spec"]["jobTemplate"]["spec"]["template"]["spec"],
-                )
+                (f"CronJob/{d['metadata']['name']}", d["spec"]["jobTemplate"]["spec"]["template"]["spec"])
             )
         elif d["kind"] == "Pod":
             out.append((f"Pod/{d['metadata']['name']}", d["spec"]))
@@ -305,10 +291,7 @@ def test_every_container_runs_unprivileged(variant):
             sc = c["securityContext"]
             assert sc["allowPrivilegeEscalation"] is False, (where, c["name"])
             assert sc["capabilities"]["drop"] == ["ALL"], (where, c["name"])
-            assert not c["image"].endswith(":latest") and ":" in c["image"], (
-                where,
-                c["image"],
-            )
+            assert not c["image"].endswith(":latest") and ":" in c["image"], (where, c["image"])
             if c["name"] != "test":
                 assert c["resources"]["limits"]["memory"], (where, c["name"])
 
@@ -350,10 +333,7 @@ def test_inline_token_creates_a_secret():
     ref = env_of(one(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0])[
         "VEROMESH_DATAHUB_TOKEN"
     ]
-    assert ref["valueFrom"]["secretKeyRef"] == {
-        "name": "veromesh-datahub",
-        "key": "token",
-    }
+    assert ref["valueFrom"]["secretKeyRef"] == {"name": "veromesh-datahub", "key": "token"}
     # Persistence off: an emptyDir, no claim (a restarted Fuseki rebuilds from Kafka)
     for sts in by_kind(docs, "StatefulSet"):
         assert "volumeClaimTemplates" not in sts["spec"]
@@ -423,11 +403,9 @@ def test_production_shape():
                 "items": [{"key": "kafka.properties", "path": "kafka.properties"}],
             },
         } in spec["volumes"]
-        assert {
-            "name": "kafka",
-            "mountPath": "/etc/fuseki/kafka",
-            "readOnly": True,
-        } in spec["containers"][0]["volumeMounts"]
+        assert {"name": "kafka", "mountPath": "/etc/fuseki/kafka", "readOnly": True} in spec["containers"][0][
+            "volumeMounts"
+        ]
     config = fuseki_cm(docs)["data"]
     for f in ("writer.ttl", "replica.ttl"):
         assert '"/etc/fuseki/kafka/kafka.properties"' in config[f]
@@ -465,12 +443,7 @@ def test_backups_need_the_customers_key_and_a_destination():
 @pytest.mark.parametrize("bad", ["not-a-key", "age1short", "ssh-dss AAAA"])
 def test_schema_rejects_a_malformed_key(bad):
     r = helm(
-        "template",
-        "veromesh",
-        str(CHART),
-        "--set",
-        f"backup.encryption.recipients={{{bad}}}",
-        check=False,
+        "template", "veromesh", str(CHART), "--set", f"backup.encryption.recipients={{{bad}}}", check=False
     )
     assert r.returncode != 0 and "schema" in r.stderr, r.stderr
 
@@ -527,13 +500,7 @@ def test_backup_to_object_storage_with_the_decision_log():
 
 def test_backup_settings_that_cannot_work_are_refused():
     r = helm(
-        "template",
-        "veromesh",
-        str(CHART),
-        *WITH_KEY,
-        "--set",
-        "backup.rclone.existingSecret=s",
-        check=False,
+        "template", "veromesh", str(CHART), *WITH_KEY, "--set", "backup.rclone.existingSecret=s", check=False
     )
     assert r.returncode != 0 and "backup.rclone.remote is required" in r.stderr, r.stderr
     r = helm(
@@ -592,13 +559,7 @@ def test_mesh_off_by_default():
 def test_every_pod_joins_the_mesh_and_fuseki_takes_only_mutual_tls():
     docs = render("mesh-values.yaml")
     pods = all_pod_labels(docs)
-    assert set(pods) == {
-        "veromesh-api",
-        WRITER,
-        REPLICA,
-        "veromesh-backup",
-        "veromesh-test",
-    }
+    assert set(pods) == {"veromesh-api", WRITER, REPLICA, "veromesh-backup", "veromesh-test"}
     for name, labels in pods.items():
         assert labels["istio.io/dataplane-mode"] == "ambient", name
 
@@ -630,10 +591,7 @@ def test_only_the_service_and_backup_identities_reach_fuseki():
     ]
     api_sa = one(docs, "Deployment")["spec"]["template"]["spec"]["serviceAccountName"]
     assert api_sa == "veromesh"
-    other = render(
-        "mesh-values.yaml",
-        sets=("mesh.trustDomain=acme.example", "backup.enabled=false"),
-    )
+    other = render("mesh-values.yaml", sets=("mesh.trustDomain=acme.example", "backup.enabled=false"))
     assert one(other, "AuthorizationPolicy")["spec"]["rules"][0]["from"][0]["source"]["principals"] == [
         "acme.example/ns/veromesh/sa/veromesh"
     ]
@@ -664,11 +622,7 @@ def fuseki_config(docs: list[dict], name: str):
     """One of the rendered Fuseki configuration files, parsed."""
     rdflib = pytest.importorskip("rdflib")
     g = rdflib.Graph()
-    g.parse(
-        data=fuseki_cm(docs)["data"][name],
-        format="turtle",
-        publicID="file:///etc/fuseki/x",
-    )
+    g.parse(data=fuseki_cm(docs)["data"][name], format="turtle", publicID="file:///etc/fuseki/x")
     return g, rdflib
 
 
@@ -690,11 +644,7 @@ def test_writer_takes_writes_and_publishes_them_to_kafka():
     g, rdflib = fuseki_config(docs, "writer.ttl")
     assert values_of(g, rdflib, FUSEKI + "name") >= {"veromesh"}
     # The endpoints the service uses: query, update, Graph Store read/write
-    assert endpoints(g, rdflib) == {
-        ("query", "query"),
-        ("update", "update"),
-        ("gsp-rw", "data"),
-    }
+    assert endpoints(g, rdflib) == {("query", "query"), ("update", "update"), ("gsp-rw", "data")}
     assert (None, rdflib.RDF.type, rdflib.URIRef(VMR + "PublishingDataset")) in g
     assert values_of(g, rdflib, VMR + "bootstrapServers") == {"prerequisites-kafka:9092"}
     assert values_of(g, rdflib, VMR + "topic") == {"veromesh.graph"}
@@ -744,10 +694,7 @@ def test_writer_and_replicas_run_their_configuration():
         assert env["FUSEKI_CONFIG"]["value"] == f"/etc/fuseki/{role}.ttl"
         assert ("REPLICA_ID_FILE" in env) == (role == "replica")
         assert {"name": "config", "mountPath": "/etc/fuseki", "readOnly": True} in c["volumeMounts"]
-        assert {
-            "name": "config",
-            "configMap": {"name": cm["metadata"]["name"]},
-        } in spec["volumes"]
+        assert {"name": "config", "configMap": {"name": cm["metadata"]["name"]}} in spec["volumes"]
         assert "checksum/config" in sts["spec"]["template"]["metadata"]["annotations"]
         # Catching up with Kafka can take a while before Fuseki answers.
         assert c["startupProbe"]["failureThreshold"] * c["startupProbe"]["periodSeconds"] >= 600
@@ -804,14 +751,7 @@ def test_replication_versions_agree():
 @pytest.mark.skipif(not shutil.which("kubeconform"), reason="kubeconform is not on PATH")
 @pytest.mark.parametrize("variant", ["(defaults)", *VARIANTS])
 def test_manifests_match_kubernetes_schemas(variant, tmp_path):
-    args = [
-        "template",
-        "veromesh",
-        str(CHART),
-        "--kube-version",
-        KUBE_VERSION,
-        "--include-crds",
-    ]
+    args = ["template", "veromesh", str(CHART), "--kube-version", KUBE_VERSION, "--include-crds"]
     args += WITH_KEY if variant == "(defaults)" else ["-f", str(CI / variant)]
     out = tmp_path / "out.yaml"
     out.write_text(helm(*args).stdout)
@@ -841,17 +781,7 @@ def pulled_chart(name: str, version: str) -> Path:
     target = CACHE / f"{name}-{version}.tgz"
     if not target.exists():
         CACHE.mkdir(parents=True, exist_ok=True)
-        r = helm(
-            "pull",
-            name,
-            "--repo",
-            DATAHUB_REPO,
-            "--version",
-            version,
-            "-d",
-            str(CACHE),
-            check=False,
-        )
+        r = helm("pull", name, "--repo", DATAHUB_REPO, "--version", version, "-d", str(CACHE), check=False)
         if r.returncode != 0:
             if os.environ.get("CI"):
                 pytest.fail(f"could not download {name} {version}: {r.stderr}")
@@ -902,42 +832,29 @@ def test_datahub_overlay_loads_the_plugin_and_the_brand():
 
     # Kept inside the cluster
     for svc in by_kind(docs, "Service"):
-        if svc["metadata"]["name"] in (
-            "datahub-datahub-gms",
-            "datahub-datahub-frontend",
-        ):
+        if svc["metadata"]["name"] in ("datahub-datahub-gms", "datahub-datahub-frontend"):
             assert svc["spec"]["type"] == "ClusterIP", svc["metadata"]["name"]
 
 
 def test_prerequisites_overlay_matches_the_local_stack():
     v = versions()
     chart = pulled_chart("datahub-prerequisites", v["DATAHUB_PREREQUISITES_CHART_VERSION"])
-    docs = render(
-        DATAHUB_OVERLAYS / "prerequisites-values.yaml",
-        chart=chart,
-        name="prerequisites",
-    )
+    docs = render(DATAHUB_OVERLAYS / "prerequisites-values.yaml", chart=chart, name="prerequisites")
     names = {d["metadata"]["name"] for d in by_kind(docs, "StatefulSet")}
     assert "prerequisites-postgresql" in names, names
     # Bitnami no longer publishes the chart's own PostgreSQL tag: a pinned archive build.
     pg = next(d for d in by_kind(docs, "StatefulSet") if d["metadata"]["name"] == "prerequisites-postgresql")
     images = [c["image"] for c in pg["spec"]["template"]["spec"]["containers"]]
     assert "docker.io/bitnamiarchive/postgresql:14.9.0-debian-11-r61" in images, images
-    env = {
-        e["name"]: e.get("value")
-        for c in pg["spec"]["template"]["spec"]["containers"]
-        for e in c.get("env", [])
-    }
-    assert env.get("POSTGRES_DATABASE") == "datahub" or env.get("POSTGRES_DB") == "datahub", env
+    containers = pg["spec"]["template"]["spec"]["containers"]
+    env = {e["name"]: e.get("value") for c in containers for e in c.get("env", [])}
+    assert "datahub" in (env.get("POSTGRES_DATABASE"), env.get("POSTGRES_DB")), env
     assert not any("mysql" in n for n in names), names
     assert any("opensearch" in n for n in names), names
     assert any("kafka" in n for n in names), names
     # One broker that allows transactions (the VeroMesh writer publishes in transactions)
     rendered = yaml.safe_dump_all(docs)
-    for setting in (
-        "transaction.state.log.replication.factor=1",
-        "transaction.state.log.min.isr=1",
-    ):
+    for setting in ("transaction.state.log.replication.factor=1", "transaction.state.log.min.isr=1"):
         assert setting in rendered, setting
 
 
@@ -972,8 +889,4 @@ def test_usage_reports_are_signed_with_a_kept_key_and_named_for_the_customer():
     }
     assert "VEROMESH_LICENCE" not in env  # none by default: loaded on the Administration page
     smtp = prod["VEROMESH_USAGE_SMTP_PASSWORD"]["valueFrom"]["secretKeyRef"]
-    assert smtp == {
-        "name": "veromesh-usage-mail",
-        "key": "smtp-password",
-        "optional": True,
-    }
+    assert smtp == {"name": "veromesh-usage-mail", "key": "smtp-password", "optional": True}
