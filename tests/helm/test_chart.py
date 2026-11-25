@@ -846,6 +846,8 @@ def test_prerequisites_overlay_matches_the_local_stack():
     pg = next(d for d in by_kind(docs, "StatefulSet") if d["metadata"]["name"] == "prerequisites-postgresql")
     images = [c["image"] for c in pg["spec"]["template"]["spec"]["containers"]]
     assert "docker.io/bitnamiarchive/postgresql:14.9.0-debian-11-r61" in images, images
+    env = {e["name"]: e.get("value") for c in pg["spec"]["template"]["spec"]["containers"] for e in c.get("env", [])}
+    assert env.get("POSTGRES_DATABASE") == "datahub" or env.get("POSTGRES_DB") == "datahub", env
     assert not any("mysql" in n for n in names), names
     assert any("opensearch" in n for n in names), names
     assert any("kafka" in n for n in names), names
