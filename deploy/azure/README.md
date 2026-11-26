@@ -45,6 +45,26 @@ Pay-as-you-go prices for West US 2, November 2026. Turned off it costs about $8 
 4. **Check.** https://dev-ontology.veromesh.ai/steward/ signs you in with Entra ID. Load the example from https://dev-ontology.veromesh.ai/docs, or load a connector run.
 5. **Copilot Studio (issue #19).** Follow [docs/copilot-studio.md](../../docs/copilot-studio.md) with this address: the invoice assistant's app registration, its sign-in client ID in the model, the MCP tool, then the test as Dana and Lee.
 
+## Starting again from a clean install
+
+To prove that a fresh install works, or to clear out test data, remove the install from the
+cluster and deploy again. The Azure resources stay: the node pool, Key Vault (purge-protected,
+so its name could not be reused for 90 days), the PostgreSQL server, the Entra apps (their
+client IDs stay the same), GitHub's settings, and Scott's DNS record and certificate.
+
+```bash
+./setup.sh on                        # if it is off
+./setup.sh reset                     # lists what goes, then asks you to type veromesh-dev
+./setup.sh reset --decision-log      # the same, and empties the decision log too
+./setup.sh all                       # recreates the namespace and its Secrets; skips the rest
+```
+
+Then **Actions > Deploy to Azure (dev) > Run workflow**. `reset` uninstalls the three helm
+releases (VeroMesh, DataHub, its prerequisites) and deletes the `veromesh-dev` namespace with
+every volume and Secret in it; `--decision-log` also drops the decision log's database (its
+user stays). It never touches the assessment, its gateway or certificate. Set
+`CONFIRM=veromesh-dev` to run it without the question.
+
 ## Turning it off and on
 
 The ontology tool runs on its own node pool (`veromesh`), so it can be turned off without touching the assessment, which keeps its own two nodes, its database and its gateway.
