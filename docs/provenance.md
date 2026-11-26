@@ -174,6 +174,10 @@ Additions to `/api/v1` (existing endpoints unchanged):
 | `POST /{type}/{id}/attestations` | Confirm or dispute: `{fields?, verdict, note?, role}`, as the signed-in person (who must fill `role`) |
 | `POST /{type}/{id}/corrections` | Steward correction: new values, recorded as a claim from the `steward` source and attested in the same step |
 | `GET /attestations?status=unconfirmed&type=&ownerRole=` | Review queue, shown on the steward screen (`/steward`, Facts to confirm) |
+| `POST /meetings`, `GET /meetings`, `GET /meetings/{id}` | Meetings as evidence for attestations recorded in them (stewards); a meeting lists what was recorded in it and where each stands |
+| `POST /meetings/preread` | For each person attending, the facts waiting for them |
+| `POST /meetings/{id}/attestations` | Record what owners confirmed in the meeting: `{items: [{type, id, owner, role, fields?, note?}]}` |
+| `GET /meetings/recorded?person=` | Attestations recorded for you (stewards: for anyone), open, confirmed, disputed or standing |
 | `GET /authorities/{id}/confirmation` | Whether an agent may rely on an authority: every fact behind it attested and current (decision 3), with the reasons when not |
 | `GET /governance` | The rankings, steward-correction policy and cadence in force |
 | `POST /effective/rebuild` | Recompute the effective model, e.g. after valid-until dates pass |
@@ -182,12 +186,14 @@ Additions to `/api/v1` (existing endpoints unchanged):
 
 Changeset items gain optional `observedAt`, `validFrom`, `validUntil`. The connector SDK's `Item` carries them, and mapping files can fill them from source columns (for example `observedAt: "{Last Modified}"`). The spreadsheet keeps working without them.
 
+**Attesting in meetings** (gap G9). Owners do not need to visit a screen: a steward records, in a meeting the owners already hold (a monthly review, a governance board), the facts each owner confirmed there. `POST /meetings` creates the meeting (name, date, a link to its minutes or recording, the chair) and puts it on the decision log's hash chain as a `meeting` entry; `POST /meetings/preread` lists, for each person attending, the facts waiting for them in the roles they fill (unconfirmed or expired), to read before the meeting. `POST /meetings/{id}/attestations` then records the ticked facts for their owners: each attestation is the owner's (`person`), made in a role they fill, with `recordedBy` (the signed-in steward), `meeting` and `objectionUntil` (five business days, Monday to Friday) beside it, all on the hash chain and checked by `GET /attestations/verify`. All items are checked before any is written; a steward cannot record for themselves, and a role the owner does not fill is refused. A recorded attestation counts at once. The owner sees it under **Recorded for you in meetings** on the steward screen (`GET /meetings/recorded`), and can confirm it or object, which is an ordinary dispute: it stands disputed as any other. Each one stands `open` until the window closes, then `stands`; `confirmed` once the owner attests it themselves, `disputed` once they object. A Teams card that asks the owner to confirm or object is next.
+
 With sign-in on, the attester is the signed-in person (matched to the model by email or employee ID; `service/README.md`, "Attesting as yourself"), who must fill the role they act in. Owners attest their own facts without the VeroMesh steward role: acting in one of the entity's owner or steward roles is enough. A steward acting in another role may still attest, with a warning. With sign-in off (development), the request names the attester.
 
 ## Validation rules (SHACL)
 
 - Every claim has exactly one source, changeset, observed time and value hash; valid until is not before valid from.
-- Every attestation names a person, a role, a verdict, a time and a pinned hash.
+- Every attestation names a person, a role, a verdict, a time and a pinned hash. One recorded by someone else also names the meeting and the end of the objection window.
 - Warning: the attester does not hold the entity's owner or steward role.
 - Unconfirmed facts are usable everywhere and marked as such, except in an agent's authority check (decision 3): there the delegated authority, the role it hangs on, the person filling the role and the ownership of the affected KPIs must each be attested and not expired, or the check fails with the reason. Elsewhere this shows as a warning.
 

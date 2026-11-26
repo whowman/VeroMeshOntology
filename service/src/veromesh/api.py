@@ -39,6 +39,7 @@ from . import (
     incremental,
     licence,
     mcp_server,
+    meetings,
     modelmeasures,
     proposals,
     publish,
@@ -141,6 +142,32 @@ class AttestationIn(BaseModel):
     fields: list[str] | None = None
     source: str | None = None
     note: str | None = None
+
+
+class MeetingIn(BaseModel):
+    name: str
+    heldOn: str  # YYYY-MM-DD
+    link: str | None = None  # minutes, recording or the calendar entry
+    chair: str | None = None  # person ID
+    createdBy: str | None = None  # with sign-in off: the steward's person ID
+
+
+class PrereadIn(BaseModel):
+    people: list[str]
+
+
+class RecordedItem(BaseModel):
+    type: str
+    id: str
+    owner: str  # the person attesting, who was at the meeting
+    role: str  # the owner or steward role they act in
+    fields: list[str] | None = None
+    note: str | None = None
+
+
+class MeetingRecordIn(BaseModel):
+    items: list[RecordedItem]
+    recordedBy: str | None = None  # with sign-in off: the steward's person ID
 
 
 class CheckIn(BaseModel):
@@ -1262,6 +1289,68 @@ def create_app(
         if e is None:
             raise HTTPException(status_code=404, detail=f"No decision log entry {entry_id}.")
         return {**e, "followedBy": dl.find(refers_to=e["id"], limit=1000)}
+
+    # ------------------------------------------------------------ meetings (gap G9)
+
+    @app.post("/api/v1/meetings", dependencies=need(auth.STEWARD), status_code=201, tags=["governance"])
+    def meeting_create(s: Svc, c: Cfg, dl: Log, who: Who, body: MeetingIn) -> dict:
+        """A meeting owners already hold, as the evidence for attestations recorded in it. It goes on
+        the decision log's hash chain."""
+        by, _ = attester_for(s, c, who, body.createdBy)
+        try:
+            return meetings.create(
+                s.store,
+                name=body.name,
+                held_on=body.heldOn,
+                link=body.link,
+                chair=body.chair,
+                created_by=by,
+                log=dl,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/api/v1/meetings", dependencies=need(auth.STEWARD), tags=["governance"])
+    def meeting_list(s: Svc) -> list[dict]:
+        return meetings.list_meetings(s.store)
+
+    @app.get("/api/v1/meetings/recorded", dependencies=need(auth.READ), tags=["governance"])
+    def meeting_recorded_for_me(s: Svc, c: Cfg, who: Who, person: str | None = None) -> list[dict]:
+        """Attestations recorded for you in meetings, with where each stands (open: you may still
+        object). Stewards may ask for anyone (`person`)."""
+        if who.has(*auth.STEWARD) and person:
+            return meetings.recorded(s.store, person=person)
+        me, _ = attester_for(s, c, who, person)
+        return meetings.recorded(s.store, person=me)
+
+    @app.post("/api/v1/meetings/preread", dependencies=need(auth.STEWARD), tags=["governance"])
+    def meeting_preread(s: Svc, c: Cfg, body: PrereadIn) -> dict:
+        """For each owner expected at a meeting, the facts waiting for them (unconfirmed or expired),
+        to read before it and record in it."""
+        return meetings.preread(s.store, c.instance_base, body.people)
+
+    @app.get("/api/v1/meetings/{mid}", dependencies=need(auth.STEWARD), tags=["governance"])
+    def meeting_get(s: Svc, mid: str) -> dict:
+        return {**meetings.get(s.store, mid), "recorded": meetings.recorded(s.store, meeting=mid)}
+
+    @app.post(
+        "/api/v1/meetings/{mid}/attestations",
+        dependencies=need(auth.STEWARD),
+        status_code=201,
+        tags=["governance"],
+    )
+    def meeting_record(s: Svc, c: Cfg, dl: Log, who: Who, mid: str, body: MeetingRecordIn) -> dict:
+        """Record attestations for the owners who gave them in the meeting. Each counts at once; each
+        owner may object (dispute) for five business days. All items are checked before any is written."""
+        by, _ = attester_for(s, c, who, body.recordedBy)
+        try:
+            return meetings.record(
+                s.store, c.instance_base, mid, [i.model_dump() for i in body.items], recorded_by=by, log=dl
+            )
+        except prov.NotYourRole as e:
+            raise HTTPException(status_code=403, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
 
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",

@@ -262,6 +262,11 @@ class Attestation:
     role: str
     expires_at: str | None = None
     note: str | None = None
+    # Recorded for the owner in a meeting they already hold (meetings.py): who recorded it,
+    # the meeting, and until when the owner may object.
+    recorded_by: str | None = None
+    meeting: str | None = None
+    objection_until: str | None = None
 
     def covers(self, key: str, value) -> bool:
         return self.hashes.get(key) == fhash(value)
@@ -276,6 +281,15 @@ class Attestation:
             "source": self.source,
             "expiresAt": self.expires_at,
             "note": self.note,
+            **(
+                {
+                    "recordedBy": self.recorded_by,
+                    "meeting": self.meeting,
+                    "objectionUntil": self.objection_until,
+                }
+                if self.recorded_by
+                else {}
+            ),
         }
 
 
@@ -641,11 +655,12 @@ def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[
     where = f" FILTER(?t = {literal(entity[0])} && ?id = {literal(entity[1])})" if entity else ""
     rows = select(
         store,
-        f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
+        f"""SELECT ?a ?t ?id ?src ?h ?verdict ?at ?person ?role ?exp ?note ?rec ?mtg ?obj WHERE {{ GRAPH <{ATTESTATIONS_GRAPH}> {{
               ?a a <{VMP.Attestation}> ; <{VMP.entityType}> ?t ; <{VMP.entityId}> ?id ; <{VMP.source}> ?src ;
                  <{VMP.fieldHashes}> ?h ; <{VMP.verdict}> ?verdict ; <{PROV.endedAtTime}> ?at ;
                  <{VMP.attestedBy}> ?person ; <{VMP.inRole}> ?role .
-              OPTIONAL {{ ?a <{VMP.expiresAt}> ?exp }} OPTIONAL {{ ?a <{VMP.note}> ?note }} {where} }} }}
+              OPTIONAL {{ ?a <{VMP.expiresAt}> ?exp }} OPTIONAL {{ ?a <{VMP.note}> ?note }}
+              OPTIONAL {{ ?a <{VMP.recordedBy}> ?rec ; <{VMP.meeting}> ?mtg ; <{VMP.objectionUntil}> ?obj }} {where} }} }}
             ORDER BY ?at""",
     )
     return [
@@ -661,6 +676,9 @@ def _read_attestations(store: RDFStore, entity: tuple[str, str] | None) -> list[
             role=b["role"]["value"],
             expires_at=b.get("exp", {}).get("value"),
             note=b.get("note", {}).get("value"),
+            recorded_by=b.get("rec", {}).get("value"),
+            meeting=b.get("mtg", {}).get("value"),
+            objection_until=b.get("obj", {}).get("value"),
         )
         for b in rows
     ]
@@ -680,9 +698,13 @@ def write_attestation(
     note: str | None = None,
     at: str | None = None,
     log=None,
+    recorded_by: str | None = None,
+    meeting: str | None = None,
+    objection_until: str | None = None,
 ) -> Attestation:
     """Record an attestation: first on the decision log's hash chain (when a log is
-    given), then in the attestations graph the model reads."""
+    given), then in the attestations graph the model reads. ``recorded_by``, ``meeting``
+    and ``objection_until``: recorded for ``person`` in a meeting, by someone else."""
     at = at or now_ts()
     days = min(cadence_days(type_, k) for k in values) if values else DEFAULT_CADENCE_DAYS
     if verdict == "attested" and source not in (STEWARD_SOURCE, ENDED_SOURCE):
@@ -708,6 +730,9 @@ def write_attestation(
         role=role,
         expires_at=expires,
         note=note,
+        recorded_by=recorded_by,
+        meeting=meeting,
+        objection_until=objection_until,
     )
     if log is not None:
         log.append(attestation_entry(a))
@@ -729,6 +754,10 @@ def write_attestation(
         g.add((s, VMP.expiresAt, Literal(expires, datatype=XSD.dateTime)))
     if note:
         g.add((s, VMP.note, Literal(note)))
+    if recorded_by:
+        g.add((s, VMP.recordedBy, Literal(recorded_by)))
+        g.add((s, VMP.meeting, Literal(meeting or "")))
+        g.add((s, VMP.objectionUntil, Literal(objection_until or "", datatype=XSD.date)))
     store.load_turtle(g.serialize(format="nt"), ATTESTATIONS_GRAPH, replace=False)
     return a
 
@@ -748,6 +777,11 @@ def attestation_entry(a: Attestation) -> dict:
         "attestedAt": a.at,
         "expiresAt": a.expires_at,
         "note": a.note,
+        **(
+            {"recordedBy": a.recorded_by, "meeting": a.meeting, "objectionUntil": a.objection_until}
+            if a.recorded_by
+            else {}
+        ),
     }
 
 
@@ -792,6 +826,9 @@ def verify_attestations(store: RDFStore, log) -> dict:
                 ("fields", e["fieldHashes"] == a.hashes),
                 ("at", _same_instant(e["attestedAt"], a.at)),
                 ("expiresAt", _same_instant(e.get("expiresAt"), a.expires_at)),
+                ("recordedBy", e.get("recordedBy") == a.recorded_by),
+                ("meeting", e.get("meeting") == a.meeting),
+                ("objectionUntil", e.get("objectionUntil") == a.objection_until),
             )
             if not same
         ]
@@ -1427,6 +1464,9 @@ def attest(
     signed_in: bool = False,
     owner_only: bool = False,
     log=None,
+    recorded_by: str | None = None,
+    meeting: str | None = None,
+    objection_until: str | None = None,
 ) -> dict:
     """Confirm or dispute fields of an entity: by default the values VeroMesh currently
     believes (each field's winning source); with ``source``, that source's values."""
@@ -1467,6 +1507,9 @@ def attest(
             base=base,
             note=note,
             log=log,
+            recorded_by=recorded_by,
+            meeting=meeting,
+            objection_until=objection_until,
         )
         for src, vals in sorted(by_source.items())
     ]

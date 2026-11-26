@@ -50,6 +50,12 @@ vmp:inRole a owl:DatatypeProperty ; rdfs:label "in role" ; rdfs:domain vmp:Attes
     rdfs:comment "ID of the role the person acted in." .
 vmp:expiresAt a owl:DatatypeProperty ; rdfs:label "expires at" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:dateTime .
 vmp:note a owl:DatatypeProperty ; rdfs:label "note" ; rdfs:range xsd:string .
+vmp:recordedBy a owl:DatatypeProperty ; rdfs:label "recorded by" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string ;
+    rdfs:comment "ID of the person who recorded the attestation for the attester, in a meeting the attester held." .
+vmp:meeting a owl:DatatypeProperty ; rdfs:label "meeting" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:string ;
+    rdfs:comment "ID of the meeting the attestation was recorded in (the evidence)." .
+vmp:objectionUntil a owl:DatatypeProperty ; rdfs:label "objection until" ; rdfs:domain vmp:Attestation ; rdfs:range xsd:date ;
+    rdfs:comment "Last day the attester may object to an attestation recorded for them." .
 vmp:name a owl:DatatypeProperty ; rdfs:label "name" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .
 vmp:category a owl:DatatypeProperty ; rdfs:label "category" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .
 vmp:ownerRole a owl:DatatypeProperty ; rdfs:label "owner role" ; rdfs:domain vmp:Source ; rdfs:range xsd:string .

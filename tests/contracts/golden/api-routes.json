@@ -263,6 +263,30 @@
       "200"
     ]
   },
+  "GET /api/v1/meetings": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
+  "GET /api/v1/meetings/recorded": {
+    "params": [
+      "person? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/meetings/{mid}": {
+    "params": [
+      "mid (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/model/versions": {
     "params": [
       "afterSeq? (query)",
@@ -672,6 +696,73 @@
     "params": [],
     "status": [
       "200"
+    ]
+  },
+  "POST /api/v1/meetings": {
+    "body": {
+      "application/json": {
+        "chair?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "createdBy?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "heldOn": "string",
+        "link?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        },
+        "name": "string"
+      }
+    },
+    "params": [],
+    "status": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/meetings/preread": {
+    "body": {
+      "application/json": {
+        "people": {
+          "array": "string"
+        }
+      }
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/meetings/{mid}/attestations": {
+    "body": {
+      "application/json": {
+        "items": {
+          "array": "RecordedItem"
+        },
+        "recordedBy?": {
+          "anyOf": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "params": [
+      "mid (path)"
+    ],
+    "status": [
+      "201",
+      "422"
     ]
   },
   "POST /api/v1/proposals/{type_}/{rid}/{field}": {
