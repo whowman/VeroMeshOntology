@@ -235,6 +235,20 @@ veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field nu
 - **Writes**, as source `servicenow-ea` (category `ea`): capabilities with their name, definition (`short_description`), parent capability (`parent`, or the field given with `--parent-field`) and owner **role** ("Owner of Accounts payable", ID `AccountsPayable.Owner`), and each owner filling it. A capability's ID comes from its name in the workbook's style ("Accounts payable" becomes `AccountsPayable`), so a capability the workbook also lists is one entity; `--id-field number` takes it from a field instead. Two capabilities that would get the same ID stop the load until one is renamed or a unique field is used. A capability whose parent is retired is loaded at the top level.
 - **Who decides:** by default the EA tool keeps the capability map (the `capabilities` domain: `ea` authoritative, then governance and the workbook as evidence), decided 25 November 2026. Where the workbook names a different owner, the EA's owner is in force and the difference is reported as **out of sync**. An organization whose map lives elsewhere changes the domain, for example `PUT /api/v1/domains/capabilities {"authoritative": ["spreadsheet"], "evidence": ["ea"]}`, and `DELETE` returns to the default.
 
+### dbt (tables, lineage and KPIs)
+
+```bash
+curl -X PUT https://<veromesh>/api/v1/sources/dbt -d '{"category": "catalog"}' ...   # once
+veromesh-connect dbt import --dir target/ --runs-on LAKE                                  # a dbt build's folder
+veromesh-connect dbt import --url https://artifacts.acme.com/dbt --runs-on LAKE           # artifacts served over HTTPS
+DBT_CLOUD_TOKEN=... veromesh-connect dbt import --dbt-cloud --account 70 --job 42 --runs-on LAKE
+```
+
+- **Reads** dbt's documented run artifacts: `manifest.json` (required) and `run_results.json` (optional), from a `target/` folder, a URL that serves them (`DBT_ARTIFACTS_TOKEN` as a bearer token if needed), or dbt Cloud's Administrative API v2, the artifacts of a job's latest run (`/api/v2/accounts/{account}/jobs/{job}/artifacts/...`, a service token in `DBT_CLOUD_TOKEN`; `--url` for a dbt Cloud address other than cloud.getdbt.com). It only reads.
+- **Writes**, as source `dbt` (category `catalog`, which decides what data means): a **data product** per model and source, with the ID `database.schema.name` (the table as the warehouse names it), the data products it feeds (the manifest's `depends_on`, read the other way), the system it runs on (`--runs-on`, for example the lakehouse from the CMDB), its sensitivity (the highest of its columns' `meta.classification`: public, internal, confidential, or restricted for PII, PHI and PCI) and its DataHub dataset URN (`urn:li:dataset:(urn:li:dataPlatform:<adapter>,<table>,<env>)`, `--env` default PROD), so the catalog page and data-change impact meet. Each table with `meta.owner` (an email) gets an owner role, "Owner of <table>", filled by that person, matched by email.
+- **KPIs:** each dbt metric (the dbt Semantic Layer) links its KPI to the data products it is computed from (`computedFromDataProducts`), which is what lets a data change reach the KPIs and their owners. The KPI's ID is the metric's `meta.veromesh_kpi`, else its name in the workbook's style (`on_time_payment_rate` becomes `OnTimePaymentRate`). Only KPIs already in the model are linked; dbt says how a KPI is computed, not that it is one the organization tracks.
+- **Counted, not loaded:** models that failed in the last run (and what they skipped), owners who match no one, and metrics that are not KPIs in the model. Tests, seeds and snapshots are not data products.
+
 ### SAP LeanIX (capabilities)
 
 ```bash

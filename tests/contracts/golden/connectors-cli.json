@@ -25,6 +25,27 @@
       },
       "options": []
     },
+    "dbt": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [],
+          "options": [
+            "--dir",
+            "--dbt-cloud",
+            "--url",
+            "--account",
+            "--job",
+            "--runs-on",
+            "--env",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "entra": {
       "args": [],
       "commands": {

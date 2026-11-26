@@ -16,6 +16,7 @@
     veromesh-connect servicenow import --url https://acme.service-now.com
     veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field number]
     veromesh-connect leanix import --url https://acme.leanix.net [--id-from externalId]
+    veromesh-connect dbt import --dir target/ [--runs-on LAKE]       (or --url, or --dbt-cloud --account --job)
     veromesh-connect halo import --url https://acme.haloitsm.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
@@ -40,6 +41,7 @@ Source systems:
     HALO_URL, HALO_CLIENT_ID, HALO_CLIENT_SECRET (HALO_TENANT for hosted instances)
                                             HaloITSM (OAuth client credentials)
     LEANIX_URL, LEANIX_API_TOKEN               SAP LeanIX (a technical user's API token)
+    DBT_CLOUD_TOKEN                            dbt Cloud (a service token with read access to job artifacts)
     SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD (or SERVICENOW_TOKEN)
                                             ServiceNow (basic authentication or an OAuth token)
 """
@@ -310,6 +312,38 @@ def leanix_import(api: ApiSession, args) -> int:
         owner_role=args.owner_role,
     )
     opts = RunOptions(source=args.source or "leanix", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def dbt_import(api: ApiSession, args) -> int:
+    from .plugins.dbt import Artifacts, DbtConnector
+
+    http = getattr(args, "source_http", None)
+    if args.dir:
+        artifacts = Artifacts(folder=args.dir)
+    elif args.dbt_cloud:
+        account = _need(args.account, "--account", "DBT_CLOUD_ACCOUNT_ID")
+        job = _need(args.job, "--job", "DBT_CLOUD_JOB_ID")
+        token = _need(os.environ.get("DBT_CLOUD_TOKEN"), "DBT_CLOUD_TOKEN", "the environment")
+        t = _source_transport(args.url or "https://cloud.getdbt.com", "dbt Cloud", http)
+        artifacts = Artifacts(
+            api=SourceApi("dbt Cloud", t, StaticToken(token)),
+            prefix=f"/api/v2/accounts/{account}/jobs/{job}/artifacts",
+        )
+    else:
+        url = _need(args.url, "--url, --dir or --dbt-cloud", "DBT_ARTIFACTS_URL").rstrip("/")
+        t = _source_transport(url, "dbt artifacts", http)
+        artifacts = Artifacts(
+            api=SourceApi("dbt artifacts", t, StaticToken(os.environ.get("DBT_ARTIFACTS_TOKEN")))
+        )
+    conn = DbtConnector(
+        artifacts,
+        people=api.entities("people"),
+        kpis=api.entities("kpis"),
+        runs_on=args.runs_on,
+        env=args.env,
+    )
+    opts = RunOptions(source=args.source or "dbt", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
@@ -647,6 +681,36 @@ def parser() -> argparse.ArgumentParser:
     )
     load_flags(sne)
     sne.set_defaults(fn=servicenow_ea)
+
+    db = sub.add_parser(
+        "dbt", help="dbt: tables, lineage, owners, sensitivity and the KPIs its metrics compute"
+    ).add_subparsers(dest="action", required=True)
+    dbi = db.add_parser(
+        "import",
+        help="Load data products from a dbt project's run artifacts (register the source as catalog)",
+    )
+    where = dbi.add_mutually_exclusive_group()
+    where.add_argument(
+        "--dir", help="the target/ folder a dbt build leaves (manifest.json, run_results.json)"
+    )
+    where.add_argument(
+        "--dbt-cloud", action="store_true", help="the latest run of a dbt Cloud job (Administrative API v2)"
+    )
+    dbi.add_argument(
+        "--url",
+        default=os.environ.get("DBT_ARTIFACTS_URL"),
+        help="where manifest.json is served; with --dbt-cloud, the dbt Cloud address (default https://cloud.getdbt.com)",
+    )
+    dbi.add_argument("--account", default=os.environ.get("DBT_CLOUD_ACCOUNT_ID"), help="dbt Cloud account ID")
+    dbi.add_argument("--job", default=os.environ.get("DBT_CLOUD_JOB_ID"), help="dbt Cloud job ID")
+    dbi.add_argument(
+        "--runs-on", help="the system the tables live in, as a VeroMesh system ID (e.g. the lakehouse)"
+    )
+    dbi.add_argument(
+        "--env", default="PROD", help="the DataHub environment in the dataset URNs (default PROD)"
+    )
+    load_flags(dbi)
+    dbi.set_defaults(fn=dbt_import)
 
     lx = sub.add_parser(
         "leanix", help="SAP LeanIX: the business capability map and its owners"
