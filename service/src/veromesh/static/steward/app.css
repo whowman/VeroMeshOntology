@@ -15,6 +15,8 @@ code { font: 13px ui-monospace, Menlo, Consolas, monospace; color: var(--text2);
 .product { color: var(--teal); font-weight: 600; letter-spacing: .02em; }
 .spacer { flex: 1; }
 .who { color: var(--text2); font-size: 14px; }
+/* An element marked hidden stays hidden, whatever display its class gives it. */
+[hidden] { display: none !important; }
 .devbar { display: flex; gap: 10px; align-items: center; padding: 8px 24px; background: rgba(232, 168, 74, .12); color: var(--warn); font-size: 14px; border-bottom: 1px solid var(--line); }
 .tabs { display: flex; gap: 4px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text2); padding: 12px 14px; font: inherit; cursor: pointer; white-space: nowrap; }
