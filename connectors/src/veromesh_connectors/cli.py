@@ -15,6 +15,7 @@
     veromesh-connect erp exceptions --since 2026-11-01
     veromesh-connect servicenow import --url https://acme.service-now.com
     veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field number]
+    veromesh-connect leanix import --url https://acme.leanix.net [--id-from externalId]
     veromesh-connect halo import --url https://acme.haloitsm.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
@@ -38,6 +39,7 @@ Source systems:
                                             Oracle Fusion Cloud (basic authentication)
     HALO_URL, HALO_CLIENT_ID, HALO_CLIENT_SECRET (HALO_TENANT for hosted instances)
                                             HaloITSM (OAuth client credentials)
+    LEANIX_URL, LEANIX_API_TOKEN               SAP LeanIX (a technical user's API token)
     SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD (or SERVICENOW_TOKEN)
                                             ServiceNow (basic authentication or an OAuth token)
 """
@@ -291,6 +293,23 @@ def servicenow_ea(api: ApiSession, args) -> int:
         parent_field=args.parent_field,
     )
     opts = RunOptions(source=args.source or "servicenow-ea", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def leanix_import(api: ApiSession, args) -> int:
+    from .plugins import LeanixClient, LeanixConnector
+    from .plugins.leanix import ApiToken
+
+    url = _need(args.url, "--url", "LEANIX_URL").rstrip("/")
+    t = _source_transport(url, "SAP LeanIX", getattr(args, "source_http", None))
+    token = _need(os.environ.get("LEANIX_API_TOKEN"), "LEANIX_API_TOKEN", "the environment")
+    conn = LeanixConnector(
+        LeanixClient(SourceApi("SAP LeanIX", t, ApiToken(t, token))),
+        people=api.entities("people"),
+        id_from=args.id_from,
+        owner_role=args.owner_role,
+    )
+    opts = RunOptions(source=args.source or "leanix", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
@@ -628,6 +647,28 @@ def parser() -> argparse.ArgumentParser:
     )
     load_flags(sne)
     sne.set_defaults(fn=servicenow_ea)
+
+    lx = sub.add_parser(
+        "leanix", help="SAP LeanIX: the business capability map and its owners"
+    ).add_subparsers(dest="action", required=True)
+    lxi = lx.add_parser(
+        "import",
+        help="Load business capabilities and their owner roles (register the source with category ea)",
+    )
+    lxi.add_argument("--url", default=os.environ.get("LEANIX_URL"), help="https://<workspace>.leanix.net")
+    lxi.add_argument(
+        "--id-from",
+        choices=("name", "externalId"),
+        default="name",
+        help="capability IDs from the name (AccountsPayable, default) or the fact sheet's external ID",
+    )
+    lxi.add_argument(
+        "--owner-role",
+        default="Business Owner",
+        help="subscription role that names the owner (default Business Owner)",
+    )
+    load_flags(lxi)
+    lxi.set_defaults(fn=leanix_import)
 
     ha = sub.add_parser("halo", help="HaloITSM: business applications and agents").add_subparsers(
         dest="action", required=True
