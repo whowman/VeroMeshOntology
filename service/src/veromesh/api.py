@@ -78,6 +78,17 @@ class BindingIn(BaseModel):
     class_iri: str
 
 
+class ReportedColumn(BaseModel):
+    column: str  # the DataHub schema-field URN
+    dataset: str | None = None
+    fieldPath: str | None = None
+    terms: list[str] = []
+
+
+class ColumnsReportIn(BaseModel):
+    columns: list[ReportedColumn]
+
+
 class PublishIn(BaseModel):
     graph: str
     name: str | None = None
@@ -786,6 +797,25 @@ def create_app(
             )
         except LookupError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.put(
+        "/api/v1/catalog/columns/reported/{source}",
+        dependencies=need(auth.STEWARD_OR_CONNECTOR),
+        tags=["catalog"],
+    )
+    def catalog_columns_report(s: Svc, source: str, body: ColumnsReportIn) -> dict:
+        """A catalog connector's columns and the tags on them (DataHub URNs), replacing what that
+        source reported before. They are matched against data elements' catalog terms as
+        binding suggestions; nothing is bound until a steward accepts."""
+        try:
+            return suggest.report_columns(s.store, source, [c.model_dump() for c in body.columns])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.get("/api/v1/catalog/columns/reported", dependencies=need(auth.STEWARD), tags=["catalog"])
+    def catalog_columns_reported(s: Svc, source: str | None = None) -> list[dict]:
+        """The columns catalog connectors reported, with their tags."""
+        return [c for c in suggest.reported_columns(s.store) if source in (None, c["source"])]
 
     @app.get("/api/v1/data-elements/suggestions", dependencies=need(auth.STEWARD), tags=["governance"])
     def data_element_suggestions(s: Svc, c: Cfg) -> dict:

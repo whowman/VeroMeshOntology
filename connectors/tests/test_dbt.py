@@ -198,3 +198,38 @@ def test_dbt_cloud_job_artifacts(http, monkeypatch):
 def test_a_missing_manifest_sends_nothing(http, tmp_path):
     assert main([*API, "dbt", "import", "--dir", str(tmp_path)], http=http) != 0
     assert products(http) == {}
+
+
+def test_columns_reported_become_binding_suggestions(http, target):
+    """The tags dbt holds on columns suggest which columns hold which data elements; a steward
+    accepts, and the data element inventory counts the column as bound."""
+    seed(http)
+    element = {
+        "id": "SupplierTaxId",
+        "name": "Supplier tax ID",
+        "catalogTerms": "urn:li:tag:classification:pii",
+    }
+    cs = http.post("/api/v1/changesets", json={"source": "governance"}).json()["id"]
+    http.post(
+        f"/api/v1/changesets/{cs}/items",
+        json={"items": [{"type": "data-elements", "op": "upsert", "entity": element}]},
+    )
+    assert http.post(f"/api/v1/changesets/{cs}/commit").status_code in (200, 201)
+    assert main([*API, "dbt", "import", "--dir", str(target)], http=http) == 0
+    col = "urn:li:schemaField:(urn:li:dataset:(urn:li:dataPlatform:databricks,finance.bronze.ap_invoices,PROD),supplier_tax_id)"
+    got = http.get("/api/v1/data-elements/suggestions").json()["suggestions"]
+    assert [(s["dataElement"], s["column"], s["reportedBy"]) for s in got] == [("SupplierTaxId", col, "dbt")]
+    r = http.post(
+        "/api/v1/data-elements/suggestions/accept",
+        json={"items": [{"dataElement": "SupplierTaxId", "column": col}]},
+    )
+    assert r.status_code == 200, r.text
+    cov = {e["id"]: e for e in http.get("/api/v1/data-elements/coverage").json()["elements"]}
+    assert col in cov["SupplierTaxId"]["columns"]
+    assert http.get("/api/v1/data-elements/suggestions").json()["suggestions"] == []
+
+
+def test_a_dry_run_reports_no_columns(http, target):
+    seed(http)
+    assert main([*API, "dbt", "import", "--dir", str(target), "--dry-run"], http=http) == 0
+    assert http.get("/api/v1/catalog/columns/reported").json() == []

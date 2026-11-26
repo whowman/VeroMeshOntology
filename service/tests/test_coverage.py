@@ -157,3 +157,39 @@ def test_a_catalog_failure_is_reported_not_fatal(client, fake_datahub, monkeypat
     monkeypatch.setattr(fake_datahub, "columns_with_terms", boom)
     got = client.get(f"{API}/data-elements/suggestions").json()
     assert got["suggestions"] == [] and "not answering" in got["problems"][0]["problem"]
+
+
+# ------------------------------------------------- columns reported by catalog connectors
+
+
+def test_columns_a_catalog_connector_reports_are_suggested(client, fake_datahub):  # noqa: F811
+    """dbt or Databricks report columns and their tags; no DataHub needed to suggest them."""
+    fake_datahub.column_terms = {}
+    reported = {
+        "columns": [
+            {"column": SUGGESTED, "dataset": "pay.vendors", "fieldPath": "acct_no", "terms": [TERM]},
+            {"column": OTHER, "fieldPath": "vendor_name", "terms": ["urn:li:tag:classification:internal"]},
+        ]
+    }
+    r = client.put(f"{API}/catalog/columns/reported/databricks", json=reported)
+    assert r.status_code == 200 and r.json() == {"source": "databricks", "columns": 2, "tagged": 2}
+    got = client.get(f"{API}/data-elements/suggestions").json()
+    assert [(x["dataElement"], x["column"], x.get("reportedBy")) for x in got["suggestions"]] == [
+        ("SupplierBankAccount", SUGGESTED, "databricks")
+    ]
+    # DataHub knows the same column too: it is suggested once.
+    fake_datahub.column_terms = {SUGGESTED: [TERM]}
+    assert len(client.get(f"{API}/data-elements/suggestions").json()["suggestions"]) == 1
+    # A new report replaces the old one.
+    client.put(f"{API}/catalog/columns/reported/databricks", json={"columns": []})
+    fake_datahub.column_terms = {}
+    assert client.get(f"{API}/data-elements/suggestions").json()["suggestions"] == []
+    assert client.get(f"{API}/catalog/columns/reported").json() == []
+
+
+def test_a_reported_column_needs_a_urn_and_a_source_name(client):  # noqa: F811
+    assert client.put(f"{API}/catalog/columns/reported/Bad Name", json={"columns": []}).status_code == 400
+    assert (
+        client.put(f"{API}/catalog/columns/reported/dbt", json={"columns": [{"column": ""}]}).status_code
+        == 400
+    )

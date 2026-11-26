@@ -371,6 +371,19 @@ def test_databricks_unity_catalog(http, company, monkeypatch, warehouse):
     if warehouse:  # classification tags only through SQL
         phi = [a for a, x in truth.assets.items() if any(c[2] == "phi" for c in x.columns)]
         assert phi and all(dps[a].get("sensitivity") == "Restricted" for a in phi)
+        # Every column is reported for binding suggestions, with its tags; the one the
+        # harness left untagged shows up as a column with no classification.
+        cols = http.get("/api/v1/catalog/columns/reported", params={"source": "databricks"}).json()
+        assert len(cols) == sum(len(x.columns) for x in truth.assets.values())
+        untagged = {
+            (d["about"]["asset"], d["about"]["column"])
+            for d in key
+            if d["kind"] == "untagged-sensitive-column"
+        }
+        for c in cols:
+            table = c["dataset"].split(",")[1]
+            if (table, c["fieldPath"]) in untagged:
+                assert not any(t.startswith("urn:li:tag:classification:") for t in c["terms"])
     else:
         assert not any(e.get("sensitivity") for e in dps.values())
 

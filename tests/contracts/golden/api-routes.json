@@ -68,6 +68,15 @@
       "422"
     ]
   },
+  "GET /api/v1/catalog/columns/reported": {
+    "params": [
+      "source? (query)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/changesets": {
     "params": [
       "limit? (query)",
@@ -842,6 +851,22 @@
       }
     },
     "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/catalog/columns/reported/{source}": {
+    "body": {
+      "application/json": {
+        "columns": {
+          "array": "ReportedColumn"
+        }
+      }
+    },
+    "params": [
+      "source (path)"
+    ],
     "status": [
       "200",
       "422"
