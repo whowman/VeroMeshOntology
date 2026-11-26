@@ -1,0 +1,33 @@
+# Delete a pull request's branch once it is merged, however it was merged (GitHub's button,
+# or a signed merge made locally and pushed: GitHub closes the pull request as merged either
+# way). Only branches in this repository, never main or another long-lived branch.
+name: Delete merged branch
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(fromJSON('["main", "master", "harper"]'), github.event.pull_request.head.ref)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if gh api -X DELETE "repos/$REPO/git/refs/heads/$BRANCH" 2>err.txt; then
+            echo "Deleted $BRANCH." >> "$GITHUB_STEP_SUMMARY"
+          elif grep -q "Reference does not exist" err.txt; then
+            echo "$BRANCH was already deleted." >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat err.txt; exit 1
+          fi
