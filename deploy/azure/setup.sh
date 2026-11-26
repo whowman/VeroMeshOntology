@@ -11,6 +11,8 @@
 #   ./setup.sh on         turn it back on (about 5-10 minutes until it answers)
 #   ./setup.sh status     on or off, its nodes and pods
 #   (the same three from GitHub: Actions > Ontology on/off, no approval needed)
+#   ./setup.sh reset [--decision-log]   remove the install from the cluster (releases, namespace,
+#                         volumes; with --decision-log its database too) for a clean redeploy; asks first
 #
 # What it adds, in resource group VeroMeshAI (West US 2), reusing the assessment's
 # cluster, registry, PostgreSQL server and gateway:
@@ -385,6 +387,55 @@ step_power() { # off | on | status
   esac
 }
 
+step_reset() {
+  # Removes the ontology tool's install from the cluster, so the next deploy starts from
+  # nothing: the helm releases (VeroMesh, DataHub, its prerequisites) and the namespace with
+  # every volume (DataHub's PostgreSQL, Kafka, OpenSearch, Fuseki, the backups) and Secret in
+  # it. With --decision-log, also the decision log's database (the user stays). Nothing else:
+  # not the assessment, its gateway or certificate, the node pool, Key Vault, the PostgreSQL
+  # server, the Entra apps or GitHub. Then: ./setup.sh all (recreates the namespace and its
+  # Secrets, skips the rest), and a deploy.
+  local drop_log=0
+  [[ ${1:-} == --decision-log ]] && drop_log=1
+  [[ $NAMESPACE == veromesh-* ]] || { echo "Refusing: namespace $NAMESPACE is not the ontology tool's." >&2; exit 1; }
+  az account set --subscription "$SUBSCRIPTION"
+  kube
+  say "Reset: remove the ontology tool's install from namespace $NAMESPACE"
+  if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    echo "  Namespace $NAMESPACE is not there."
+  else
+    echo "  Releases:"; helm list -n "$NAMESPACE" -q | sed 's/^/    /'
+    echo "  Volumes (deleted with their data):"
+    kubectl -n "$NAMESPACE" get pvc -o custom-columns=NAME:.metadata.name,SIZE:.spec.resources.requests.storage --no-headers | sed 's/^/    /'
+  fi
+  ((drop_log)) && echo "  And the decision log: database $DB on $PG_SERVER (every recorded decision)."
+  local answer=${CONFIRM:-}
+  if [[ -z $answer ]]; then read -r -p "  This cannot be undone. Type $NAMESPACE to go on: " answer; fi
+  [[ $answer == "$NAMESPACE" ]] || { echo "  Nothing changed."; exit 1; }
+  if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    local r
+    for r in veromesh datahub prerequisites; do
+      helm status "$r" -n "$NAMESPACE" >/dev/null 2>&1 && helm uninstall "$r" -n "$NAMESPACE" --wait --timeout 10m
+    done
+  fi
+  if ((drop_log)); then
+    kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    local admin_pw
+    admin_pw=$(az keyvault secret show --vault-name "$ASSESSMENT_VAULT" -n postgres-admin-password --query value -o tsv)
+    kubectl -n "$NAMESPACE" delete pod veromesh-db-setup --ignore-not-found >/dev/null
+    kubectl -n "$NAMESPACE" run veromesh-db-setup --restart=Never --rm -i --quiet \
+      --image "$ACR.azurecr.io/library/postgres:16-alpine" \
+      --env "PGPASSWORD=$admin_pw" --env "PGHOST=$PG_SERVER.postgres.database.azure.com" --env PGSSLMODE=require \
+      --env "PGUSER=$PG_ADMIN" --env PGDATABASE=postgres -- \
+      psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)"
+    echo "  Decision log database dropped."
+  fi
+  if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    kubectl delete namespace "$NAMESPACE" --wait --timeout=15m
+  fi
+  echo "  Done. Next: ./setup.sh all, then Actions > Deploy to Azure (dev)."
+}
+
 variables() {
   cat <<V
 AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
@@ -420,5 +471,6 @@ case "${1:-}" in
   gateway) az account set --subscription "$SUBSCRIPTION"; step_gateway ;;
   show) az account set --subscription "$SUBSCRIPTION"; step_show ;;
   off | on | status) step_power "$1" ;;
+  reset) step_reset "${2:-}" ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 2 ;;
 esac
