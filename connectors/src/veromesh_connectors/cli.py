@@ -317,6 +317,18 @@ def leanix_import(api: ApiSession, args) -> int:
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
+def _report_columns(api: ApiSession, conn, opts: RunOptions, ok: bool) -> int:
+    """After a catalog load, report its columns and their tags for binding suggestions."""
+    if not ok:
+        return 1
+    if opts.dry_run:
+        return 0
+    cols = conn.columns()
+    got = api.call("PUT", f"/catalog/columns/reported/{opts.source}", json={"columns": cols})
+    _out(f"Reported {got['columns']} columns ({got['tagged']} tagged) for data element suggestions.")
+    return 0
+
+
 def dbt_import(api: ApiSession, args) -> int:
     from .plugins.dbt import Artifacts, DbtConnector
 
@@ -346,7 +358,7 @@ def dbt_import(api: ApiSession, args) -> int:
         env=args.env,
     )
     opts = RunOptions(source=args.source or "dbt", mode=args.mode, dry_run=args.dry_run)
-    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+    return _report_columns(api, conn, opts, Runner(api, _out).run(conn, opts).ok)
 
 
 def databricks_import(api: ApiSession, args) -> int:
@@ -377,7 +389,7 @@ def databricks_import(api: ApiSession, args) -> int:
         env=args.env,
     )
     opts = RunOptions(source=args.source or "databricks", mode=args.mode, dry_run=args.dry_run)
-    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+    return _report_columns(api, conn, opts, Runner(api, _out).run(conn, opts).ok)
 
 
 def erp_import(api: ApiSession, args) -> int:

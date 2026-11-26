@@ -125,6 +125,27 @@ class DbtConnector(BatchConnector):
     def urn(self, dp_id: str) -> str:
         return f"urn:li:dataset:(urn:li:dataPlatform:{self.platform},{dp_id},{self.env})"
 
+    def columns(self) -> list[dict]:
+        """Each table's columns and their tags as DataHub names them (a dbt tag ``pii`` is
+        ``urn:li:tag:pii``; ``meta.classification: phi`` is ``urn:li:tag:classification:phi``),
+        for binding suggestions."""
+        out = []
+        for uid, n in self.tables.items():
+            ds = self.urn(self.ids[uid])
+            for name, c in (n.get("columns") or {}).items():
+                terms = [f"urn:li:tag:{t}" for t in c.get("tags") or []]
+                if cls := (c.get("meta") or {}).get("classification"):
+                    terms.append(f"urn:li:tag:classification:{str(cls).lower()}")
+                out.append(
+                    {
+                        "column": f"urn:li:schemaField:({ds},{name})",
+                        "dataset": ds,
+                        "fieldPath": name,
+                        "terms": terms,
+                    }
+                )
+        return out
+
     def read(self, schema: list[dict]) -> Iterable[Record]:
         try:
             manifest = self.artifacts.get("manifest.json")

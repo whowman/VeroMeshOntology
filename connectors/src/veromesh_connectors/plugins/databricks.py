@@ -106,6 +106,7 @@ class UnityCatalogConnector(BatchConnector):
         self.tables: dict[str, dict] = {}
         self.feeds: dict[str, set[str]] = {}
         self.tags: dict[str, list[str]] = {}
+        self.column_tags: dict[tuple[str, str], list[str]] = {}
         self.group_owned: list[str] = []
         self.unmatched: set[str] = set()
 
@@ -129,6 +130,25 @@ class UnityCatalogConnector(BatchConnector):
     def urn(self, full: str) -> str:
         return f"urn:li:dataset:(urn:li:dataPlatform:databricks,{full},{self.env})"
 
+    def columns(self) -> list[dict]:
+        """Each table's columns and their tags as DataHub names them (a Unity Catalog tag
+        ``classification = phi`` is ``urn:li:tag:classification:phi``), for binding
+        suggestions. Without a SQL warehouse the columns come without tags."""
+        out = []
+        for full, t in self.tables.items():
+            ds = self.urn(full)
+            for c in t.get("columns") or []:
+                name = c.get("name")
+                out.append(
+                    {
+                        "column": f"urn:li:schemaField:({ds},{name})",
+                        "dataset": ds,
+                        "fieldPath": name,
+                        "terms": self.column_tags.get((full, name), []),
+                    }
+                )
+        return out
+
     def _person(self, who: str | None):
         who = str(who or "").strip().lower()
         if "@" not in who:
@@ -151,9 +171,13 @@ class UnityCatalogConnector(BatchConnector):
                 if src in self.tables and dst in self.tables:
                     self.feeds.setdefault(src, set()).add(dst)
             for row in self.client.sql("SELECT * FROM system.information_schema.column_tags"):
-                if str(row.get("tag_name") or "").lower() == "classification":
-                    full = f"{row.get('catalog_name')}.{row.get('schema_name')}.{row.get('table_name')}"
-                    self.tags.setdefault(full, []).append(str(row.get("tag_value") or ""))
+                full = f"{row.get('catalog_name')}.{row.get('schema_name')}.{row.get('table_name')}"
+                key, value = str(row.get("tag_name") or ""), str(row.get("tag_value") or "")
+                self.column_tags.setdefault((full, str(row.get("column_name"))), []).append(
+                    f"urn:li:tag:{key}:{value}" if value else f"urn:li:tag:{key}"
+                )
+                if key.lower() == "classification":
+                    self.tags.setdefault(full, []).append(value)
         else:
             for full in self.tables:
                 self.feeds[full] = {d for d in self.client.downstreams(full) if d in self.tables}
