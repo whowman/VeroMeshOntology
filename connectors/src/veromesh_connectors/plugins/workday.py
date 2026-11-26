@@ -476,3 +476,92 @@ class WorkdayApprovalsConnector(BatchConnector):
         if above:
             co["aboveAmount"] = above
         return [*items, Item(type="co-approvals", entity=co, ref=record.ref)]
+
+
+# ---------------------------------------------------------------------------- goals
+
+#: Columns the goals report must have; Goal_Level, Status and KPI_IDs are optional.
+GOAL_COLUMNS = ("Goal_ID", "Goal_Name", "Owner_Employee_ID", "Owner_Business_Title", "Parent_Goal_ID")
+CLOSED_GOALS = {"cancelled", "canceled", "archived"}
+LEVELS = ("enterprise", "function", "capability", "process")
+
+
+class WorkdayGoalsConnector(BatchConnector):
+    """Organization goals from Workday Talent (Manage Goals), as objectives, from a custom
+    report (RaaS, default ``VeroMesh_Goals``). One row per goal:
+
+    * ``Goal_ID``, ``Goal_Name``, ``Description``;
+    * ``Owner_Employee_ID`` and ``Owner_Business_Title``: the objective is owned by the
+      owner's **role**, the one the workers connector gives that business title (or the
+      ``role_map`` entry), because ownership in VeroMesh sits with a role;
+    * ``Parent_Goal_ID``: the goal this one is aligned to (cascaded from), one level up;
+    * ``Goal_Level`` (optional): enterprise, function, capability or process; without it, a
+      goal with no parent is an enterprise objective and the rest function objectives;
+    * ``Status`` (optional): cancelled and archived goals are left out;
+    * ``KPI_IDs`` (optional, a calculated field): IDs of the KPIs that measure it, ``;``-separated.
+
+    Register the source with category ``hr``: Workday decides the objectives domain by default,
+    with the governance workbook as evidence (its priorities and conflicts still come from there).
+    A parent goal that is not in the report is left out and noted."""
+
+    name = "workday-goals"
+    kind = "connector"
+
+    def __init__(
+        self,
+        client: WorkdayClient,
+        *,
+        report_owner: str = "ISU_VeroMesh",
+        report: str = "VeroMesh_Goals",
+        role_map: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__()
+        self.client, self.report_owner, self.report = client, report_owner, report
+        self.role_map = dict(role_map or {})
+        self.ids: set[str] = set()
+        self.orphans: list[str] = []
+
+    def describe(self) -> str:
+        note = f"; {len(self.orphans)} aligned to goals not in the report" if self.orphans else ""
+        return f"Workday goals, report {self.report_owner}/{self.report}: {len(self.ids)} goals{note}"
+
+    def fingerprint(self) -> str | None:
+        return f"workday-goals:{self.client.tenant}"
+
+    def role(self, title: str) -> str:
+        return self.role_map.get(title) or role_id(title)
+
+    def read(self, schema: list[dict]) -> Iterable[Record]:
+        rows = self.client.report(self.report_owner, self.report)
+        if rows:
+            missing = [c for c in GOAL_COLUMNS if c not in rows[0]]
+            if missing:
+                self.problems.append(f"report {self.report} has no column {', '.join(missing)}")
+                return
+        live = [r for r in rows if str(r.get("Status") or "").strip().lower() not in CLOSED_GOALS]
+        self.ids = {str(r["Goal_ID"]).strip() for r in live}
+        for r in live:
+            yield Record(ref=f"Workday goal {r['Goal_ID']}", data=r, type="objectives")
+
+    def map(self, record: Record, schema: list[dict]) -> list[Item]:
+        r = record.data
+        gid = str(r["Goal_ID"]).strip()
+        e: dict = {"id": gid, "name": str(r.get("Goal_Name") or gid).strip()}
+        if str(r.get("Description") or "").strip():
+            e["definition"] = str(r["Description"]).strip()
+        parent = str(r.get("Parent_Goal_ID") or "").strip()
+        if parent in self.ids:
+            e["parentObjective"] = parent
+        elif parent:
+            self.orphans.append(gid)
+        level = str(r.get("Goal_Level") or "").strip().lower()
+        e["level"] = level if level in LEVELS else ("function" if parent else "enterprise")
+        kpis = [k.strip() for k in str(r.get("KPI_IDs") or "").split(";") if k.strip()]
+        if kpis:
+            e["measuredByKpis"] = kpis if len(kpis) > 1 else kpis[0]
+        items = []
+        title = str(r.get("Owner_Business_Title") or "").strip()
+        if title:
+            e["ownerRole"] = self.role(title)
+            items.append(Item(type="roles", entity={"id": e["ownerRole"], "name": title}, ref=record.ref))
+        return [*items, Item(type="objectives", entity=e, ref=record.ref)]

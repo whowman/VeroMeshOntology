@@ -84,6 +84,7 @@ For each entity and field, VeroMesh picks one source's values:
 | ai-approval | Which agents may run, for what? | governance | spreadsheet | AI use cases; the actions an agent performs |
 | systems | Which systems exist, who owns them? | cmdb | catalog, spreadsheet | Systems |
 | capabilities | Which business capabilities are there, how do they nest, and which role owns each? | ea | governance, spreadsheet | Capabilities' names, definitions, parents and owner roles (decided 25 November 2026) |
+| objectives | Which objectives are there, how do they cascade, and which role owns each? | hr | governance, spreadsheet | Objectives' names, definitions, owner roles, levels and parents (Workday goals); priorities and conflicts stay with the workbook |
 | data-meaning | What does this data mean? | catalog, steward | spreadsheet | Data elements' and products' definitions, owners, sensitivity |
 
 **Roles filled are combined** across live sources: HR's job roles and the identity system's or the workbook's approval roles both count, instead of one replacing the other. An organization changes any domain with `PUT /api/v1/domains/{name}` (administrators; only the keys given: `authoritative`, `evidence`, `contractors`, `union`, `fields`) and returns it to the default with `DELETE`. Each change is appended to the decision log's hash chain (kind `configuration`), and the effective model is rebuilt.
@@ -112,6 +113,7 @@ For each entity and field, VeroMesh picks one source's values:
 | Delegated authority | erp > iam > spreadsheet |
 | Approved AI use cases | governance > spreadsheet |
 | Capabilities | ea > governance > spreadsheet |
+| Objectives | hr > governance > spreadsheet |
 | Everything else | spreadsheet (the model's own home today) |
 
 **Steward corrections** are configured per field (decision 1):

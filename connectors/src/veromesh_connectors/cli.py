@@ -8,6 +8,7 @@
     veromesh-connect workday import --url https://wd2-impl-services1.workday.com --tenant acme [--via rest]
     veromesh-connect workday changes --since 2026-11-01
     veromesh-connect workday approvals --tenant acme --role-map groups.yaml
+    veromesh-connect workday goals --tenant acme [--role-map titles.yaml]
     veromesh-connect entra import --tenant <tenant ID> [--role-group-prefix SG-] [--agent-tag AIAgent]
     veromesh-connect entra changes --state entra-delta.json
     veromesh-connect erp import --url https://acme.fa.us2.oraclecloud.com [--role-map erp-roles.yaml]
@@ -378,6 +379,19 @@ def workday_approvals(api: ApiSession, args) -> int:
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
+def workday_goals(api: ApiSession, args) -> int:
+    from .plugins.workday import WorkdayGoalsConnector
+
+    conn = WorkdayGoalsConnector(
+        workday_client(args, getattr(args, "source_http", None)),
+        report_owner=args.report_owner,
+        report=args.report,
+        role_map=_load_mapping(args.role_map) if args.role_map else None,
+    )
+    opts = RunOptions(source=args.source or "workday-goals", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
 def workday_changes(api: ApiSession, args) -> int:
     from datetime import date
 
@@ -543,6 +557,10 @@ def parser() -> argparse.ArgumentParser:
     wa.add_argument("--currency", default="USD", help="Currency of amount conditions")
     load_flags(wa)
     wa.set_defaults(fn=workday_approvals)
+    wg = wd.add_parser("goals", help="Load organization goals as objectives, owned by the owner's role")
+    workday_flags(wg, "VeroMesh_Goals")
+    load_flags(wg)
+    wg.set_defaults(fn=workday_goals)
     wc = wd.add_parser("changes", help="Apply worker changes entered since a date, one event each")
     workday_flags(wc, "VeroMesh_Worker_Changes")
     wc.add_argument("--since", required=True, help="YYYY-MM-DD: changes entered on or after")
