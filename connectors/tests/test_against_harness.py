@@ -287,3 +287,51 @@ def test_workday_goals_as_objectives(http, company, tmp_path):
     for oid, _name, level, parent, _role, _priority, _kpis, _conflicts in prof.OBJECTIVES:
         assert got[oid]["level"] == level
         assert got[oid].get("parentObjective") == parent
+
+
+def test_dbt_tables_lineage_and_a_breaking_change(http, company, monkeypatch, tmp_path):
+    """dbt's run artifacts give the lakehouse's tables, their lineage and the KPIs computed
+    from them; a change to a bronze table reaches everything downstream and their owners."""
+    truth, h = company
+    monkeypatch.setenv("SERVICENOW_USER", "admin")
+    monkeypatch.setenv("SERVICENOW_PASSWORD", "harness")
+    if "metrics" not in h.get("/dbt/manifest.json").json():
+        pytest.skip("this harness's dbt project has no metrics")
+    load(http, h)
+    book = tmp_path / "governance.xlsx"
+    book.write_bytes(h.get("/governance/workbook.xlsx").content)
+    assert (
+        main([*API, "spreadsheet", "import", str(book), "--source", "governance"], http=http) == 0
+    )  # the KPIs
+    assert (
+        main(
+            [*API, "servicenow", "import", "--url", "http://testserver/servicenow"], http=http, source_http=h
+        )
+        == 0
+    )
+    lake = next(
+        s["id"] for s in http.get("/api/v1/systems").json() if s["name"] == truth.systems["LAKE"].name
+    )
+    assert http.put("/api/v1/sources/dbt", json={"category": "catalog"}).status_code == 200
+    dbt = [*API, "dbt", "import", "--url", "http://testserver/dbt", "--runs-on", lake]
+    assert main(dbt, http=http, source_http=h) == 0
+
+    dps = {d["id"] for d in http.get("/api/v1/data-products", params={"source": "dbt"}).json()}
+    assert dps == set(truth.assets)
+    downstream = __import__("harness.scenarios", fromlist=["_downstream"])._downstream
+    tracked = {k["id"] for k in http.get("/api/v1/kpis").json()}  # dbt links only KPIs the model tracks
+    kpi_tables = {k.asset for k in truth.kpis.values() if k.id in tracked}
+    asset = next(
+        a
+        for a in sorted(truth.assets)
+        if truth.assets[a].layer == "bronze" and kpi_tables & set(downstream(truth, a))
+    )
+    got = http.get(f"/api/v1/impact/data-products/{asset}").json()
+    assert sorted(d["id"] for d in got["downstream"]) == downstream(truth, asset)
+    affected = {asset, *downstream(truth, asset)}
+    expected = sorted(k.id for k in truth.kpis.values() if k.asset in affected and k.id in tracked)
+    assert expected and sorted(k["id"] for k in got["kpis"]) == expected
+    # Whom to tell: the owners of what changes, and the lakehouse's technical owner.
+    told = {p["id"] if isinstance(p, dict) else p for e in got["notify"] for p in e.get("people", [])}
+    owners = {truth.people[truth.assets[a].owner].employee_id for a in affected if truth.assets[a].owner}
+    assert owners <= told
