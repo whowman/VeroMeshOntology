@@ -28,6 +28,7 @@ def settings(**kw) -> Settings:
         oidc_issuer=ISSUER,
         oidc_audience=AUDIENCE,
         oidc_role_prefix="VeroMesh.",
+        notify_job=False,  # tests send notices themselves (POST /notify/run)
     )
     return Settings(**{**base, **kw})
 

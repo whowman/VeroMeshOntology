@@ -207,7 +207,7 @@ class UsageStore(Protocol):
     def add_setting(self, key: str, value: Any) -> Any: ...
     def add_delivery(self, month: str, ok: bool, adapter: str, recipient: str, detail: str) -> None: ...
     def deliveries(self, month: str | None = None) -> list[dict]: ...
-    def exclusive(self): ...
+    def exclusive(self, key: int | None = None): ...
 
 
 def _merge_day(old: dict | None, new: dict) -> dict:
@@ -292,7 +292,7 @@ class MemoryUsage:
             return [dict(d) for d in self._deliveries if month is None or d["month"] == month]
 
     @contextmanager
-    def exclusive(self):
+    def exclusive(self, key: int | None = None):
         with self._lock:
             yield
 
@@ -466,18 +466,20 @@ class PostgresUsage:
         ]
 
     @contextmanager
-    def exclusive(self):
-        """One usage run at a time across every copy of the service (a session advisory lock)."""
+    def exclusive(self, key: int | None = None):
+        """One run at a time across every copy of the service (a session advisory lock):
+        the usage job's, or another job's with its own ``key``."""
         from .decisions import pg_connect
 
+        k = LOCK_KEY if key is None else key
         conn = pg_connect(self._params)
         try:
-            if not conn.run("SELECT pg_try_advisory_lock(:k)", k=LOCK_KEY)[0][0]:
+            if not conn.run("SELECT pg_try_advisory_lock(:k)", k=k)[0][0]:
                 raise _Busy()
             try:
                 yield
             finally:
-                conn.run("SELECT pg_advisory_unlock(:k)", k=LOCK_KEY)
+                conn.run("SELECT pg_advisory_unlock(:k)", k=k)
         finally:
             conn.close()
 

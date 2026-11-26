@@ -205,12 +205,14 @@ async function showMeeting() {
   if (!m.recorded.length) { box.replaceChildren(el("div", "empty", "Nothing recorded in this meeting yet.")); return; }
   const table = el("table");
   const hr = el("tr");
-  for (const h of ["Fact", "Owner", "As", "Fields", "Objection until", "Now"]) hr.append(el("th", null, h));
+  for (const h of ["Fact", "Owner", "As", "Fields", "Objection until", "Told", "Now"]) hr.append(el("th", null, h));
   table.append(hr);
   for (const r of m.recorded) {
     const tr = el("tr");
     tr.append(el("td", null, `${r.name || r.id} (${r.type})`), el("td", null, nameOf("people", r.person)), el("td", null, nameOf("roles", r.role)));
     tr.append(el("td", null, r.fields.join(", ")), el("td", null, r.objectionUntil));
+    const told = (r.notified || []).map((n) => `${n.notice === "reminder" ? "reminded" : "told"} by ${n.channel} ${when(n.at)}`).join("; ");
+    tr.append(el("td", r.notifyProblem ? "bad" : null, told || (r.notifyProblem ? `not yet: ${r.notifyProblem}` : "not yet")));
     const c = el("td"); c.append(el("span", "kind " + (STANDING[r.standing] || ""), r.standing)); tr.append(c);
     table.append(tr);
   }

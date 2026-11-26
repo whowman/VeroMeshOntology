@@ -154,6 +154,24 @@ spec:
             {{- end }}
             - name: VEROMESH_TIME_ZONE
               value: {{ .Values.api.timeZone | default "UTC" | quote }}
+            {{- $public := .Values.api.publicUrl | default (ternary (printf "https://%s" .Values.api.ingress.host) "" .Values.api.ingress.enabled) }}
+            {{- if $public }}
+            - name: VEROMESH_PUBLIC_URL
+              value: {{ $public | quote }}
+            {{- end }}
+            {{- with .Values.api.teams }}
+            {{- if .appId }}
+            - name: VEROMESH_TEAMS_APP_ID
+              value: {{ .appId | quote }}
+            - name: VEROMESH_TEAMS_TENANT_ID
+              value: {{ required "api.teams.tenantId is needed with api.teams.appId" .tenantId | quote }}
+            - name: VEROMESH_TEAMS_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "api.teams.existingSecret is needed with api.teams.appId" .existingSecret | quote }}
+                  key: app-password
+            {{- end }}
+            {{- end }}
             {{- with .Values.api.usage }}
             {{- if .installId }}
             - name: VEROMESH_INSTALL_ID
