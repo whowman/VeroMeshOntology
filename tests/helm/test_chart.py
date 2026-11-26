@@ -910,7 +910,9 @@ def test_public_url_and_teams():
 
     assert "VEROMESH_PUBLIC_URL" not in env() and "VEROMESH_TEAMS_APP_ID" not in env()
     assert env("api.ingress.enabled=true")["VEROMESH_PUBLIC_URL"]["value"] == "https://veromesh.example.com"
-    assert env("api.publicUrl=https://o.example.com")["VEROMESH_PUBLIC_URL"]["value"] == "https://o.example.com"
+    assert (
+        env("api.publicUrl=https://o.example.com")["VEROMESH_PUBLIC_URL"]["value"] == "https://o.example.com"
+    )
     e = env("api.teams.appId=app-1", "api.teams.tenantId=t-1", "api.teams.existingSecret=veromesh-teams")
     assert (e["VEROMESH_TEAMS_APP_ID"]["value"], e["VEROMESH_TEAMS_TENANT_ID"]["value"]) == ("app-1", "t-1")
     ref = e["VEROMESH_TEAMS_APP_PASSWORD"]["valueFrom"]["secretKeyRef"]
