@@ -215,3 +215,75 @@ def test_halo_applications_and_agent_seats(http, company, monkeypatch):
     assert agents and {a["id"] for a in agents} <= it | {
         a["id"] for a in agents if not a["id"].startswith("W")
     }
+
+
+def _skip_without(h, path: str, what: str):
+    if h.get(path).status_code == 404:
+        pytest.skip(f"this harness has no {what}")
+
+
+def test_servicenow_ea_capability_map(http, company, monkeypatch):
+    truth, h = company
+    monkeypatch.setenv("SERVICENOW_USER", "admin")
+    monkeypatch.setenv("SERVICENOW_PASSWORD", "harness")
+    _skip_without(h, "/servicenow/api/now/table/cmdb_ci_business_capability?sysparm_limit=1", "ServiceNow EA")
+    load(http, h)
+    assert http.put("/api/v1/sources/servicenow-ea", json={"category": "ea"}).status_code == 200
+    assert (
+        main([*API, "servicenow", "ea", "--url", "http://testserver/servicenow"], http=http, source_http=h)
+        == 0
+    )
+    caps = {c["id"]: c for c in http.get("/api/v1/capabilities", params={"source": "servicenow-ea"}).json()}
+    prof = __import__(f"harness.profiles.{truth.profile}", fromlist=["EA_CAPABILITIES"])
+    assert set(caps) == {c[0] for c in prof.EA_CAPABILITIES}
+    for cid, _name, parent, role in prof.EA_CAPABILITIES:
+        assert caps[cid].get("parentCapability") == parent
+        holder = truth.holder(role)
+        if holder:  # the owner role is filled by the person in it (as of the monthly review)
+            assert caps[cid]["ownerRole"] == f"{cid}.Owner"
+
+
+def test_leanix_gives_the_same_capabilities_as_servicenow_ea(http, company, monkeypatch):
+    truth, h = company
+    _skip_without(h, "/harness/status", "status")
+    if "leanix" not in h.get("/harness/status").json()["systems"]:
+        pytest.skip("this harness has no LeanIX")
+    monkeypatch.setenv("LEANIX_API_TOKEN", "harness-leanix-api-token")
+    load(http, h)
+    assert (
+        main([*API, "leanix", "import", "--url", "http://testserver/leanix"], http=http, source_http=h) == 0
+    )
+    lx = {c["id"]: c for c in http.get("/api/v1/capabilities", params={"source": "leanix"}).json()}
+    prof = __import__(f"harness.profiles.{truth.profile}", fromlist=["EA_CAPABILITIES"])
+    assert set(lx) == {c[0] for c in prof.EA_CAPABILITIES}  # the archived one is left out
+    assert lx["AccountsPayable"]["parentCapability"] == "Finance"
+    owners = {p["id"] for p in http.get("/api/v1/people", params={"source": "leanix"}).json()}
+    assert owners  # Business Owner subscriptions matched to people by email
+
+
+def test_workday_goals_as_objectives(http, company, tmp_path):
+    truth, h = company
+    load(http, h)
+    goals = [*API, "workday", "goals", "--url", "http://testserver/workday", "--tenant", "kvh"]
+    prof = __import__(f"harness.profiles.{truth.profile}", fromlist=["OBJECTIVES", "TITLE_ROLES"])
+    if not hasattr(prof, "OBJECTIVES"):
+        pytest.skip("this harness profile has no objectives")
+    titles = tmp_path / "titles.yaml"
+    titles.write_text("".join(f'"{t}": {roles[0]}\n' for t, roles in prof.TITLE_ROLES.items() if roles))
+    book = tmp_path / "governance.xlsx"
+    book.write_bytes(h.get("/governance/workbook.xlsx").content)
+    assert (
+        main([*API, "spreadsheet", "import", str(book), "--source", "governance"], http=http) == 0
+    )  # the KPIs
+    code = main([*goals, "--role-map", str(titles)], http=http, source_http=h)
+    if (
+        code != 0
+        and h.get("/workday/ccx/service/customreport2/kvh/ISU_VeroMesh/VeroMesh_Goals").status_code == 404
+    ):
+        pytest.skip("this harness has no Workday goals report")
+    assert code == 0
+    got = {o["id"]: o for o in http.get("/api/v1/objectives", params={"source": "workday-goals"}).json()}
+    assert set(got) == {o[0] for o in prof.OBJECTIVES}
+    for oid, _name, level, parent, _role, _priority, _kpis, _conflicts in prof.OBJECTIVES:
+        assert got[oid]["level"] == level
+        assert got[oid].get("parentObjective") == parent
