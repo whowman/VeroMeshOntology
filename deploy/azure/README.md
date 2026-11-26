@@ -1,6 +1,8 @@
 # VeroMesh on Azure (dev)
 
-The dev install of VeroMesh, running beside the assessment on the assessment's AKS cluster in West US 2 (issue #19). It gives Copilot Studio an HTTPS address to reach and Entra ID sign-in, for the end-to-end test in [docs/copilot-studio.md](../../docs/copilot-studio.md).
+The dev install of VeroMesh, running beside the assessment on the assessment's AKS cluster in West US 2 (issue #19). It gives Copilot Studio an HTTPS address to reach and Entra ID sign-in, for the end-to-end test in [docs/copilot-studio-test.md](../../docs/copilot-studio-test.md).
+
+Status, 26 November 2026: **running**. First installed on 25 November; rebuilt from nothing on 26 November (`reset`, `all`, then a deploy) with no manual steps.
 
 | | |
 | --- | --- |
