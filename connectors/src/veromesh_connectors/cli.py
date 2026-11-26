@@ -17,6 +17,7 @@
     veromesh-connect servicenow ea --url https://acme.service-now.com [--id-field number]
     veromesh-connect leanix import --url https://acme.leanix.net [--id-from externalId]
     veromesh-connect dbt import --dir target/ [--runs-on LAKE]       (or --url, or --dbt-cloud --account --job)
+    veromesh-connect databricks import --url https://adb-123.azuredatabricks.net [--warehouse ID] [--runs-on LAKE]
     veromesh-connect halo import --url https://acme.haloitsm.com
     veromesh-connect sources
     veromesh-connect runs [--source p2p]
@@ -42,6 +43,7 @@ Source systems:
                                             HaloITSM (OAuth client credentials)
     LEANIX_URL, LEANIX_API_TOKEN               SAP LeanIX (a technical user's API token)
     DBT_CLOUD_TOKEN                            dbt Cloud (a service token with read access to job artifacts)
+    DATABRICKS_URL, DATABRICKS_TOKEN (or DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET)   Databricks
     SERVICENOW_URL, SERVICENOW_USER, SERVICENOW_PASSWORD (or SERVICENOW_TOKEN)
                                             ServiceNow (basic authentication or an OAuth token)
 """
@@ -344,6 +346,37 @@ def dbt_import(api: ApiSession, args) -> int:
         env=args.env,
     )
     opts = RunOptions(source=args.source or "dbt", mode=args.mode, dry_run=args.dry_run)
+    return 0 if Runner(api, _out).run(conn, opts).ok else 1
+
+
+def databricks_import(api: ApiSession, args) -> int:
+    from .plugins.databricks import DatabricksClient, UnityCatalogConnector
+
+    url = _need(args.url, "--url", "DATABRICKS_URL").rstrip("/")
+    t = _source_transport(url, "Databricks", getattr(args, "source_http", None))
+    if os.environ.get("DATABRICKS_TOKEN"):
+        auth = StaticToken(os.environ["DATABRICKS_TOKEN"])
+    else:
+        cid = _need(
+            os.environ.get("DATABRICKS_CLIENT_ID"),
+            "DATABRICKS_TOKEN or DATABRICKS_CLIENT_ID",
+            "the environment",
+        )
+        auth = ClientCredentials(
+            t,
+            f"{t.base_url}/oidc/v1/token",
+            cid,
+            os.environ.get("DATABRICKS_CLIENT_SECRET", ""),
+            scope="all-apis",
+        )
+    conn = UnityCatalogConnector(
+        DatabricksClient(SourceApi("Databricks", t, auth), warehouse=args.warehouse),
+        people=api.entities("people"),
+        catalogs=args.catalog,
+        runs_on=args.runs_on,
+        env=args.env,
+    )
+    opts = RunOptions(source=args.source or "databricks", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
 
 
@@ -711,6 +744,30 @@ def parser() -> argparse.ArgumentParser:
     )
     load_flags(dbi)
     dbi.set_defaults(fn=dbt_import)
+
+    dk = sub.add_parser(
+        "databricks", help="Databricks Unity Catalog: tables, owners, stewards, sensitivity and lineage"
+    ).add_subparsers(dest="action", required=True)
+    dki = dk.add_parser(
+        "import", help="Load the lakehouse's tables as data products (register the source as catalog)"
+    )
+    dki.add_argument(
+        "--url", default=os.environ.get("DATABRICKS_URL"), help="the workspace, https://<workspace>"
+    )
+    dki.add_argument(
+        "--warehouse",
+        default=os.environ.get("DATABRICKS_WAREHOUSE_ID"),
+        help="a SQL warehouse ID: lineage from system tables in one query, and classification tags",
+    )
+    dki.add_argument("--catalog", action="append", help="only this catalog (repeat for more); default all")
+    dki.add_argument(
+        "--runs-on", help="the system the tables live in, as a VeroMesh system ID (e.g. the lakehouse)"
+    )
+    dki.add_argument(
+        "--env", default="PROD", help="the DataHub environment in the dataset URNs (default PROD)"
+    )
+    load_flags(dki)
+    dki.set_defaults(fn=databricks_import)
 
     lx = sub.add_parser(
         "leanix", help="SAP LeanIX: the business capability map and its owners"

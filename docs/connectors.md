@@ -249,6 +249,19 @@ DBT_CLOUD_TOKEN=... veromesh-connect dbt import --dbt-cloud --account 70 --job 4
 - **KPIs:** each dbt metric (the dbt Semantic Layer) links its KPI to the data products it is computed from (`computedFromDataProducts`), which is what lets a data change reach the KPIs and their owners. The KPI's ID is the metric's `meta.veromesh_kpi`, else its name in the workbook's style (`on_time_payment_rate` becomes `OnTimePaymentRate`). Only KPIs already in the model are linked; dbt says how a KPI is computed, not that it is one the organization tracks.
 - **Counted, not loaded:** models that failed in the last run (and what they skipped), owners who match no one, and metrics that are not KPIs in the model. Tests, seeds and snapshots are not data products.
 
+### Databricks Unity Catalog (tables, owners and lineage)
+
+```bash
+curl -X PUT https://<veromesh>/api/v1/sources/databricks -d '{"category": "catalog"}' ...   # once
+export DATABRICKS_TOKEN=...   # or DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET (a service principal)
+veromesh-connect databricks import --url https://adb-123.4.azuredatabricks.net --runs-on LAKE [--warehouse <id>] [--catalog finance]
+```
+
+- **Sign-in:** a personal access token, or OAuth machine-to-machine for a service principal (`/oidc/v1/token`, scope `all-apis`). Read access to the catalogs is enough; with `--warehouse`, also to the system tables.
+- **Reads** Unity Catalog's REST API: catalogs, schemas and tables (`/api/2.1/unity-catalog/...`, paged), with each table's owner, columns and properties. Lineage: per table from `/api/2.0/lineage-tracking/table-lineage`, or, with a SQL warehouse (`--warehouse`), from `system.access.table_lineage` in one query through the Statement Execution API, which also reads the columns' `classification` tags from `system.information_schema.column_tags`. Without a warehouse there are no tags, so no sensitivity. `--catalog` limits it to named catalogs. It only reads.
+- **Writes**, as source `databricks` (category `catalog`), the same shape as dbt: a data product per table, ID its full name (`catalog.schema.table`), the tables it feeds, the system it runs on (`--runs-on`), its sensitivity, its DataHub dataset URN, an owner role filled by its owner and a steward role filled by the `steward` property (both matched by email). Because dbt and Unity Catalog give a table the same ID and URN, the model holds one data product, with any disagreement reported as a conflict.
+- **Counted, not loaded:** tables owned by a group (Unity Catalog allows it; there is no accountable person, so no owner role), and owners or stewards who match no one in VeroMesh.
+
 ### SAP LeanIX (capabilities)
 
 ```bash

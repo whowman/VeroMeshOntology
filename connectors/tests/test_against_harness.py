@@ -335,3 +335,51 @@ def test_dbt_tables_lineage_and_a_breaking_change(http, company, monkeypatch, tm
     told = {p["id"] if isinstance(p, dict) else p for e in got["notify"] for p in e.get("people", [])}
     owners = {truth.people[truth.assets[a].owner].employee_id for a in affected if truth.assets[a].owner}
     assert owners <= told
+
+
+DATABRICKS = ["databricks", "import", "--url", "http://testserver/databricks"]
+
+
+@pytest.mark.parametrize("warehouse", [None, "wh-1"], ids=["rest-lineage", "system-tables"])
+def test_databricks_unity_catalog(http, company, monkeypatch, warehouse):
+    truth, h = company
+    monkeypatch.setenv("DATABRICKS_TOKEN", "dapi-harness-token")
+    load(http, h)
+    assert http.put("/api/v1/sources/databricks", json={"category": "catalog"}).status_code == 200
+    args = [*API, *DATABRICKS, *(["--warehouse", warehouse] if warehouse else [])]
+    assert main(args, http=http, source_http=h) == 0
+    dps = {d["id"]: d for d in http.get("/api/v1/data-products", params={"source": "databricks"}).json()}
+    assert set(dps) == set(truth.assets)
+    feeds = {
+        (s, d)
+        for s, e in dps.items()
+        for d in (
+            [e["feedsDataProducts"]]
+            if isinstance(e.get("feedsDataProducts"), str)
+            else e.get("feedsDataProducts") or []
+        )
+    }
+    assert feeds == set(truth.lineage)
+    assert all(
+        e["catalogUrn"] == f"urn:li:dataset:(urn:li:dataPlatform:databricks,{i},PROD)" for i, e in dps.items()
+    )
+    key = h.get("/harness/answer-key").json()["defects"]
+    group_owned = {d["about"]["asset"] for d in key if d["kind"] == "owner-is-group"}
+    assert group_owned and not any(dps[a].get("ownerRole") for a in group_owned)  # a group is not an owner
+    owned = [a for a in truth.assets if a not in group_owned and dps[a].get("ownerRole")]
+    assert owned
+    if warehouse:  # classification tags only through SQL
+        phi = [a for a, x in truth.assets.items() if any(c[2] == "phi" for c in x.columns)]
+        assert phi and all(dps[a].get("sensitivity") == "Restricted" for a in phi)
+    else:
+        assert not any(e.get("sensitivity") for e in dps.values())
+
+
+def test_dbt_and_databricks_describe_one_table(http, company, monkeypatch):
+    """The two catalog sources give a table the same ID and URN, so the model holds one."""
+    truth, h = company
+    monkeypatch.setenv("DATABRICKS_TOKEN", "dapi-harness-token")
+    load(http, h)
+    assert main([*API, *DATABRICKS], http=http, source_http=h) == 0
+    assert main([*API, "dbt", "import", "--url", "http://testserver/dbt"], http=http, source_http=h) == 0
+    assert {d["id"] for d in http.get("/api/v1/data-products").json()} == set(truth.assets)
