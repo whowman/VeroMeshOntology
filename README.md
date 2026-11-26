@@ -2,10 +2,10 @@
 
 The organizational ontology (OWL/RDF): who owns what, who may decide what, and what depends on it. It sits beside the open source [DataHub](https://github.com/datahub-project/datahub) catalog and publishes its vocabulary there as glossary terms. DataHub is a catalog with a glossary, not a semantic layer; where a customer has a semantic layer (metric definitions, entity meaning), the ontology takes it as an input.
 
-What it does today (main, 24 November 2026):
+What it does today (main, 26 November 2026):
 
 - **The organizational model:** people, roles, delegated authority, co-approvals, capabilities, processes, objectives and KPIs, policies, systems, data products, data elements, AI agents and approved AI use cases, validated by SHACL rules ([docs/meta-model.md](docs/meta-model.md)).
-- **Kept true:** loaded from spreadsheets, CSV, Workday (workers, change feeds and business process approval rules), Microsoft Entra ID, Oracle ERP, ServiceNow CMDB and HaloITSM, through their public APIs ([docs/connectors.md](docs/connectors.md)). Each source has its own named graph. **Domains** say which kind of source decides each question (HR decides employment; the workflow in force decides authority) and which only gives evidence; the domains are configuration, not code. Owners attest or dispute facts ([docs/provenance.md](docs/provenance.md)).
+- **Kept true:** loaded from spreadsheets, CSV, Workday (workers, change feeds, business process approval rules and organization goals), Microsoft Entra ID, Oracle ERP, ServiceNow (CMDB and Enterprise Architecture capabilities), SAP LeanIX and HaloITSM, through their public APIs ([docs/connectors.md](docs/connectors.md)). Each source has its own named graph. **Domains** say which kind of source decides each question (HR decides employment and the objective cascade; the workflow in force decides authority; the enterprise architecture tool decides the capability map) and which only gives evidence; the domains are configuration, not code, and each organization can change them. Owners attest or dispute facts ([docs/provenance.md](docs/provenance.md)).
 - **Changes wait for their owner:** a change to who reports to whom, the roles someone fills, an authority or an agent's principal is a proposal until its owner attests it. Narrowing takes effect at once. Every change to the model is a publish with a model version, and every decision quotes the version it was made on.
 - **Findings, routed to owners:** a leaver who still has access, someone employed with no access, a source out of sync with the policy, an owner who has left, a degraded capability, an unsettled objective conflict, and changes waiting for attestation.
 - **Source fidelity:** how well each source is kept, measured per question from corrections, lateness, gaps, contradictions and loads (high, medium or low; declared until there is history). Low makes the decision check consult the source's owner.
@@ -19,9 +19,9 @@ What it does today (main, 24 November 2026):
 - **Licensing and usage:** a licence signed by VeroMesh and checked offline, with warnings, 30 days of grace, then read-only (decision checks, the decision log and attestations keep working); a signed, chained monthly usage report of identities in scope, sent to VeroMesh by SMTP, sendmail or Microsoft 365; and an Administration area (`/admin`) for both ([service/README.md](service/README.md)).
 - **Backups and encryption:** nightly backups of the model and the decision log, encrypted to the customer's own key, with a tested restore; encryption at rest with the customer's keys; mutual TLS between every pod through Istio's ambient mesh, with certificates from the customer's OpenBao ([deploy/helm/README.md](deploy/helm/README.md#backups-and-restore)).
 
-- **On Azure (dev):** the install beside the assessment, ready to run ([deploy/azure/README.md](deploy/azure/README.md)). It is turned on and off from GitHub, off every night at 11 PM Eastern, while the assessment keeps running.
+- **On Azure (dev):** running at https://dev-ontology.veromesh.ai beside the assessment, with DataHub, Entra sign-in and the decision log on Azure PostgreSQL ([deploy/azure/README.md](deploy/azure/README.md)). Rebuilt from nothing on 26 November with no manual steps (`setup.sh reset`, then a deploy). It is turned on and off from GitHub, off every night at 11 PM Eastern, while the assessment keeps running.
 
-Not yet: the first Azure install (its setup is written, not yet run) and the Copilot Studio test after it (issue #19), enforcement at a gateway (the check is advisory), catalog connectors (dbt, Databricks), ServiceNow EA capabilities, Workday Goals and LeanIX, and VeroMesh's own licensing system (issue #56). The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: the Copilot Studio test on the Azure install (issue #19; its steps and script are in [docs/copilot-studio-test.md](docs/copilot-studio-test.md)), enforcement at a gateway (the check is advisory), catalog connectors (dbt, Databricks), linking capabilities to the applications that support them, and VeroMesh's own licensing system (issue #56). The plan is the Delivery Plan; open work is in the GitHub issues.
 
 Administrator and user guides: [docs/guides/](docs/guides/) (CI builds Word copies). Connectors are tested against the [VeroMesh test harness](https://github.com/whowman/VeroMeshTestHarness), a simulated company whose systems serve their public APIs.
 
@@ -32,7 +32,7 @@ DataHub runs **unmodified** from its official images; Veromesh extends it with a
 | Path | What |
 | --- | --- |
 | `service/` | Veromesh API (Python, FastAPI): REST model API, changesets, validation |
-| `connectors/` | Connector SDK and connectors (spreadsheet, CSV, Workday, Entra ID, Oracle ERP, ServiceNow, HaloITSM): clients of the REST API, CLI and container; see [docs/connectors.md](docs/connectors.md) |
+| `connectors/` | Connector SDK and connectors (spreadsheet, CSV, Workday, Entra ID, Oracle ERP, ServiceNow, SAP LeanIX, HaloITSM): clients of the REST API, CLI and container; see [docs/connectors.md](docs/connectors.md) |
 | `datahub-model/` | Custom DataHub aspect `veromeshOntologyBindings` (PDL + entity registry) |
 | `branding/` | VeroMesh palette, logos, and the DataHub theme; see [branding/README.md](branding/README.md) |
 | `ontology/` | Veromesh core vocabulary, the organizational meta-model (draft) with its validation rules, and examples; see [docs/meta-model.md](docs/meta-model.md) |
