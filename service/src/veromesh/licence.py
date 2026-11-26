@@ -354,6 +354,7 @@ class Licensing:
 _SAFE_WRITES = (
     "/api/v1/decisions/",
     "/api/v1/licence",
+    "/api/v1/meetings",  # attesting in meetings, as attesting anywhere, is never stopped
     "/api/v1/usage",
     "/sparql",
     "/mcp",
