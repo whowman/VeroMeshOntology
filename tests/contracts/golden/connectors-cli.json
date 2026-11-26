@@ -25,6 +25,25 @@
       },
       "options": []
     },
+    "databricks": {
+      "args": [],
+      "commands": {
+        "import": {
+          "args": [],
+          "options": [
+            "--url",
+            "--warehouse",
+            "--catalog",
+            "--runs-on",
+            "--env",
+            "--source",
+            "--mode ['replace', 'merge']",
+            "--dry-run"
+          ]
+        }
+      },
+      "options": []
+    },
     "dbt": {
       "args": [],
       "commands": {
