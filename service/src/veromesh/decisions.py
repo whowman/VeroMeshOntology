@@ -40,7 +40,17 @@ from urllib.parse import unquote, urlparse
 log = logging.getLogger("veromesh.decisions")
 
 GENESIS = "0" * 64
-KINDS = ("decision", "override", "outcome", "attestation", "configuration", "query", "publish", "meeting")
+KINDS = (
+    "decision",
+    "override",
+    "outcome",
+    "attestation",
+    "configuration",
+    "query",
+    "publish",
+    "meeting",
+    "notice",
+)
 ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
 # Fields an entry may carry, beyond those the log assigns (id, seq, recordedAt, prevHash, hash).
@@ -75,6 +85,11 @@ FIELDS = (
     "objectionUntil",
     # meeting entries: the meeting that is the evidence for attestations recorded in it
     "meetingRecord",
+    # notice entries: an owner told of attestations recorded for them (subject, meeting,
+    # the attestations), by which channel, and whether it was the first notice or the reminder
+    "channel",
+    "notice",
+    "attestations",
     # query entries: what a caller read (path or MCP tool) and the purpose it gave
     "query",
     "purpose",
@@ -130,6 +145,12 @@ def check(fields: dict) -> dict:
             raise InvalidEntry(
                 "A meeting entry needs meetingRecord (the meeting, with its id) and refers to nothing."
             )
+    elif kind == "notice":
+        if fields.get("refersTo") or fields.get("notice") not in ("recorded", "reminder"):
+            raise InvalidEntry("A notice is 'recorded' or 'reminder' and refers to no decision.")
+        missing = [k for k in ("subject", "meeting", "channel") if not fields.get(k)]
+        if missing or not isinstance(fields.get("attestations"), list):
+            raise InvalidEntry("A notice entry needs subject, meeting, channel and attestations (a list).")
     elif kind == "configuration":
         if fields.get("refersTo"):
             raise InvalidEntry("A configuration change refers to no decision.")

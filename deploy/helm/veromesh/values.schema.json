@@ -77,6 +77,16 @@
           }
         },
         "timeZone": {"type": "string", "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$"},
+        "publicUrl": {"type": "string", "pattern": "^(|https?://[^/]+(/.*)?)$"},
+        "teams": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "appId": {"type": "string"},
+            "tenantId": {"type": "string"},
+            "existingSecret": {"type": "string"}
+          }
+        },
         "usage": {
           "type": "object",
           "additionalProperties": false,

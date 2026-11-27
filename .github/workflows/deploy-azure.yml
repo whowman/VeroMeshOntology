@@ -108,6 +108,7 @@ jobs:
             --set "api.auth.uiClientId=${{ vars.UI_CLIENT_ID }}" \
             --set "api.auth.uiScope=openid profile email api://$api/access_as_user" \
             --set "backup.encryption.recipients={${{ vars.BACKUP_RECIPIENT }}}" \
+            --set "api.publicUrl=https://$HOST" \
             --wait --timeout 15m
           export NAMESPACE HOST
           envsubst '${NAMESPACE} ${HOST}' < deploy/azure/route.yaml | kubectl apply -f -

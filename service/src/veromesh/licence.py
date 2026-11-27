@@ -355,6 +355,8 @@ _SAFE_WRITES = (
     "/api/v1/decisions/",
     "/api/v1/licence",
     "/api/v1/meetings",  # attesting in meetings, as attesting anywhere, is never stopped
+    "/api/v1/notify/",  # telling owners of what was recorded for them
+    "/api/v1/teams/",  # their answers in Teams
     "/api/v1/usage",
     "/sparql",
     "/mcp",

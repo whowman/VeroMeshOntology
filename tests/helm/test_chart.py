@@ -902,3 +902,20 @@ def test_azure_datahub_overlay_keeps_the_theme_and_passes_the_system_secret():
             assert env.get(e["name"]) == e, (component, e["name"])
         ref = env["DATAHUB_SYSTEM_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]
         assert ref == {"name": "datahub-auth-secrets", "key": "system_client_secret"}, component
+
+
+def test_public_url_and_teams():
+    def env(*sets):
+        return env_of(one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+
+    assert "VEROMESH_PUBLIC_URL" not in env() and "VEROMESH_TEAMS_APP_ID" not in env()
+    assert env("api.ingress.enabled=true")["VEROMESH_PUBLIC_URL"]["value"] == "https://veromesh.example.com"
+    assert (
+        env("api.publicUrl=https://o.example.com")["VEROMESH_PUBLIC_URL"]["value"] == "https://o.example.com"
+    )
+    e = env("api.teams.appId=app-1", "api.teams.tenantId=t-1", "api.teams.existingSecret=veromesh-teams")
+    assert (e["VEROMESH_TEAMS_APP_ID"]["value"], e["VEROMESH_TEAMS_TENANT_ID"]["value"]) == ("app-1", "t-1")
+    ref = e["VEROMESH_TEAMS_APP_PASSWORD"]["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "veromesh-teams", "key": "app-password"}
+    bad = helm("template", "veromesh", str(CHART), *WITH_KEY, "--set", "api.teams.appId=app-1", check=False)
+    assert bad.returncode != 0 and "api.teams.tenantId is needed" in bad.stderr

@@ -297,6 +297,12 @@
       "422"
     ]
   },
+  "GET /api/v1/notify/settings": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/proposals": {
     "params": [
       "id? (query)",
@@ -765,6 +771,12 @@
       "422"
     ]
   },
+  "POST /api/v1/notify/run": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "POST /api/v1/proposals/{type_}/{rid}/{field}": {
     "body": {
       "application/json": {
@@ -990,6 +1002,16 @@
     ]
   },
   "PUT /api/v1/licence": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/notify/settings": {
     "body": {
       "application/json": "object"
     },

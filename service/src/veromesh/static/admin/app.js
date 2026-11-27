@@ -207,9 +207,39 @@ function wireUsage() {
   });
 }
 
+// ------------------------------------------------------------------ notices
+
+function fillNotify(n) {
+  $("#n-channels").value = n.channels.join(",");
+  $("#n-show").value = n.show;
+  $("#n-reminder").value = String(n.reminderBusinessDays);
+}
+
+async function showNotices() {
+  try { fillNotify(await api("/api/v1/notify/settings")); } catch (e) { say(e.message, "error"); }
+}
+
+function wireNotices() {
+  $("#notify-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const ch = $("#n-channels").value;
+    const body = { channels: ch ? ch.split(",") : [], show: $("#n-show").value, reminderBusinessDays: Number($("#n-reminder").value) };
+    try { fillNotify(await api("/api/v1/notify/settings", { method: "PUT", body })); say("Notice settings saved.", "ok"); }
+    catch (e) { say(e.message, "error"); }
+  });
+  $("#n-run").addEventListener("click", async () => {
+    try {
+      const r = await api("/api/v1/notify/run", { method: "POST" });
+      if (r.skipped) { say(r.skipped, "ok"); return; }
+      const problems = r.notSent.map((x) => `${x.person}: ${x.problem}`).join("; ");
+      say(`Sent ${r.sent.length}.` + (problems ? ` Not sent: ${problems}` : ""), problems ? "error" : "ok");
+    } catch (e) { say(e.message, "error"); }
+  });
+}
+
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { licence: showLicence, usage: showUsage };
+const SHOW = { licence: showLicence, usage: showUsage, notices: showNotices };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -238,8 +268,9 @@ async function start() {
     document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => openTab(b.dataset.tab)));
     $("#licence-form").addEventListener("submit", loadLicence);
     wireUsage();
+    wireNotices();
     licenceBanner();
-    openTab(location.hash === "#usage" ? "usage" : "licence");
+    openTab(SHOW[location.hash.slice(1)] ? location.hash.slice(1) : "licence");
   } catch (e) {
     say(e.message, "error");
   }

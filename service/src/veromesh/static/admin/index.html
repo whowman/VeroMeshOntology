@@ -21,6 +21,7 @@
 <nav class="tabs" role="tablist">
   <button role="tab" data-tab="licence" aria-selected="true">Licence</button>
   <button role="tab" data-tab="usage">Usage</button>
+  <button role="tab" data-tab="notices">Notices</button>
 </nav>
 
 <main>
@@ -75,6 +76,39 @@
         <button type="submit" class="primary">Save</button>
         <button type="button" id="u-test" class="secondary">Send a test message</button>
         <button type="button" id="u-run" class="secondary">Count and make reports now</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="tab-notices" class="tab" hidden>
+    <p class="lead">When a steward records in a meeting what owners confirmed there, each owner is told what was recorded and until when they may object, with one reminder if they have not answered. Every notice sent is on the decision log. Email uses the mail adapter set on the Usage page.</p>
+    <form id="notify-form" class="settings">
+      <label>Tell owners by
+        <select id="n-channels">
+          <option value="email">Email</option>
+          <option value="teams,email">Teams, or email when Teams cannot reach them</option>
+          <option value="teams">Teams only</option>
+          <option value="">Nobody (the steward screen only)</option>
+        </select>
+      </label>
+      <label>Notices show
+        <select id="n-show">
+          <option value="values">The values recorded (no personal details)</option>
+          <option value="names">Only which facts, not their values</option>
+        </select>
+      </label>
+      <label>Reminder
+        <select id="n-reminder">
+          <option value="0">None</option>
+          <option value="1">After 1 business day</option>
+          <option value="2">After 2 business days</option>
+          <option value="3">After 3 business days</option>
+          <option value="4">After 4 business days</option>
+        </select>
+      </label>
+      <div class="buttons">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="n-run" class="secondary">Send due notices now</button>
       </div>
     </form>
   </section>

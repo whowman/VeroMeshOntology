@@ -78,6 +78,18 @@ api:
   # are stored in UTC either way.
   timeZone: UTC
 
+  # Where people reach this install (https://ontology.example.com), for the links in
+  # notices to owners. Unset: https://<ingress host> when the ingress is on, else no link.
+  publicUrl: ""
+
+  # The Teams channel for notices to owners (deploy/teams/README.md): the bot's Entra
+  # application ID, the customer's tenant, and a Secret holding the bot's client secret
+  # (key app-password). Unset: owners are told by email only.
+  teams:
+    appId: ""
+    tenantId: ""
+    existingSecret: ""
+
   # The usage report: every install makes one a month, signed with its own key and
   # kept beside the decision log; with a mail adapter set up (on the steward screen's
   # Usage page in Administration) it is also sent to VeroMesh. See service/README.md, "Usage report".

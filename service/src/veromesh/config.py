@@ -110,6 +110,17 @@ class Settings(BaseSettings):
     licence: str | None = None
     usage_job: bool = True  # count every hour and make the reports in the background
     usage_interval_s: float = 3600.0
+    # Where people reach this install (https://ontology.example.com), for links in notices.
+    public_url: str | None = None
+    # Notices to owners of attestations recorded for them in meetings (notify.py): sent in
+    # the background after each recording and every hour (reminders, retries).
+    notify_job: bool = True
+    notify_interval_s: float = 3600.0
+    # The Teams channel (teams.py): the VeroMesh bot's Entra application ID and client
+    # secret, and the customer's tenant. Unset: no Teams channel.
+    teams_app_id: str | None = None
+    teams_app_password: str | None = None
+    teams_tenant_id: str | None = None
 
 
 @lru_cache

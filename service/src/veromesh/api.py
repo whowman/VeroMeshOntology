@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from starlette.routing import Route
 
 from . import (
@@ -41,10 +42,12 @@ from . import (
     mcp_server,
     meetings,
     modelmeasures,
+    notify,
     proposals,
     publish,
     querylog,
     suggest,
+    teams,
     usage,
     validation,
 )
@@ -229,12 +232,18 @@ def create_app(
         if s.warm_on_start:
             threading.Thread(target=warm_planner, args=(app, s), name="veromesh-warm", daemon=True).start()
         job = usage.Job(lambda: usage_of(app), s.usage_interval_s).start() if s.usage_job else None
+        notices = (
+            usage.Job(lambda: notifier_of(app), s.notify_interval_s, delay=90.0).start()
+            if s.notify_job
+            else None
+        )
         try:
             async with app.state.mcp.session_manager.run():
                 yield
         finally:
-            if job is not None:
-                job.stop()
+            for j in (job, notices):
+                if j is not None:
+                    j.stop()
 
     app = FastAPI(
         lifespan=lifespan,
@@ -283,6 +292,20 @@ def create_app(
             u.licensing = licence.Licensing(u, c)
             a.state.usage = u
         return a.state.usage
+
+    def notifier_of(a: FastAPI) -> notify.Notifier:
+        """Notices to owners (built on first use, kept with the app)."""
+        if getattr(a.state, "notifier", None) is None:
+            u = usage_of(a)
+            c = a.state.settings or get_settings()
+            channels: dict[str, notify.Channel] = {"email": notify.EmailChannel(u.mail, c)}
+            n = notify.Notifier(a.state.service.store, a.state.decision_log, u.store, channels, c.public_url)
+            if c.teams_app_id and c.teams_tenant_id:
+                channels["teams"] = teams.Teams(
+                    c, a.state.service.store, c.instance_base, a.state.decision_log, u.store, n
+                )
+            a.state.notifier = n
+        return a.state.notifier
 
     @app.middleware("http")
     async def read_only_after_expiry(request: Request, call_next):
@@ -1318,10 +1341,9 @@ def create_app(
     def meeting_recorded_for_me(s: Svc, c: Cfg, who: Who, person: str | None = None) -> list[dict]:
         """Attestations recorded for you in meetings, with where each stands (open: you may still
         object). Stewards may ask for anyone (`person`)."""
-        if who.has(*auth.STEWARD) and person:
-            return meetings.recorded(s.store, person=person)
-        me, _ = attester_for(s, c, who, person)
-        return meetings.recorded(s.store, person=me)
+        if not (who.has(*auth.STEWARD) and person):
+            person, _ = attester_for(s, c, who, person)
+        return notifier_of(app).annotate(meetings.recorded(s.store, person=person))
 
     @app.post("/api/v1/meetings/preread", dependencies=need(auth.STEWARD), tags=["governance"])
     def meeting_preread(s: Svc, c: Cfg, body: PrereadIn) -> dict:
@@ -1331,7 +1353,8 @@ def create_app(
 
     @app.get("/api/v1/meetings/{mid}", dependencies=need(auth.STEWARD), tags=["governance"])
     def meeting_get(s: Svc, mid: str) -> dict:
-        return {**meetings.get(s.store, mid), "recorded": meetings.recorded(s.store, meeting=mid)}
+        rows = notifier_of(app).annotate(meetings.recorded(s.store, meeting=mid))
+        return {**meetings.get(s.store, mid), "recorded": rows}
 
     @app.post(
         "/api/v1/meetings/{mid}/attestations",
@@ -1344,13 +1367,54 @@ def create_app(
         owner may object (dispute) for five business days. All items are checked before any is written."""
         by, _ = attester_for(s, c, who, body.recordedBy)
         try:
-            return meetings.record(
+            done = meetings.record(
                 s.store, c.instance_base, mid, [i.model_dump() for i in body.items], recorded_by=by, log=dl
             )
         except prov.NotYourRole as e:
             raise HTTPException(status_code=403, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+        if c.notify_job:
+            notifier_of(app).kick()  # tell the owners now; the hourly run retries what fails
+        return done
+
+    # ------------------------------------------------------------ notices to owners
+
+    @app.post("/api/v1/teams/messages", tags=["governance"], include_in_schema=False)
+    async def teams_messages(request: Request):
+        """The VeroMesh bot's messaging endpoint, called by Microsoft's Bot Framework with
+        its own token (not a VeroMesh sign-in): installs, and Confirm/Object presses."""
+        bot = notifier_of(app).channels.get("teams")
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Teams is not set up on this install.")
+        activity = await request.json()
+        try:
+            status, body = await run_in_threadpool(bot.handle, request.headers.get("authorization"), activity)
+        except teams.NotFromBotFramework as e:
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        return (
+            JSONResponse(body, status_code=status)
+            if body is not None
+            else JSONResponse({}, status_code=status)
+        )
+
+    @app.get("/api/v1/notify/settings", dependencies=need(auth.ADMIN), tags=["governance"])
+    def notify_settings_get() -> dict:
+        """How owners are told of attestations recorded for them: channels in order, what a
+        notice shows (values, personal details hidden, or names only), the reminder day."""
+        return notifier_of(app).settings()
+
+    @app.put("/api/v1/notify/settings", dependencies=need(auth.ADMIN), tags=["governance"])
+    def notify_settings_put(who: Who, body: Annotated[dict, Body()]) -> dict:
+        try:
+            return notifier_of(app).put_settings(body, by=who.subject)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.post("/api/v1/notify/run", dependencies=need(auth.ADMIN), tags=["governance"])
+    def notify_run() -> dict:
+        """Send every notice due now (otherwise sent after each recording and every hour)."""
+        return notifier_of(app).run()
 
     @app.post(
         "/api/v1/{type_}/{rid}/attestations",
