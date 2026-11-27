@@ -360,6 +360,7 @@ _SAFE_WRITES = (
     "/api/v1/usage",
     "/sparql",
     "/mcp",
+    "/gateway/mcp",  # agents' tool calls are decisions: checked and logged, never stopped
 )
 
 

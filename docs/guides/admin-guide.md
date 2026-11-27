@@ -98,6 +98,8 @@ Roles filled always stay answerable, so the decision check and the steward scree
 
 Each agent signs in with its own client ID, recorded on the agent in the model (`signInClientId`). An agent can only act within the use cases approved for it and the authority of the person it acts for.
 
+The decision check alone is advisory. To enforce it, give the agent no credentials of its own for the systems it acts on: register each system's MCP server as a gateway target (`PUT /api/v1/gateway/settings`, its token in the Secret named by `api.gateway.existingSecret`) and point the agent at `/gateway/mcp`. Each consequential tool is mapped to a VeroMesh action; a call reaches the system only once it is allowed, and one that needs the owners waits until they approve. See `docs/gateway.md`.
+
 # Licence and usage reports
 
 To write: installing the licence file (`VEROMESH_LICENCE`), what the usage report contains, how it is signed, and how to send it (`VEROMESH_USAGE_*`). See `docs/licensing.md`.

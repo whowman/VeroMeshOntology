@@ -921,6 +921,15 @@ def test_public_url_and_teams():
     assert bad.returncode != 0 and "api.teams.tenantId is needed" in bad.stderr
 
 
+def test_gateway_tokens_come_from_a_secret():
+    def container(*sets):
+        return one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0]
+
+    assert "envFrom" not in container()
+    c = container("api.gateway.existingSecret=veromesh-gateway")
+    assert c["envFrom"] == [{"secretRef": {"name": "veromesh-gateway"}}]
+
+
 def test_need_to_know_setting():
     def env(*sets):
         return env_of(one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0])
