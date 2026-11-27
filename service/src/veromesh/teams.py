@@ -21,6 +21,11 @@ service's public address, wherever it is hosted. Nothing here uses Azure hosting
   that shows where each fact now stands, so nothing can be pressed twice.
 - **Closing.** When the objection window closes, the next run replaces open cards with
   "this stands".
+- **Decisions.** A decision waiting for an owner (``notify.DecisionNotice``) becomes a card
+  with what the agent asks, for whom, why the owner is consulted, and Approve and Reject. A
+  press answers the decision as that person, in the consulted role they fill, as on the
+  steward screen; ``after_answer`` then lets a call the MCP gateway holds go through. Once
+  the decision is no longer pending, the next run replaces the card with where it stands.
 
 Settings: ``VEROMESH_TEAMS_APP_ID`` (the bot's Entra application ID), ``VEROMESH_TEAMS_APP_PASSWORD``
 (its client secret) and ``VEROMESH_TEAMS_TENANT_ID``.
@@ -37,9 +42,9 @@ from typing import Any
 import httpx
 import jwt
 
-from . import meetings
+from . import changesets, followup, meetings
 from . import provenance as P
-from .notify import Notice, Unreachable, _day, type_label
+from .notify import DecisionNotice, Notice, Unreachable, _day, amount_of, type_label
 
 log = logging.getLogger("veromesh.teams")
 
@@ -85,6 +90,7 @@ class Teams:
         self._jwks: jwt.PyJWKClient | None = None
         self._token: tuple[str, float] | None = None
         self._lock = threading.Lock()
+        self.after_answer: Callable[[str], Any] | None = None  # e.g. send a held gateway call
 
     # ------------------------------------------------------------ the bot's own tokens
 
@@ -209,7 +215,7 @@ class Teams:
         if kind == "message":
             self._reply(
                 activity,
-                "I send you the facts a steward recorded for you in meetings, to confirm or object to. "
+                "I send you the facts a steward recorded for you in meetings, to confirm or object to, and decisions waiting for your approval. "
                 + (
                     f"Everything else is on the steward screen: {self.notifier.link}"
                     if self.notifier.link
@@ -244,6 +250,8 @@ class Teams:
         """A Confirm, Object or Confirm all press: attest or dispute as the person pressing."""
         action = (activity.get("value") or {}).get("action") or {}
         verb, data = action.get("verb"), action.get("data") or {}
+        if verb in ("approve", "reject"):
+            return self._answer(activity, verb, data)
         mid = data.get("meeting")
         pid = self._person_for(activity)
         if pid is None or not mid:
@@ -283,6 +291,153 @@ class Teams:
     def _notice(self, mid: str, pid: str, kind: str = "recorded") -> Notice:
         return self.notifier.build(kind, mid, pid, meetings.recorded(self.store, meeting=mid, person=pid))
 
+    def _answer(self, activity: dict, verb: str, data: dict) -> dict:
+        """Approve or Reject on a decision card: an answer by the person pressing, in the
+        consulted role they fill (as on the steward screen)."""
+        did, role = data.get("decision"), data.get("role")
+        pid = self._person_for(activity)
+        d = self.log.get(did) if did else None
+        if pid is None or d is None or d.get("kind") != "decision":
+            return _message(400, "VeroMesh cannot tell who you are in the model, or which decision this is.")
+        st = followup.status_of(d, followup.followups(self.log, did))
+        if st["status"] == "pending":
+            p = changesets.get_entity(self.store, "people", pid, self.base) or {}
+            roles = p.get("rolesFilled", [])
+            roles = [*([roles] if isinstance(roles, str) else roles), f"person:{pid}"]
+            note = (data.get("note") or "").strip()
+            try:
+                followup.override(
+                    self.log,
+                    d,
+                    person=pid,
+                    person_roles=roles,
+                    is_admin=False,
+                    verdict="approved" if verb == "approve" else "rejected",
+                    subject=f"teams:{(activity.get('from') or {}).get('aadObjectId') or pid}",
+                    role=role if role in st.get("waitingFor", []) else None,
+                    note=(note + " " if note else "") + "(in Teams)",
+                )
+            except PermissionError as e:
+                return _message(403, str(e))
+            if self.after_answer is not None:
+                try:
+                    self.after_answer(did)
+                except Exception:  # noqa: BLE001 — the gateway's sweep sends it later
+                    log.exception("after answering %s in Teams", did)
+        n = self.notifier.build_decision(self.log.get(did), pid, role or "")
+        return {
+            "statusCode": 200,
+            "type": "application/vnd.microsoft.card.adaptive",
+            "value": self.decision_card(n),
+        }
+
+    def send_decision(self, n: DecisionNotice) -> str:
+        ref = self.people().get(n.person)
+        if ref is None:
+            raise Unreachable("the VeroMesh app is not installed for them in Teams")
+        url = f"{ref['serviceUrl'].rstrip('/')}/v3/conversations/{ref['conversationId']}/activities"
+        summary = f"Approval needed: {n.action_name}"
+        made = self._call(
+            "POST",
+            url,
+            {"type": "message", "attachments": [_attachment(self.decision_card(n))], "summary": summary},
+        )
+        cards = dict(self.kv.setting(CARDS) or {})
+        cards[f"decision|{n.decision['id']}|{n.person}|{n.role}"] = {
+            "activityId": made.get("id"),
+            "open": True,
+        }
+        self.kv.put_setting(CARDS, cards)
+        return f"card sent in Teams ({made.get('id')})"
+
+    def decision_card(self, n: DecisionNotice) -> dict:
+        d, st = n.decision, n.status
+        amount = amount_of(d)
+        facts = [
+            {"title": "Agent", "value": n.agent_name},
+            {"title": "Acting for", "value": n.principal_name},
+            {"title": "Action", "value": n.action_name},
+        ]
+        if amount:
+            facts.append({"title": "Amount", "value": amount})
+        if d.get("note"):
+            facts.append({"title": "About", "value": d["note"]})
+        body: list[dict] = [
+            {
+                "type": "TextBlock",
+                "text": "Approval needed",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": True,
+            },
+            {"type": "FactSet", "facts": facts},
+            {"type": "TextBlock", "wrap": True, "text": f"You are asked as **{n.role_name}**:"},
+            *({"type": "TextBlock", "wrap": True, "text": f"- {w}"} for w in n.why),
+        ]
+        if n.held_call:
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "wrap": True,
+                    "text": f"The agent's call (**{n.held_call}**) is held by VeroMesh: it goes to the system only if approved.",
+                }
+            )
+        actions: list[dict] = []
+        if st["status"] == "pending":
+            body.append(
+                {"type": "Input.Text", "id": "note", "placeholder": "Note (optional; say why if you reject)"}
+            )
+            data = {"decision": d["id"], "role": n.role}
+            actions += [
+                {
+                    "type": "Action.Execute",
+                    "title": "Approve",
+                    "verb": "approve",
+                    "data": data,
+                    "style": "positive",
+                },
+                {
+                    "type": "Action.Execute",
+                    "title": "Reject",
+                    "verb": "reject",
+                    "data": data,
+                    "style": "destructive",
+                },
+            ]
+        else:
+            by = next((o for o in reversed(st.get("overrides") or [])), None)
+            words = {
+                "approved": "Approved",
+                "rejected": "Rejected",
+                "refused": "Refused",
+                "allowed": "Allowed",
+            }.get(st["status"], st["status"])
+            who = f" by {self.notifier._name('people', by['by'])}" if by and by.get("by") else ""
+            done = {
+                "done": " The action was carried out.",
+                "not_done": " The action was not carried out.",
+            }.get(st.get("done") or "", "")
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "wrap": True,
+                    "weight": "Bolder",
+                    "color": "Attention" if st["status"] == "rejected" else "Good",
+                    "text": f"{words}{who}.{done}",
+                }
+            )
+        if n.link:
+            actions.append({"type": "Action.OpenUrl", "title": "Open the steward screen", "url": n.link})
+        out = {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": body,
+        }
+        if actions:
+            out["actions"] = actions
+        return out
+
     # ------------------------------------------------------------ the channel
 
     def send(self, notice: Notice) -> str:
@@ -315,6 +470,11 @@ class Teams:
         for key, c in list(cards.items()):
             if not c.get("open"):
                 continue
+            if key.startswith("decision|"):
+                if self._sweep_decision(key, c, ppl):
+                    cards[key] = {**c, "open": False}
+                    done += 1
+                continue
             mid, pid = key.split("|", 1)
             notice = self._notice(mid, pid)
             if any(i.standing == "open" for i in notice.items) or pid not in ppl:
@@ -328,6 +488,22 @@ class Teams:
             done += 1
         self.kv.put_setting(CARDS, cards)
         return done
+
+    def _sweep_decision(self, key: str, c: dict, ppl: dict) -> bool:
+        _, did, pid, role = key.split("|", 3)
+        d = self.log.get(did)
+        if d is None or pid not in ppl:
+            return d is None
+        n = self.notifier.build_decision(d, pid, role)
+        if n.status["status"] == "pending":
+            return False
+        url = f"{ppl[pid]['serviceUrl'].rstrip('/')}/v3/conversations/{ppl[pid]['conversationId']}/activities/{c['activityId']}"
+        try:
+            self._call("PUT", url, {"type": "message", "attachments": [_attachment(self.decision_card(n))]})
+        except Exception as e:  # noqa: BLE001 — tried again at the next run
+            log.warning("could not update the Teams card for %s: %s", key, e)
+            return False
+        return True
 
     # ------------------------------------------------------------ the card
 

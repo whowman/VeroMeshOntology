@@ -1,4 +1,5 @@
-/* VeroMesh Administration: the install's licence and its usage reports. Administrators only.
+/* VeroMesh Administration: the install's licence, its usage reports, notices to owners and the
+   MCP gateway's systems. Administrators only.
    Plain JavaScript, no build step; sign-in, the API helper and the licence banner are in
    /common/vm.js. Every value from the API is written with textContent, never as HTML. */
 "use strict";
@@ -213,6 +214,7 @@ function fillNotify(n) {
   $("#n-channels").value = n.channels.join(",");
   $("#n-show").value = n.show;
   $("#n-reminder").value = String(n.reminderBusinessDays);
+  $("#n-decisions").value = String(n.decisions);
 }
 
 async function showNotices() {
@@ -223,7 +225,7 @@ function wireNotices() {
   $("#notify-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const ch = $("#n-channels").value;
-    const body = { channels: ch ? ch.split(",") : [], show: $("#n-show").value, reminderBusinessDays: Number($("#n-reminder").value) };
+    const body = { channels: ch ? ch.split(",") : [], show: $("#n-show").value, reminderBusinessDays: Number($("#n-reminder").value), decisions: $("#n-decisions").value === "true" };
     try { fillNotify(await api("/api/v1/notify/settings", { method: "PUT", body })); say("Notice settings saved.", "ok"); }
     catch (e) { say(e.message, "error"); }
   });
@@ -237,9 +239,179 @@ function wireNotices() {
   });
 }
 
+// ------------------------------------------------------------------ gateway
+
+const gw = { targets: [], tools: {}, actions: [] };
+const ARGS = [["amount", "Amount"], ["currency", "Currency"], ["about", "Person it is about"], ["value", "Value (%, steps)"], ["note", "Note for the log"]];
+
+function option(value, text, selected) {
+  const o = el("option", null, text);
+  o.value = value;
+  if (selected) o.selected = true;
+  return o;
+}
+
+function argSelect(args, chosen) {
+  const sel = el("select");
+  sel.append(option("", "–", !chosen));
+  const names = args.includes(chosen) || !chosen ? args : [...args, chosen];
+  for (const a of names) sel.append(option(a, a, a === chosen));
+  return sel;
+}
+
+function labelled(text, control) {
+  const l = el("label", null, text);
+  l.append(control);
+  return l;
+}
+
+function toolRow(t, tool) {
+  const row = el("div", "gw-tool");
+  row.dataset.tool = tool.name;
+  const name = el("div", "tool");
+  name.append(el("div", "mono", tool.name));
+  if (tool.description) name.append(el("div", "meta", tool.description));
+  if (!tool.listed && gw.tools[t.name] && !gw.tools[t.name].problem) name.append(el("span", "chip bad", "No longer offered by the server"));
+  const offered = el("select");
+  offered.className = "gw-offered";
+  offered.setAttribute("aria-label", `How ${tool.name} is offered`);
+  offered.append(option("", "Not offered to agents", !tool.offered), option("read", "Read-only: passes through unchecked", tool.offered === "read"), option("checked", "Checked by VeroMesh first", tool.offered === "checked"));
+  row.append(name, offered);
+  const m = tool.mapping || {};
+  const map = el("div", "gw-map settings");
+  const action = el("select");
+  action.className = "gw-action";
+  action.append(option("", "Choose the action…", !m.action));
+  const known = gw.actions.some((a) => a.id === m.action);
+  for (const a of gw.actions) action.append(option(a.id, a.name ? `${a.name} (${a.id})` : a.id, a.id === m.action));
+  if (m.action && !known) action.append(option(m.action, `${m.action} (not in the model)`, true));
+  const wide = labelled("The VeroMesh action it takes", action);
+  wide.className = "wide";
+  map.append(wide);
+  for (const [k, label] of ARGS) {
+    const sel = argSelect(tool.arguments, m[k]);
+    sel.dataset.arg = k;
+    map.append(labelled(`${label}: from the argument`, sel));
+    if (k === "currency") {
+      const fixed = el("input");
+      fixed.type = "text";
+      fixed.placeholder = "e.g. USD";
+      fixed.dataset.fixed = "currencyValue";
+      fixed.value = m.currencyValue || "";
+      map.append(labelled("…or always this currency", fixed));
+    }
+  }
+  row.append(map);
+  const sync = () => { map.hidden = offered.value !== "checked"; };
+  offered.addEventListener("change", sync);
+  sync();
+  return row;
+}
+
+function targetBlock(t) {
+  const box = el("div", "gw-target");
+  box.dataset.target = t.name;
+  const head = el("div", "gw-head");
+  head.append(el("span", "name", t.name), el("span", "url", t.url), el("span", "spacer"));
+  const remove = el("button", "secondary", "Remove");
+  remove.type = "button";
+  remove.addEventListener("click", () => { gw.targets = gw.targets.filter((x) => x.name !== t.name); drawGateway(); say(`${t.name} removed; save to apply.`, "ok"); });
+  head.append(remove);
+  box.append(head);
+  box.append(el("div", "meta", t.header ? `Sends ${t.header} from the environment variable ${t.secretEnv}. Agents see its tools as ${t.name}__<tool>.` : `No header is sent. Agents see its tools as ${t.name}__<tool>.`));
+  const listed = gw.tools[t.name];
+  if (!listed) {
+    box.append(el("div", "empty", "Save the settings, then its tools are listed here."));
+    return box;
+  }
+  if (listed.problem) box.append(el("div", "message error", listed.problem));
+  if (!listed.tools.length) { box.append(el("div", "empty", "No tools listed.")); return box; }
+  for (const tool of listed.tools) box.append(toolRow(t, tool));
+  return box;
+}
+
+function drawGateway() {
+  const box = $("#gw-targets");
+  if (!gw.targets.length) { box.replaceChildren(el("div", "empty", "No systems yet: add one below.")); return; }
+  box.replaceChildren(...gw.targets.map(targetBlock));
+}
+
+function collectGateway() {
+  const targets = gw.targets.map((t) => {
+    const out = { name: t.name, url: t.url, tools: {}, passThrough: [] };
+    if (t.header) Object.assign(out, { header: t.header, secretEnv: t.secretEnv });
+    const block = document.querySelector(`.gw-target[data-target="${CSS.escape(t.name)}"]`);
+    const rows = block ? block.querySelectorAll("[data-tool]") : [];
+    if (!rows.length) return Object.assign(out, { tools: t.tools || {}, passThrough: t.passThrough || [] });
+    for (const tr of rows) {
+      const offered = tr.querySelector(".gw-offered").value;
+      if (offered === "read") out.passThrough.push(tr.dataset.tool);
+      if (offered !== "checked") continue;
+      const action = tr.querySelector(".gw-action").value;
+      if (!action) throw new Error(`${t.name}: choose the VeroMesh action ${tr.dataset.tool} takes.`);
+      const m = { action };
+      tr.querySelectorAll("[data-arg]").forEach((x) => { if (x.value) m[x.dataset.arg] = x.value; });
+      const fixed = tr.querySelector("[data-fixed]").value.trim();
+      if (fixed && !m.currency) m.currencyValue = fixed;
+      out.tools[tr.dataset.tool] = m;
+    }
+    return out;
+  });
+  return { targets };
+}
+
+async function loadTools() {
+  gw.tools = {};
+  await Promise.all(gw.targets.map(async (t) => {
+    try { gw.tools[t.name] = await api(`/api/v1/gateway/targets/${encodeURIComponent(t.name)}/tools`); }
+    catch (e) { gw.tools[t.name] = { tools: [], problem: e.message }; }
+  }));
+}
+
+async function showGateway() {
+  try {
+    const [settings, actions] = await Promise.all([api("/api/v1/gateway/settings"), api("/api/v1/actions").catch(() => [])]);
+    gw.targets = settings.targets;
+    gw.actions = (actions || []).map((a) => ({ id: a.id, name: a.name })).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    await loadTools();
+    drawGateway();
+  } catch (e) { say(e.message, "error"); }
+}
+
+function wireGateway() {
+  $("#gw-add").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const t = { name: $("#gw-name").value.trim(), url: $("#gw-url").value.trim(), tools: {}, passThrough: [] };
+    const header = $("#gw-header").value.trim();
+    const secret = $("#gw-secret").value.trim();
+    if (header || secret) {
+      if (!header || !secret) { say("Give both the header and the environment variable, or neither.", "error"); return; }
+      Object.assign(t, { header, secretEnv: secret });
+    }
+    if (gw.targets.some((x) => x.name === t.name)) { say(`There is already a system called ${t.name}.`, "error"); return; }
+    gw.targets.push(t);
+    ev.target.reset();
+    drawGateway();
+    say(`${t.name} added; save to list its tools.`, "ok");
+  });
+  $("#gw-save").addEventListener("click", async () => {
+    try {
+      const saved = await api("/api/v1/gateway/settings", { method: "PUT", body: collectGateway() });
+      gw.targets = saved.targets;
+      await loadTools();
+      drawGateway();
+      say("Gateway settings saved.", "ok");
+    } catch (e) { say(e.message, "error"); }
+  });
+  $("#gw-run").addEventListener("click", async () => {
+    try { const r = await api("/api/v1/gateway/run", { method: "POST" }); say(`Sent ${r.released} held call(s).`, "ok"); }
+    catch (e) { say(e.message, "error"); }
+  });
+}
+
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { licence: showLicence, usage: showUsage, notices: showNotices };
+const SHOW = { licence: showLicence, usage: showUsage, notices: showNotices, gateway: showGateway };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -269,6 +441,7 @@ async function start() {
     $("#licence-form").addEventListener("submit", loadLicence);
     wireUsage();
     wireNotices();
+    wireGateway();
     licenceBanner();
     openTab(SHOW[location.hash.slice(1)] ? location.hash.slice(1) : "licence");
   } catch (e) {

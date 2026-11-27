@@ -22,6 +22,7 @@
   <button role="tab" data-tab="licence" aria-selected="true">Licence</button>
   <button role="tab" data-tab="usage">Usage</button>
   <button role="tab" data-tab="notices">Notices</button>
+  <button role="tab" data-tab="gateway">Gateway</button>
 </nav>
 
 <main>
@@ -81,7 +82,7 @@
   </section>
 
   <section id="tab-notices" class="tab" hidden>
-    <p class="lead">When a steward records in a meeting what owners confirmed there, each owner is told what was recorded and until when they may object, with one reminder if they have not answered. Every notice sent is on the decision log. Email uses the mail adapter set on the Usage page.</p>
+    <p class="lead">When a steward records in a meeting what owners confirmed there, each owner is told what was recorded and until when they may object, with one reminder if they have not answered. When an agent's action needs an owner's approval (including a tool call the gateway holds), each consulted owner is told what the agent asks and why; in Teams they can approve or reject on the card. Every notice sent is on the decision log. Email uses the mail adapter set on the Usage page.</p>
     <form id="notify-form" class="settings">
       <label>Tell owners by
         <select id="n-channels">
@@ -106,11 +107,35 @@
           <option value="4">After 4 business days</option>
         </select>
       </label>
+      <label>Decisions waiting for owners
+        <select id="n-decisions">
+          <option value="true">Tell the consulted owners</option>
+          <option value="false">Steward screen only</option>
+        </select>
+      </label>
       <div class="buttons">
         <button type="submit" class="primary">Save</button>
         <button type="button" id="n-run" class="secondary">Send due notices now</button>
       </div>
     </form>
+  </section>
+
+  <section id="tab-gateway" class="tab" hidden>
+    <p class="lead">The systems agents act on through VeroMesh. Agents sign in to VeroMesh's MCP gateway (<code>/gateway/mcp</code>) instead of to these systems, and only the tools offered here reach them. A checked tool goes to the system only once the decision check allows it; one that needs an owner waits until they approve. A read-only tool passes through unchecked. A tool not offered is invisible to agents. Every change here is on the decision log.</p>
+    <div id="gw-targets"></div>
+    <h2 class="section">Add a system</h2>
+    <form id="gw-add" class="settings">
+      <label>Name (lowercase, prefixes its tools) <input type="text" id="gw-name" placeholder="erp" pattern="[a-z][a-z0-9-]{0,30}" required></label>
+      <label>MCP server URL <input type="text" id="gw-url" placeholder="https://erp-mcp.example.com/mcp" required></label>
+      <label>Header sent to it (optional) <input type="text" id="gw-header" placeholder="Authorization"></label>
+      <label>Environment variable holding its value <input type="text" id="gw-secret" placeholder="GATEWAY_ERP_TOKEN"></label>
+      <p class="meta">The header's value (a token) never goes in these settings: put it in the Secret named by <code>api.gateway.existingSecret</code>, under the variable's name.</p>
+      <div class="buttons"><button type="submit" class="secondary">Add</button></div>
+    </form>
+    <div class="buttons gw-save">
+      <button type="button" id="gw-save" class="primary">Save the gateway settings</button>
+      <button type="button" id="gw-run" class="secondary">Send approved held calls now</button>
+    </div>
   </section>
 </main>
 

@@ -98,7 +98,7 @@ Roles filled always stay answerable, so the decision check and the steward scree
 
 Each agent signs in with its own client ID, recorded on the agent in the model (`signInClientId`). An agent can only act within the use cases approved for it and the authority of the person it acts for.
 
-The decision check alone is advisory. To enforce it, give the agent no credentials of its own for the systems it acts on: register each system's MCP server as a gateway target (`PUT /api/v1/gateway/settings`, its token in the Secret named by `api.gateway.existingSecret`) and point the agent at `/gateway/mcp`. Each consequential tool is mapped to a VeroMesh action; a call reaches the system only once it is allowed, and one that needs the owners waits until they approve. See `docs/gateway.md`.
+The decision check alone is advisory. To enforce it, give the agent no credentials of its own for the systems it acts on: register each system's MCP server as a gateway target (`PUT /api/v1/gateway/settings`, its token in the Secret named by `api.gateway.existingSecret`) and point the agent at `/gateway/mcp`. Each consequential tool is mapped to a VeroMesh action; a call reaches the system only once it is allowed, and one that needs the owners waits until they approve. Set it up on **Administration > Gateway**: add each system's MCP server, then choose for each of its tools whether it is not offered, read-only, or checked, and for a checked tool the VeroMesh action it takes and which arguments carry the amount, currency, person and note. See `docs/gateway.md`.
 
 # Licence and usage reports
 
@@ -143,8 +143,9 @@ When a steward records in a meeting what owners confirmed (User Guide, *Attestin
 - **Tell owners by:** email; Teams, or email when Teams cannot reach them; Teams only; or nobody (the steward screen only).
 - **Notices show:** the values recorded, or only which facts. Personal details (an email, an employee ID, a reporting line) are never shown.
 - **Reminder:** none, or after one to four business days (default three).
+- **Decisions waiting for owners:** when an agent's action needs an owner's approval (above a materiality threshold or the agent's limit, or a tool call the MCP gateway holds), each person filling a consulted role is told what the agent asks, for whom and why they are asked. In Teams the card has **Approve** and **Reject**; by email it links to the steward screen. Set to "Steward screen only" to turn this off.
 
-Email goes through the mail adapter set on Administration > Usage, to each person's email in the model. Links in notices go to `VEROMESH_PUBLIC_URL` (Helm `api.publicUrl`). Teams needs a bot registered in your Microsoft tenant (a free Azure Bot registration, whatever cloud VeroMesh runs on) and the VeroMesh app installed for owners by a Teams administrator: see `deploy/teams/README.md`. Every notice sent is on the decision log; a notice that cannot be sent is retried every hour, and the Meetings tab says why.
+Email goes through the mail adapter set on Administration > Usage, to each person's email in the model. Links in notices go to `VEROMESH_PUBLIC_URL` (Helm `api.publicUrl`). Teams needs a bot registered in your Microsoft tenant (a free Azure Bot registration, whatever cloud VeroMesh runs on) and the VeroMesh app installed for owners by a Teams administrator: see `deploy/teams/README.md`. Every notice sent is on the decision log; a notice that cannot be sent is retried every hour, and the Meetings tab says why. Decision notices are sent straight after the decision and cover decisions of the last 14 days.
 
 # Replicas and failover
 

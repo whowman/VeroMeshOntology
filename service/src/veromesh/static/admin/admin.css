@@ -9,3 +9,14 @@
 .value.warn { color: var(--warn); }
 .value.bad { color: var(--danger); }
 #licence-tiles .value { font-size: 26px; white-space: nowrap; }
+.gw-target { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+.gw-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.gw-head .name { font-weight: 600; color: var(--text); font-size: 15px; }
+.gw-head .url { color: var(--text2); font-size: 13px; overflow-wrap: anywhere; }
+.gw-head .spacer { flex: 1; }
+.gw-tool { display: grid; grid-template-columns: 1fr minmax(240px, 300px); gap: 8px 16px; align-items: start; border-top: 1px solid var(--line); padding: 12px 0 4px; }
+.gw-tool .tool .meta { font-size: 13px; margin: 2px 0 0; }
+.gw-tool .gw-map { grid-column: 1 / -1; background: var(--raised); border-radius: 8px; padding: 12px; margin: 4px 0 8px; }
+.gw-tool .gw-map[hidden] { display: none; }
+.gw-tool .gw-map .wide { grid-column: 1 / -1; }
+.gw-save { margin-top: 18px; display: flex; gap: 10px; }

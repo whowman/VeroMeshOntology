@@ -11,7 +11,8 @@ the agent, on the decision log:
 - **refuse**: the call never leaves VeroMesh; the agent gets the reasons.
 - **consult**: the call is **held** (a ``gateway`` entry on the decision log keeps it, so a
   restart or another copy of the service loses nothing) while the owners are asked, as for
-  any decision (steward screen, and the notices in docs/provenance.md). Once they approve,
+  any decision (the steward screen, and a notice by email or a Teams card with Approve and
+  Reject). Once they approve,
   the held call goes through, then or the next time the agent asks; a rejection discards it.
   The agent asks with ``gateway_status`` and the reference it was given.
 
@@ -194,6 +195,7 @@ class Gateway:
     ) -> None:
         self.kv, self.log, self.upstream = settings_store, decision_log, upstream
         self._swept = 0  # the background sweep's watermark (decision log seq)
+        self.after_hold: Callable[[str], Any] | None = None  # tell the owners (the notices)
 
     def settings(self) -> dict:
         return check_settings(self.kv.setting(SETTING) or {})
@@ -256,6 +258,37 @@ class Gateway:
         )
         return out
 
+    async def target_tools(self, name: str) -> dict:
+        """What one target's server offers, for the Administration page: each tool with its
+        arguments and how the gateway offers it (checked, read, or not at all)."""
+        t = next((t for t in self.settings()["targets"] if t["name"] == name), None)
+        if t is None:
+            raise LookupError(f"There is no gateway target {name}.")
+        try:
+            listed = await self.upstream(t).list_tools()
+            problem = None
+        except Exception as e:  # noqa: BLE001 — shown on the page
+            listed, problem = [], f"{t['url']} could not be reached: {e}"
+        names = [x["name"] for x in listed]
+        names += [x for x in [*t["tools"], *t["passThrough"]] if x not in names]
+        by = {x["name"]: x for x in listed}
+        out = []
+        for n in names:
+            x = by.get(n, {})
+            props = list(((x.get("inputSchema") or {}).get("properties") or {}).keys())
+            offered = "checked" if n in t["tools"] else "read" if n in t["passThrough"] else None
+            out.append(
+                {
+                    "name": n,
+                    "description": x.get("description") or "",
+                    "arguments": props,
+                    "offered": offered,
+                    "listed": n in by,  # false: configured, but the server no longer offers it
+                    **({"mapping": t["tools"][n]} if offered == "checked" else {}),
+                }
+            )
+        return {"target": name, "tools": out, "problem": problem}
+
     # ------------------------------------------------------------ calling
 
     def check_in(self, target: dict, tool: str, arguments: dict) -> dict:
@@ -309,6 +342,11 @@ class Gateway:
                     "gatewayCall": call,
                 }
             )
+            if self.after_hold is not None:
+                try:
+                    self.after_hold(did)
+                except Exception:  # noqa: BLE001 — the hourly notice run tells them
+                    log.exception("telling the owners of held call %s", did)
             asked = ", ".join(
                 c.get("roleName") or c.get("role", "")
                 for c in decision.get("consult") or d.get("consult") or []

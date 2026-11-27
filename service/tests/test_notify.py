@@ -165,6 +165,7 @@ def test_settings_are_checked_and_logged(notified):
         "channels": ["email"],
         "show": "values",
         "reminderBusinessDays": 0,
+        "decisions": True,
     }
     assert log.find(kind="configuration")[-1]["setting"] == "notify"
     assert client.get(f"{API}/notify/settings", headers=LEE).status_code == 403

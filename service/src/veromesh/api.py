@@ -310,11 +310,13 @@ def create_app(
             u = usage_of(a)
             c = a.state.settings or get_settings()
             channels: dict[str, notify.Channel] = {"email": notify.EmailChannel(u.mail, c)}
-            n = notify.Notifier(a.state.service.store, a.state.decision_log, u.store, channels, c.public_url)
+            n = notify.Notifier(
+                a.state.service.store, a.state.decision_log, u.store, channels, c.public_url, c.instance_base
+            )
             if c.teams_app_id and c.teams_tenant_id:
-                channels["teams"] = teams.Teams(
-                    c, a.state.service.store, c.instance_base, a.state.decision_log, u.store, n
-                )
+                bot = teams.Teams(c, a.state.service.store, c.instance_base, a.state.decision_log, u.store, n)
+                bot.after_answer = lambda did: gateway_of(a).release(did)  # a held tool call goes through
+                channels["teams"] = bot
             a.state.notifier = n
         return a.state.notifier
 
@@ -322,7 +324,9 @@ def create_app(
         """The MCP gateway (built on first use, kept with the app)."""
         if getattr(a.state, "gateway", None) is None:
             u = usage_of(a)
-            a.state.gateway = gateway.Gateway(u.store, a.state.decision_log)
+            g = gateway.Gateway(u.store, a.state.decision_log)
+            g.after_hold = lambda _did: tell_owners(a.state.settings or get_settings())  # the owners hear now
+            a.state.gateway = g
         return a.state.gateway
 
     @app.middleware("http")
@@ -1084,7 +1088,19 @@ def create_app(
         Answers allow, consult (with the owners to consult first) or refuse, with reasons, and
         appends the decision to the log. Ask as the agent (its own sign-in); the answer says
         whom to inform, whom to consult (above the agent's limit: the next authority up), and
-        whom to escalate to when no authority covers the amount."""
+        whom to escalate to when no authority covers the amount. Consulted owners are told by
+        email or Teams (the notice settings)."""
+        out = check_decision(s, c, dl, who, body)
+        if out.get("outcome") == "consult":
+            tell_owners(c)
+        return out
+
+    def tell_owners(c: Settings) -> None:
+        if c.notify_job:
+            notifier_of(app).kick()  # the consulted owners hear now; the hourly run retries
+
+    def check_decision(s: Svc, c: Cfg, dl: Log, who: Who, body: CheckIn) -> dict:
+        """The decision check itself, as the signed-in agent (the route, MCP and the gateway)."""
         trusted = c.auth_disabled or "admin" in who.roles
         if c.auth_disabled or (who.kind != "app" and "admin" in who.roles):
             if not body.agent:
@@ -1462,6 +1478,15 @@ def create_app(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
+    @app.get("/api/v1/gateway/targets/{name}/tools", dependencies=need(auth.ADMIN), tags=["gateway"])
+    async def gateway_target_tools(name: str) -> dict:
+        """The tools one target's server offers, with their arguments and how the gateway offers
+        each (checked, read-only, or not offered); for the Administration page."""
+        try:
+            return await gateway_of(app).target_tools(name)
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
     @app.post("/api/v1/gateway/run", dependencies=need(auth.ADMIN), tags=["gateway"])
     def gateway_run() -> dict:
         """Send every held call whose owners have approved (otherwise done after each answer
@@ -1691,13 +1716,15 @@ def create_app(
                 who = auth.current_caller(request, await auth.bearer(request), c)
                 auth.forbid(who, *auth.READ)
                 s, dl = svc(request), dlog(request, c)
-                # With sign-in off (development), the agent is named in a header.
-                named = request.headers.get("x-veromesh-agent") if c.auth_disabled else None
-                if c.auth_disabled and not named:
+                # With sign-in off (development), or for an administrator testing on an agent's
+                # behalf (as with the decision check), the agent is named in a header.
+                names_agent = c.auth_disabled or (who.kind != "app" and "admin" in who.roles)
+                named = request.headers.get("x-veromesh-agent") if names_agent else None
+                if names_agent and not named:
                     raise HTTPException(status_code=422, detail="Name the agent (X-VeroMesh-Agent).")
 
                 def check(body: dict) -> dict:
-                    return decisions_check(s, c, dl, who, CheckIn(**body, agent=named))
+                    return check_decision(s, c, dl, who, CheckIn(**body, agent=named))
 
                 state = {"check": check, "subject": who.client_id or who.subject}
             except HTTPException as exc:

@@ -87,7 +87,8 @@ FIELDS = (
     # meeting entries: the meeting that is the evidence for attestations recorded in it
     "meetingRecord",
     # notice entries: an owner told of attestations recorded for them (subject, meeting,
-    # the attestations), by which channel, and whether it was the first notice or the reminder
+    # the attestations), by which channel, and whether it was the first notice or the reminder;
+    # or ("decision") a consulted owner told of a decision waiting for them (refersTo, role)
     "channel",
     "notice",
     "attestations",
@@ -149,6 +150,10 @@ def check(fields: dict) -> dict:
             raise InvalidEntry(
                 "A meeting entry needs meetingRecord (the meeting, with its id) and refers to nothing."
             )
+    elif kind == "notice" and fields.get("notice") == "decision":
+        missing = [k for k in ("refersTo", "subject", "channel") if not fields.get(k)]
+        if missing:
+            raise InvalidEntry(f"A decision notice needs {', '.join(missing)}.")
     elif kind == "notice":
         if fields.get("refersTo") or fields.get("notice") not in ("recorded", "reminder"):
             raise InvalidEntry("A notice is 'recorded' or 'reminder' and refers to no decision.")
