@@ -456,3 +456,67 @@ def test_leanix_links_the_same_applications_except_one_entered_by_hand(http, com
     missing = {c for c in want if want[c] - got.get(c, set())}
     assert missing == {d["capability"] for d in unsynced}
     assert all(got.get(c, set()) <= want[c] for c in want)
+
+
+def test_the_mcp_gateway_decides_what_reaches_the_erp(company, tmp_path, monkeypatch):
+    """The harness's gateway scenarios, against VeroMesh's real MCP gateway: the Invoice
+    Assistant calls the ERP's MCP server through it, and the harness records what arrived."""
+    pytest.importorskip("harness.systems.erp_mcp")
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+    from harness import runner, scenarios
+    from veromesh.api import create_app
+    from veromesh.config import Settings
+    from veromesh.rdf_store import make_store
+    from veromesh.service import VeromeshService
+
+    truth, h = company
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    erp = uvicorn.Server(uvicorn.Config(h.app, port=port, log_level="warning"))  # the same harness, on a port
+    threading.Thread(target=erp.run, daemon=True).start()
+    while not erp.started:
+        time.sleep(0.05)
+    settings = Settings(
+        rdf_store="memory", decision_requires_attested=False, gateway_job=False, notify_job=False
+    )
+    svc = VeromeshService(make_store("memory"), None, bindings_graph="https://veromesh.ai/graph/bindings")
+    try:
+        with TestClient(create_app(svc, settings)) as http:
+            load(http, h)
+            book = tmp_path / "governance.xlsx"
+            book.write_bytes(h.get("/governance/workbook.xlsx").content)
+            assert main([*API, "spreadsheet", "import", str(book), "--source", "governance"], http=http) == 0
+            for name, cat in (("workday", "hr"), ("entra", "iam"), ("governance", "governance")):
+                assert http.put(f"/api/v1/sources/{name}", json={"category": cat}).status_code == 200
+            monkeypatch.setenv("GATEWAY_ERP_TOKEN", "Bearer harness-erp-mcp-token")
+            target = {
+                "name": "erp",
+                "url": f"http://127.0.0.1:{port}/erp/mcp",
+                "header": "Authorization",
+                "secretEnv": "GATEWAY_ERP_TOKEN",
+                "tools": {
+                    "approve_invoice": {
+                        "action": "ApproveSupplierInvoice",
+                        "amount": "amount",
+                        "currency": "currency",
+                        "note": "invoice_number",
+                    }
+                },
+                "passThrough": ["get_invoice"],
+            }
+            assert http.put("/api/v1/gateway/settings", json={"targets": [target]}).status_code == 200
+            vm = runner.VeroMesh(http, "http://testserver", harness=h)
+            listed = {s["id"]: s for s in h.get("/harness/scenarios").json()["scenarios"]}
+            ids = ("gateway-allowed", "gateway-held", "gateway-not-offered")
+            answers = {i: getattr(runner, i.replace("-", "_"))(vm, listed[i]) for i in ids}
+            got = scenarios.score([listed[i] for i in ids], answers)
+            assert got["passed"] == 3, (answers, got)
+            arrived = [c["tool"] for c in h.get("/harness/received").json()["calls"]]
+            assert arrived == ["approve_invoice", "approve_invoice"]  # the held one, after its approval
+    finally:
+        erp.should_exit = True

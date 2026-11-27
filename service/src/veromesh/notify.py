@@ -18,6 +18,13 @@ order of preference (the first that reaches the person is used), whether notices
 values recorded or only the facts' names, and the reminder day. Personal details (an email,
 an employee ID, a reporting line) are never put in a notice.
 
+The same channels tell owners of **decisions waiting for them**: when the decision check
+consults an owner (an agent's action above a materiality threshold, or a tool call the MCP
+gateway holds until they answer), each person filling a consulted role gets one notice with
+what the agent asks, for whom, and why they are consulted; in Teams it carries Approve and
+Reject. Answering there is the same as answering on the steward screen, and a held gateway
+call goes through once the owners approve (``decisions`` in the settings turns this off).
+
 Every notice sent is a ``notice`` entry on the decision log's hash chain, which is also how
 a notice is sent once: an owner was told, by which channel and when, is evidence that they
 had the chance to object. A notice that cannot be sent is retried at the next run.
@@ -29,10 +36,10 @@ import hashlib
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
-from . import clock, meetings
+from . import changesets, clock, followup, meetings
 from . import provenance as P
 from .entities import FIELDS as ENTITY_FIELDS
 from .entities import PERSONAL_FIELDS, TYPE_OF_SHEET
@@ -45,8 +52,11 @@ SHOW = ("values", "names")
 LOCK_KEY = int.from_bytes(hashlib.sha256(b"veromesh_notify").digest()[:8], "big", signed=True)
 
 
+DECISION_WINDOW_DAYS = 14  # decisions older than this are not notified any more
+
+
 def defaults() -> dict:
-    return {"channels": ["email"], "show": "values", "reminderBusinessDays": 3}
+    return {"channels": ["email"], "show": "values", "reminderBusinessDays": 3, "decisions": True}
 
 
 def check_settings(value: dict | None) -> dict:
@@ -60,6 +70,10 @@ def check_settings(value: dict | None) -> dict:
     if not isinstance(ch, list) or any(c not in CHANNELS for c in ch) or len(set(ch)) != len(ch):
         raise ValueError(
             f"channels must be a list of distinct channels from {', '.join(CHANNELS)} (empty: none)."
+        )
+    if not isinstance(out["decisions"], bool):
+        raise ValueError(
+            "decisions must be true (tell consulted owners of decisions waiting for them) or false."
         )
     if out["show"] not in SHOW:
         raise ValueError("show must be 'values' (the values recorded, personal details hidden) or 'names'.")
@@ -110,6 +124,63 @@ class Notice:
 class Unreachable(Exception):
     """This channel cannot reach this person (no address, the app not installed); the next
     channel is tried."""
+
+
+@dataclass
+class DecisionNotice:
+    """A decision waiting for one consulted owner."""
+
+    decision: dict
+    person: str
+    person_name: str
+    email: str | None
+    role: str
+    role_name: str
+    why: list[str]
+    action_name: str
+    agent_name: str
+    principal_name: str
+    held_call: str | None  # "<target>.<tool>" when the MCP gateway holds the agent's call
+    status: dict  # followup.status_of
+    link: str | None
+    kind: str = "decision"
+
+
+def amount_of(d: dict) -> str:
+    if d.get("amount") is None:
+        return ""
+    try:
+        a = f"{float(d['amount']):,.2f}".removesuffix(".00")
+    except ValueError:
+        a = str(d["amount"])
+    return f"{a} {d.get('currency') or ''}".strip()
+
+
+def decision_text(n: DecisionNotice) -> tuple[str, str]:
+    """Subject and plain-text body of a decision notice."""
+    d = n.decision
+    amount = amount_of(d)
+    what = n.action_name + (f", {amount}" if amount else "")
+    subject = f"Approval needed: {what}, for {n.principal_name}"
+    lines = [
+        f"Hello {n.person_name},",
+        "",
+        f"{n.agent_name}, acting for {n.principal_name}, asks to: {what}.",
+    ]
+    if d.get("note"):
+        lines.append(f"About: {d['note']}")
+    lines += ["", f"You are asked as {n.role_name}:"]
+    lines += [f"- {w}" for w in n.why] or ["- (no reason recorded)"]
+    if n.held_call:
+        lines += [
+            "",
+            f"The agent's call ({n.held_call}) is held by VeroMesh: it goes to the system only if you approve.",
+        ]
+    lines.append("")
+    where = f"on the steward screen: {n.link}" if n.link else "on the VeroMesh steward screen (Decisions)"
+    lines.append(f"Approve or reject {where}.")
+    lines += [f"Decision {d['id']}.", "", "VeroMesh"]
+    return subject, "\n".join(lines) + "\n"
 
 
 class Channel(Protocol):
@@ -201,9 +272,14 @@ class EmailChannel:
             raise Unreachable("No mail adapter is set up (Administration, Usage).")
         from . import usage
 
-        subject, body = text(notice)
+        subject, body = decision_text(notice) if isinstance(notice, DecisionNotice) else text(notice)
         send = self._send or usage.send_mail
         return send({**mail, "to": notice.email}, self._settings, subject, body, None, None)
+
+    send_decision = send
+
+    def ready(self) -> bool:
+        return self._mail()["adapter"] != "off"
 
 
 # --------------------------------------------------------------------------- the notifier
@@ -221,13 +297,21 @@ class Notifier:
     store); ``channels``: the adapters by name."""
 
     def __init__(
-        self, store, decision_log, settings_store, channels: dict[str, Channel], public_url: str | None = None
+        self,
+        store,
+        decision_log,
+        settings_store,
+        channels: dict[str, Channel],
+        public_url: str | None = None,
+        base: str = "",
     ) -> None:
-        self.store, self.log, self.settings_store = store, decision_log, settings_store
+        self.store, self.log, self.settings_store, self.base = store, decision_log, settings_store, base
+        self._decisions_after: int | None = None  # decisions before this seq are all settled
         self.channels = channels
         self.link = public_url.rstrip("/") + "/steward/" if public_url else None
         self.problems: dict[tuple[str, str, str], str] = {}  # (meeting, person, kind) -> last failure
         self._kick = threading.Lock()
+        self._again = False
 
     # ------------------------------------------------------------ settings
 
@@ -259,7 +343,8 @@ class Notifier:
         while True:
             page = self.log.find(kind="notice", after_seq=after, limit=1000)
             for e in page:
-                out.setdefault((e["meeting"], e["subject"], e["notice"]), e)
+                if e.get("notice") in ("recorded", "reminder"):
+                    out.setdefault((e["meeting"], e["subject"], e["notice"]), e)
             if len(page) < 1000:
                 return out
             after = page[-1]["seq"]
@@ -400,6 +485,117 @@ class Notifier:
         self.problems[(notice.meeting["id"], notice.person, notice.kind)] = problem
         return {"person": notice.person, "notice": notice.kind, "problem": problem}
 
+    # ------------------------------------------------------------ decisions waiting for owners
+
+    def _ready(self) -> bool:
+        """Whether any channel can send now (mail set up, or Teams), so a busy install with no
+        channel does not read its pending decisions every run."""
+        for ch in self.settings()["channels"]:
+            adapter = self.channels.get(ch)
+            ready = getattr(adapter, "ready", None)
+            if adapter is not None and (ready is None or ready()):
+                return True
+        return False
+
+    def decisions_due(self, now: datetime | None = None) -> list[tuple[dict, str, str]]:
+        """(decision, person, role) for each consulted owner of a pending decision not yet told.
+        Only decisions of the last DECISION_WINDOW_DAYS are read, and settled ones once."""
+        if not self.settings()["decisions"] or not self._ready():
+            return []
+        now = now or datetime.now(UTC)
+        floor = self.log.last_seq_before(now - timedelta(days=DECISION_WINDOW_DAYS))
+        after = max(floor, self._decisions_after or 0)
+        out, settled_to, settled = [], after, True
+        while True:
+            page = self.log.find(kind="decision", after_seq=after, limit=500)
+            for d in page:
+                if d["outcome"] == "consult":
+                    later = followup.followups(self.log, d["id"])
+                    st = followup.status_of(d, later)
+                    if st["status"] == "pending":
+                        told = {e["subject"] for e in later if e["kind"] == "notice"}
+                        waiting = set(st.get("waitingFor") or [])
+                        seen = set()
+                        for c in d.get("consult") or []:
+                            if c["role"] not in waiting:
+                                continue
+                            for p in c.get("people") or []:
+                                if p["id"] not in told and p["id"] not in seen:
+                                    seen.add(p["id"])
+                                    out.append((d, p["id"], c["role"]))
+                        settled = False  # still pending: read again next run
+                if settled:
+                    settled_to = d["seq"]
+            if len(page) < 500:
+                break
+            after = page[-1]["seq"]
+        self._decisions_after = settled_to
+        return out
+
+    def _name(self, type_: str, rid: str | None) -> str:
+        if not rid:
+            return ""
+        e = changesets.get_entity(self.store, type_, rid, self.base) or {}
+        return e.get("name") or rid
+
+    def build_decision(self, d: dict, pid: str, role: str) -> DecisionNotice:
+        person = changesets.get_entity(self.store, "people", pid, self.base) or {}
+        later = followup.followups(self.log, d["id"])
+        held = next((e for e in later if e["kind"] == "gateway" and e["outcome"] == "held"), None)
+        c = next((c for c in d.get("consult") or [] if c["role"] == role), {})
+        why = c.get("why") or []
+        return DecisionNotice(
+            decision=d,
+            person=pid,
+            person_name=person.get("name") or pid,
+            email=next(iter(_flat(person.get("email"))), None),
+            role=role,
+            role_name=c.get("roleName") or self._name("roles", role),
+            why=[why] if isinstance(why, str) else list(why),
+            action_name=self._name("actions", d.get("action")),
+            agent_name=self._name("agents", d.get("agent")),
+            principal_name=self._name("people", d.get("principal")),
+            held_call=f"{held['gatewayCall']['target']}.{held['gatewayCall']['tool']}" if held else None,
+            status=followup.status_of(d, later),
+            link=self.link,
+        )
+
+    def send_decision(self, n: DecisionNotice) -> dict:
+        """Try the channels in order; the first that reaches the person is recorded."""
+        problems = []
+        for ch in self.settings()["channels"]:
+            adapter = self.channels.get(ch)
+            send = getattr(adapter, "send_decision", None)
+            if send is None:
+                problems.append(f"{ch}: not set up on this install")
+                continue
+            try:
+                said = send(n)
+            except Unreachable as e:
+                problems.append(f"{ch}: {e}")
+                continue
+            except Exception as e:  # noqa: BLE001 — reported, retried at the next run
+                log.warning("decision notice to %s by %s failed: %s", n.person, ch, e)
+                problems.append(f"{ch}: {e}")
+                continue
+            entry = self.log.append(
+                {
+                    "kind": "notice",
+                    "notice": "decision",
+                    "refersTo": n.decision["id"],
+                    "subject": n.person,
+                    "role": n.role,
+                    "channel": ch,
+                    "outcome": "sent",
+                    "note": said[:500],
+                }
+            )
+            self.problems.pop((n.decision["id"], n.person, "decision"), None)
+            return {"person": n.person, "decision": n.decision["id"], "channel": ch, "entry": entry["id"]}
+        problem = "; ".join(problems) or "no channel"
+        self.problems[(n.decision["id"], n.person, "decision")] = problem
+        return {"person": n.person, "decision": n.decision["id"], "problem": problem}
+
     def run(self, today: date | None = None) -> dict:
         """Send every notice due; safe to run from several copies (one at a time)."""
         from .usage import _Busy
@@ -407,6 +603,7 @@ class Notifier:
         try:
             with self.settings_store.exclusive(LOCK_KEY):
                 results = [self.send(self.build(*d)) for d in self.due(today)]
+                results += [self.send_decision(self.build_decision(*d)) for d in self.decisions_due()]
                 for ch in self.channels.values():
                     sweep = getattr(ch, "sweep", None)
                     if sweep is not None:
@@ -422,15 +619,20 @@ class Notifier:
         }
 
     def kick(self) -> None:
-        """Run now in the background (after a recording), unless a kicked run is going."""
+        """Run now in the background (after a recording or a decision that consults owners).
+        A kick during a kicked run makes that run go round once more, so nothing waits an hour."""
+        self._again = True
         if not self._kick.acquire(blocking=False):
             return
 
         def go():
             try:
-                self.run()
-            except Exception:  # noqa: BLE001 — logged; the hourly run tries again
-                log.exception("sending notices failed")
+                while self._again:
+                    self._again = False
+                    try:
+                        self.run()
+                    except Exception:  # noqa: BLE001 — logged; the hourly run tries again
+                        log.exception("sending notices failed")
             finally:
                 self._kick.release()
 

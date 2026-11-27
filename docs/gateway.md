@@ -15,9 +15,9 @@ agent ──MCP──▶ VeroMesh /gateway/mcp ──check──▶ allow ──
 | --- | --- | --- |
 | allow | Sends the call to the system at once and logs the outcome against the decision: done (with a summary of the system's answer) or not done when the system fails | The system's answer, plus the decision ID |
 | refuse | Nothing leaves VeroMesh | The reasons, and who the decision goes to when no authority covers it |
-| consult | Holds the call on the decision log (a `gateway` entry) and the owners are asked as for any decision (the steward screen, email or Teams) | A reference; `gateway_status` with it says *still held*, *done* (with the system's answer) or *rejected* |
+| consult | Holds the call on the decision log (a `gateway` entry); each consulted owner is told at once, by email or a Teams card with Approve and Reject, naming the held call (Administration > Notices) | A reference; `gateway_status` with it says *still held*, *done* (with the system's answer) or *rejected* |
 
-When the owners approve, the held call goes through straight after the answer. A sweep every minute (`VEROMESH_GATEWAY_INTERVAL_S`) catches approvals given in Teams or while the service was down, and `POST /api/v1/gateway/run` runs it now. A rejection discards the call.
+When the owners approve, on the steward screen or the Teams card, the held call goes through straight after the answer. A sweep every minute (`VEROMESH_GATEWAY_INTERVAL_S`) catches approvals given in Teams or while the service was down, and `POST /api/v1/gateway/run` runs it now. A rejection discards the call.
 
 Before sending, the gateway logs a claim (`gateway` entry, outcome `sending`). The first claim on the log wins, so two copies of the service that see the same approval never send the call twice. A call whose sender stopped between the claim and the outcome stays at *being sent*: check the system, then record the outcome on the steward screen.
 
@@ -34,7 +34,7 @@ A tool that is neither is not offered. A target that cannot be reached hides onl
 
 ## Settings
 
-Administrators set the targets with `PUT /api/v1/gateway/settings` (`GET` reads them). Each change goes on the decision log as a configuration entry.
+Administrators set the targets on **Administration > Gateway**: add a system (its name, its MCP server's URL, and the header and environment variable for its token), save, and its tools are listed; for each, choose *not offered*, *read-only* or *checked*, and for a checked tool the VeroMesh action and which of its arguments carry the amount, currency (or a fixed one), person, value and note. The same settings are at `PUT /api/v1/gateway/settings` (`GET` reads them; `GET /api/v1/gateway/targets/{name}/tools` lists what a server offers). Each change goes on the decision log as a configuration entry.
 
 ```json
 {
@@ -81,11 +81,15 @@ helm upgrade veromesh deploy/helm/veromesh --reuse-values --set api.gateway.exis
 
 ## Signing in
 
-Agents sign in at `/gateway/mcp` as they do at `/mcp`: as themselves (client credentials, the agent role) or as a person through their agent's app registration (docs/copilot-studio.md). The agent is always the one its sign-in names. With sign-in off (development only), the agent is named in the `X-VeroMesh-Agent` header.
+Agents sign in at `/gateway/mcp` as they do at `/mcp`: as themselves (client credentials, the agent role) or as a person through their agent's app registration (docs/copilot-studio.md). The agent is always the one its sign-in names. With sign-in off (development only), or for an administrator testing on an agent's behalf (as with the decision check), the agent is named in the `X-VeroMesh-Agent` header.
 
 For the gateway to enforce anything, the agent must have no other way into the system: give the system's credentials to VeroMesh, not to the agent.
 
 When the licence has lapsed (read-only), the gateway keeps working, as the decision check does.
+
+## Tested against the harness
+
+The VeroMesh test harness has an MCP server in front of its simulated ERP (`/erp/mcp`: `get_invoice`, `approve_invoice`, `change_supplier_bank`) and records every call that reaches it. Its gateway scenarios check that an allowed approval arrives, that one above the limit arrives only after the consulted owners approve, and that a tool not offered never arrives; `connectors/tests/test_against_harness.py` runs them against this gateway.
 
 ## Limits
 

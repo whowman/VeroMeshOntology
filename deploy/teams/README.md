@@ -6,6 +6,12 @@ Where the customer uses Teams, the owner can get a card in their chat with the V
 instead, with **Confirm** and **Object** for each fact. Their answer is their own
 attestation or dispute, on the decision log's hash chain, as on the steward screen.
 
+The same bot tells owners of **decisions waiting for them**: an agent's action that needs
+their approval, including a tool call the MCP gateway holds (docs/gateway.md). The card says
+what the agent asks, for whom and why they are consulted, with **Approve** and **Reject**; a
+press answers the decision as that person, in the consulted role they fill, and a held call
+goes through once every consulted role has approved.
+
 ## What it depends on
 
 Only the customer's Microsoft tenant, not where VeroMesh runs. Teams sends card presses

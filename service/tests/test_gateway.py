@@ -279,3 +279,42 @@ def test_mcp_upstream_over_streamable_http():
     finally:
         server.should_exit = True
         t.join(5)
+
+
+def test_the_administration_page_lists_each_tool_and_how_it_is_offered(gw):
+    client, _, _ = gw
+    out = client.get(f"{API}/gateway/targets/erp/tools").json()
+    by = {t["name"]: t for t in out["tools"]}
+    assert out["problem"] is None
+    assert (
+        by["approve_invoice"]["offered"],
+        by["get_invoice"]["offered"],
+        by["delete_vendor"]["offered"],
+    ) == (
+        "checked",
+        "read",
+        None,
+    )
+    assert by["approve_invoice"]["mapping"]["action"] == "ApproveSupplierInvoice"
+    assert client.get(f"{API}/gateway/targets/nope/tools").status_code == 404
+    page = client.get("/admin/").text
+    assert 'data-tab="gateway"' in page and "gw-save" in page
+
+
+def test_an_administrator_names_the_agent_when_testing(signed_in):
+    from test_auth import h, token
+
+    client, log, _ = signed_in
+    admin = h(token(roles=("VeroMesh.Admin",)))
+    r = client.post(
+        "/gateway/mcp", headers={**HEADERS, **admin}, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    )
+    assert r.status_code == 422  # say which agent
+    call(
+        client,
+        "erp__approve_invoice",
+        hdr={**admin, "X-VeroMesh-Agent": "InvoiceAssistant"},
+        amount=800,
+        invoice="T-1",
+    )
+    assert decision_of(log)["agent"] == "InvoiceAssistant"

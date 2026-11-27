@@ -221,6 +221,15 @@
       "200"
     ]
   },
+  "GET /api/v1/gateway/targets/{name}/tools": {
+    "params": [
+      "name (path)"
+    ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/governance": {
     "params": [],
     "status": [
