@@ -21,7 +21,7 @@ What it does today (main, 27 November 2026):
 
 - **On Azure (dev):** running at https://dev-ontology.veromesh.ai beside the assessment, with DataHub, Entra sign-in and the decision log on Azure PostgreSQL ([deploy/azure/README.md](deploy/azure/README.md)). Rebuilt from nothing on 26 November with no manual steps (`setup.sh reset`, then a deploy); every problem met on the first install is now handled by the scripts, and the few steps still done by hand are listed there. It is turned on and off from GitHub, off every night at about 11 PM Eastern, while the assessment keeps running.
 
-Not yet: the Copilot Studio test on the Azure install (issue #19; its steps and script are in [docs/copilot-studio-test.md](docs/copilot-studio-test.md)), the Teams bot registered for dev (built; `deploy/teams/register-bot.sh`), linking capabilities to the applications that support them, and VeroMesh's own licensing system (issue #56). The plan is the Delivery Plan; open work is in the GitHub issues.
+Not yet: the Copilot Studio test on the Azure install (issue #19; its steps and script are in [docs/copilot-studio-test.md](docs/copilot-studio-test.md)), the Teams bot registered for dev (built; `deploy/teams/register-bot.sh`), and VeroMesh's own licensing system (issue #56). The plan is the Delivery Plan; open work is in the GitHub issues.
 
 Administrator and user guides: [docs/guides/](docs/guides/) (CI builds Word copies). Connectors are tested against the [VeroMesh test harness](https://github.com/whowman/VeroMeshTestHarness), a simulated company whose systems serve their public APIs.
 

@@ -155,3 +155,16 @@ def test_event_connector_applies_each_event_once(http):
     assert all(r.ok for r in results)
     assert any("Already applied" in line for line in out)
     assert [r["id"] for r in http.get("/api/v1/roles", params={"source": "feed"}).json()] == ["A"]
+
+
+def test_source_time_reads_each_source_s_timestamp():
+    from veromesh_connectors.core import source_time
+
+    assert source_time("2026-11-20 14:05:00") == "2026-11-20T14:05:00+00:00"  # ServiceNow, UTC
+    assert source_time("2026-11-20T09:05:00-05:00") == "2026-11-20T14:05:00+00:00"
+    assert source_time("2026-11-20T14:05:00Z") == "2026-11-20T14:05:00+00:00"
+    assert source_time(1795615500000) == "2026-11-25T14:05:00+00:00"  # Databricks, epoch ms
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).isoformat()[:10]
+    assert source_time(None)[:10] == source_time("not a time")[:10] == now  # no time given: now

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from ..core import BatchConnector, Item, MappingError, Record
+from ..core import BatchConnector, Item, MappingError, Record, source_time
 from ..core.source import SourceApi
 from .dbt import CLASSIFICATION, LEVELS
 from .servicenow import _now
@@ -220,7 +220,7 @@ class UnityCatalogConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["ownerRole"], "name": f"Owner of {full}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(t.get("updated_at") or t.get("last_altered")),
                     )
                 )
             steward = str((t.get("properties") or {}).get("steward") or "").lower()
@@ -231,10 +231,18 @@ class UnityCatalogConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["stewardRole"], "name": f"Steward of {full}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(t.get("updated_at") or t.get("last_altered")),
                     )
                 )
-            return [*items, Item(type="data-products", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="data-products",
+                    entity=e,
+                    ref=record.ref,
+                    observed_at=source_time(t.get("updated_at") or t.get("last_altered")),
+                ),
+            ]
         if record.type == "people":
             p, held = record.data["person"], sorted(set(record.data["roles"]))
             e = {

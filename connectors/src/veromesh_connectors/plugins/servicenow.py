@@ -44,7 +44,7 @@ import re
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 
-from ..core import BatchConnector, Item, MappingError, Record
+from ..core import BatchConnector, Item, MappingError, Record, source_time
 from ..core.source import SourceApi
 from .oracle_erp import local_id
 
@@ -202,10 +202,15 @@ class ServiceNowCmdbConnector(BatchConnector):
                             type="roles",
                             entity={"id": rid, "name": f"{label} of {name}"},
                             ref=record.ref,
-                            observed_at=_now(),
+                            observed_at=source_time(a.get("sys_updated_on")),
                         )
                     )
-            return [*items, Item(type="systems", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="systems", entity=e, ref=record.ref, observed_at=source_time(a.get("sys_updated_on"))
+                ),
+            ]
         if record.type == "people":
             u, roles = record.data["user"], record.data["roles"]
             pid = self._pid(u)
@@ -215,7 +220,11 @@ class ServiceNowCmdbConnector(BatchConnector):
                 e["email"] = u["email"]
             if roles:
                 e["rolesFilled"] = sorted(set(roles)) if len(set(roles)) > 1 else roles[0]
-            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                Item(
+                    type="people", entity=e, ref=record.ref, observed_at=source_time(u.get("sys_updated_on"))
+                )
+            ]
         raise MappingError(f"unexpected record type {record.type}", record.ref)
 
 
@@ -253,6 +262,31 @@ def duplicates(apps: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------- Enterprise Architecture
 
 CAPABILITY_TABLE = "cmdb_ci_business_capability"
+APP_TABLE = "cmdb_ci_business_app"
+REL_TABLE = "cmdb_rel_ci"
+PROVIDES = "Provided by::Provides"  # CSDM: a business capability is provided by its applications
+
+
+class SystemMatcher:
+    """Finds the system VeroMesh holds for an application an EA tool names: by its ID or CMDB
+    ID (a ServiceNow number or sys_id, or an external ID set to one), else by name."""
+
+    def __init__(self, systems: list[dict] | None) -> None:
+        self.known = systems is not None
+        self.by_key: dict[str, str] = {}
+        self.by_name: dict[str, str] = {}
+        for s in systems or []:
+            for k in (s.get("id"), s.get("cmdbId")):
+                if k:
+                    self.by_key[str(k)] = s["id"]
+            if s.get("name"):
+                self.by_name.setdefault(str(s["name"]).strip().lower(), s["id"])
+
+    def find(self, *keys: str | None, name: str | None = None) -> str | None:
+        for k in keys:
+            if k and str(k) in self.by_key:
+                return self.by_key[str(k)]
+        return self.by_name.get(str(name or "").strip().lower())
 
 
 def pascal(name: str) -> str:
@@ -277,6 +311,12 @@ class ServiceNowEaConnector(BatchConnector):
     * **people**: each owner, filling their owner roles, matched to the people VeroMesh holds as
       the CMDB connector matches them.
 
+    * **supported by systems**: the applications each capability is provided by (CSDM's
+      ``Provided by::Provides`` relationship in ``cmdb_rel_ci``, the capability as parent and the
+      business application as child), as the systems VeroMesh holds: the application's number
+      (the CMDB connector's system ID) or its sys_id (their CMDB ID). An application VeroMesh
+      does not hold yet is left out and reported: load the CMDB first.
+
     Two capabilities that would get the same ID are a source problem: nothing is sent until one
     is renamed or IDs come from a unique field. A capability whose parent is retired or missing
     is loaded at the top level.
@@ -292,11 +332,15 @@ class ServiceNowEaConnector(BatchConnector):
         people: list[dict] | None = None,
         id_field: str | None = None,
         parent_field: str = "parent",
+        systems: list[dict] | None = None,
     ) -> None:
         super().__init__()
         self.client = client
         self.id_field = id_field
         self.parent_field = parent_field
+        self.systems = SystemMatcher(systems)
+        self.support: dict[str, list[str]] = {}  # capability sys_id -> system IDs
+        self.unlinked: list[str] = []
         people = people or []
         self.by_employee = {str(p["employeeId"]): p for p in people if p.get("employeeId")}
         self.by_id = {str(p["id"]): p for p in people}
@@ -306,7 +350,14 @@ class ServiceNowEaConnector(BatchConnector):
     _pid = ServiceNowCmdbConnector._pid
 
     def describe(self) -> str:
-        return f"ServiceNow EA: {len(self.caps)} business capabilities"
+        links = sum(len(v) for v in self.support.values())
+        note = (
+            f"; {len(self.unlinked)} supporting applications VeroMesh does not hold yet "
+            f"({', '.join(sorted(set(self.unlinked))[:5])}): load the CMDB first"
+            if self.unlinked
+            else ""
+        )
+        return f"ServiceNow EA: {len(self.caps)} business capabilities, {links} links to supporting systems{note}"
 
     def fingerprint(self) -> str | None:
         return "servicenow-ea"
@@ -330,6 +381,7 @@ class ServiceNowEaConnector(BatchConnector):
             c for c in self.client.rows(CAPABILITY_TABLE) if str(c.get("install_status")) not in RETIRED
         ]
         self._assign_ids()
+        self._read_support()
         owners: dict[str, list[str]] = {}
         for c in self.caps:
             if uid := _ref(c.get("owned_by")):
@@ -355,6 +407,24 @@ class ServiceNowEaConnector(BatchConnector):
                 ref=f"ServiceNow user {u.get('user_name')}", data={"user": u, "roles": roles}, type="people"
             )
 
+    def _read_support(self) -> None:
+        """Which applications provide each capability (CSDM: Provided by::Provides)."""
+        apps = {
+            a["sys_id"]: a for a in self.client.rows(APP_TABLE, fields="sys_id,number,name,install_status")
+        }
+        for rel in self.client.rows(REL_TABLE, query=f"type.name={PROVIDES}", fields="parent,child,type"):
+            cap, app = _ref(rel.get("parent")), _ref(rel.get("child"))
+            if cap not in self.ids or app not in apps:
+                continue  # a retired capability, or a relationship between other kinds of CI
+            a = apps[app]
+            sid = self.systems.find(a.get("number"), app) if self.systems.known else a.get("number") or app
+            if sid is None:
+                self.unlinked.append(str(a.get("name") or a.get("number") or app))
+                continue
+            self.support.setdefault(cap, [])
+            if sid not in self.support[cap]:
+                self.support[cap].append(sid)
+
     def map(self, record: Record, schema: list[dict]) -> list[Item]:
         if record.type == "capabilities":
             c = record.data
@@ -366,6 +436,8 @@ class ServiceNowEaConnector(BatchConnector):
             parent = _ref(c.get(self.parent_field))
             if parent in self.ids:  # a retired or missing parent: shown at the top level
                 e["parentCapability"] = self.ids[parent]
+            if sup := sorted(self.support.get(c["sys_id"], [])):
+                e["supportedBySystems"] = sup
             items = []
             if _ref(c.get("owned_by")):
                 e["ownerRole"] = f"{cid}.Owner"
@@ -374,10 +446,18 @@ class ServiceNowEaConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["ownerRole"], "name": f"Owner of {name}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(c.get("sys_updated_on")),
                     )
                 )
-            return [*items, Item(type="capabilities", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="capabilities",
+                    entity=e,
+                    ref=record.ref,
+                    observed_at=source_time(c.get("sys_updated_on")),
+                ),
+            ]
         if record.type == "people":
             u, roles = record.data["user"], sorted(set(record.data["roles"]))
             pid = self._pid(u)
@@ -386,5 +466,9 @@ class ServiceNowEaConnector(BatchConnector):
             if u.get("email"):
                 e["email"] = u["email"]
             e["rolesFilled"] = roles if len(roles) > 1 else roles[0]
-            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                Item(
+                    type="people", entity=e, ref=record.ref, observed_at=source_time(u.get("sys_updated_on"))
+                )
+            ]
         raise MappingError(f"unexpected record type {record.type}", record.ref)

@@ -224,6 +224,13 @@ vmo:realizedBy
     rdfs:domain vmo:BusinessCapability ;
     rdfs:range vmo:Process .
 
+vmo:supportedBy
+    a owl:ObjectProperty ;
+    rdfs:label "supported by" ;
+    rdfs:domain vmo:BusinessCapability ;
+    rdfs:range vmo:System ;
+    skos:definition "The applications that support the capability, as the enterprise architecture tool maps them (ServiceNow's Provided by::Provides, LeanIX's Business Capability to Application relation). Separate from the processes that realize it, which run on systems of their own." .
+
 vmo:bounds
     a owl:ObjectProperty ;
     rdfs:label "bounds" ;

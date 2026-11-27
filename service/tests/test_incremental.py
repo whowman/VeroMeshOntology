@@ -124,6 +124,10 @@ STEPS = [
         [{"type": "people", "op": "delete", "entity": {"id": "DanaExample"}}],
     ),  # hr still has her
     ("hr", "merge", [{"type": "people", "op": "delete", "entity": {"id": "Expired"}}]),
+    # A system retired while a capability it supports still names it: a warning on the
+    # capability, which points at the system (and gone again when it is active).
+    ("hr", "merge", [item("systems", "Erp", lifecycle="retired")]),
+    ("hr", "merge", [item("systems", "Erp", lifecycle="active")]),
     # Replace loads: the whole source again with one change, then unchanged.
     ("hr", "replace", with_changed("people", "LeeExample", name="Lee Renamed")),
     ("hr", "replace", with_changed("people", "LeeExample", name="Lee Renamed")),
@@ -547,3 +551,13 @@ def test_a_store_that_respells_values_does_not_force_a_rewrite(monkeypatch):
         base=BASE,
         ontology_dir=ONT,
     )
+
+
+def test_a_capability_supported_by_a_retired_system_is_warned_about(monkeypatch):
+    store = make_store("memory")
+    run(store, monkeypatch, True, "hr", "replace", example_items(), False)
+    out = run(store, monkeypatch, True, "hr", "merge", [item("systems", "Erp", lifecycle="retired")], False)
+    found = json.dumps(out)
+    assert "supported by a retired system" in found and "AccountsPayable" in found
+    out = run(store, monkeypatch, True, "hr", "merge", [item("systems", "Erp", lifecycle="active")], False)
+    assert "supported by a retired system" not in json.dumps(out)
