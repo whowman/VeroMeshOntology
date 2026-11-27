@@ -98,3 +98,25 @@ def test_unreachable_api(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("VEROMESH_RETRIES", "0")
     assert main(["--api", "http://127.0.0.1:9", "sources"]) == 2
     assert "cannot reach the VeroMesh API" in capsys.readouterr().out
+
+
+def _values(path) -> dict:
+    wb = load_workbook(path)
+    return {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
+
+
+def test_the_published_workbooks_match_what_the_install_generates(http, tmp_path):
+    """docs/guides/examples holds the example and blank workbooks the guides link to. They must
+    stay what `template` writes; regenerate them with the commands in docs/guides/examples/README.md."""
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parents[2] / "docs" / "guides" / "examples"
+    for name, extra in (
+        ("veromesh-model-workbook-example.xlsx", ("--example",)),
+        ("veromesh-model-workbook-blank.xlsx", ()),
+    ):
+        fresh = tmp_path / name
+        assert run(http, "template", *extra, "-o", str(fresh)) == 0
+        assert _values(here / name) == _values(fresh), (
+            f"{name} is out of date: regenerate it (docs/guides/examples/README.md)"
+        )
