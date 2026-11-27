@@ -87,6 +87,13 @@
             "existingSecret": {"type": "string"}
           }
         },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"}
+          }
+        },
         "usage": {
           "type": "object",
           "additionalProperties": false,

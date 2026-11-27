@@ -47,6 +47,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_USAGE_SIGNING_KEY` | generated | The install's Ed25519 key (PEM, PKCS#8) that signs its usage reports, from a secret (the Helm chart makes and keeps one). Without it a key is generated on first use and kept in the usage tables |
 | `VEROMESH_PUBLIC_URL` | unset | Where people reach the install (`https://ontology.example.com`), for links in notices to owners |
 | `VEROMESH_NOTIFY_JOB` | `true` | Tell owners of attestations recorded for them in meetings, after each recording and every hour (`VEROMESH_NOTIFY_INTERVAL_S`); the channels are set on Administration > Notices |
+| `VEROMESH_GATEWAY_JOB` | `true` | Send held MCP gateway calls whose owners have approved, every minute (`VEROMESH_GATEWAY_INTERVAL_S`) as well as straight after each answer (docs/gateway.md) |
 | `VEROMESH_TEAMS_APP_ID` / `VEROMESH_TEAMS_TENANT_ID` / `VEROMESH_TEAMS_APP_PASSWORD` | unset | The Teams channel: the VeroMesh bot's Entra application ID, the customer's tenant and the bot's client secret ([deploy/teams/README.md](../deploy/teams/README.md)) |
 | `VEROMESH_USAGE_SMTP_PASSWORD` / `VEROMESH_USAGE_M365_CLIENT_SECRET` | unset | The mail adapter's secrets. The rest of the mail settings is set on the Administration area's Usage page (`/admin/`) or with `PUT /api/v1/usage/settings` |
 | `VEROMESH_USAGE_JOB` / `VEROMESH_USAGE_INTERVAL_S` | `true` / `3600` | Count and make due reports in the background, this often (every copy runs it; one at a time does the work) |

@@ -919,3 +919,12 @@ def test_public_url_and_teams():
     assert ref == {"name": "veromesh-teams", "key": "app-password"}
     bad = helm("template", "veromesh", str(CHART), *WITH_KEY, "--set", "api.teams.appId=app-1", check=False)
     assert bad.returncode != 0 and "api.teams.tenantId is needed" in bad.stderr
+
+
+def test_gateway_tokens_come_from_a_secret():
+    def container(*sets):
+        return one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0]
+
+    assert "envFrom" not in container()
+    c = container("api.gateway.existingSecret=veromesh-gateway")
+    assert c["envFrom"] == [{"secretRef": {"name": "veromesh-gateway"}}]

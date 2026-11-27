@@ -90,6 +90,13 @@ api:
     tenantId: ""
     existingSecret: ""
 
+  # The MCP gateway (agents call their tools through /gateway/mcp; each call is checked
+  # first). Its upstream servers are set by an administrator (PUT /api/v1/gateway/settings);
+  # their tokens come from this Secret: each key becomes an environment variable, named
+  # by a target's secretEnv (e.g. GATEWAY_ERP_TOKEN: "Bearer ..."). See docs/gateway.md.
+  gateway:
+    existingSecret: ""
+
   # The usage report: every install makes one a month, signed with its own key and
   # kept beside the decision log; with a mail adapter set up (on the steward screen's
   # Usage page in Administration) it is also sent to VeroMesh. See service/README.md, "Usage report".

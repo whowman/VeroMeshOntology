@@ -215,6 +215,12 @@
       "422"
     ]
   },
+  "GET /api/v1/gateway/settings": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "GET /api/v1/governance": {
     "params": [],
     "status": [
@@ -704,6 +710,12 @@
       "200"
     ]
   },
+  "POST /api/v1/gateway/run": {
+    "params": [],
+    "status": [
+      "200"
+    ]
+  },
   "POST /api/v1/meetings": {
     "body": {
       "application/json": {
@@ -996,6 +1008,16 @@
     "params": [
       "source (path)"
     ],
+    "status": [
+      "200",
+      "422"
+    ]
+  },
+  "PUT /api/v1/gateway/settings": {
+    "body": {
+      "application/json": "object"
+    },
+    "params": [],
     "status": [
       "200",
       "422"

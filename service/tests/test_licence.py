@@ -179,6 +179,7 @@ def test_every_write_route_is_either_stopped_or_safe_in_read_only():
         concrete = concrete.replace("{month}", "2026-10").replace("{cs}", "c1").replace("{name}", "hr")
         assert L.blocked(method, concrete) == (r not in SAFE), r
     assert not L.blocked("GET", "/api/v1/people") and not L.blocked("POST", "/mcp")
+    assert not L.blocked("POST", "/gateway/mcp")  # agents' tool calls are decisions
 
 
 @pytest.fixture

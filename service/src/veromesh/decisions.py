@@ -50,6 +50,7 @@ KINDS = (
     "publish",
     "meeting",
     "notice",
+    "gateway",
 )
 ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
@@ -99,6 +100,9 @@ FIELDS = (
     # publish entries: a change to the effective model, the version it made, and the changeset
     "modelVersion",
     "changeset",
+    # gateway entries: a tool call the gateway holds until the decision it refers to is
+    # answered (target, tool and arguments), sent on when the owners approve (gap G3)
+    "gatewayCall",
 )
 
 
@@ -166,6 +170,10 @@ def check(fields: dict) -> dict:
             raise InvalidEntry("A query refers to no decision.")
         if not fields.get("query"):
             raise InvalidEntry("A query entry needs query (what was read).")
+    elif kind == "gateway":
+        c = fields.get("gatewayCall")
+        if not fields.get("refersTo") or not isinstance(c, dict) or not c.get("target") or not c.get("tool"):
+            raise InvalidEntry("A gateway entry refers to its decision and holds gatewayCall (target, tool).")
     elif kind == "decision":
         if fields.get("outcome") not in DECISION_OUTCOMES:
             raise InvalidEntry(f"A decision's outcome is one of {', '.join(DECISION_OUTCOMES)}.")

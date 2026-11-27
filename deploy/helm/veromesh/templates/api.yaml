@@ -230,6 +230,12 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+          {{- with .Values.api.gateway.existingSecret }}
+          envFrom:
+            # The MCP gateway's upstream tokens (each key, an environment variable).
+            - secretRef:
+                name: {{ . | quote }}
+          {{- end }}
           startupProbe:
             httpGet:
               path: /health

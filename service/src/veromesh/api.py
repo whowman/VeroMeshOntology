@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.routing import Route
@@ -36,6 +38,7 @@ from . import (
     fidelity,
     findings,
     followup,
+    gateway,
     gcsetup,
     incremental,
     licence,
@@ -237,11 +240,16 @@ def create_app(
             if s.notify_job
             else None
         )
+        held = (
+            usage.Job(lambda: gateway_of(app), s.gateway_interval_s, delay=30.0).start()
+            if s.gateway_job
+            else None
+        )
         try:
-            async with app.state.mcp.session_manager.run():
+            async with app.state.mcp.session_manager.run(), app.state.gateway_mcp.run():
                 yield
         finally:
-            for j in (job, notices):
+            for j in (job, notices, held):
                 if j is not None:
                     j.stop()
 
@@ -306,6 +314,13 @@ def create_app(
                 )
             a.state.notifier = n
         return a.state.notifier
+
+    def gateway_of(a: FastAPI) -> gateway.Gateway:
+        """The MCP gateway (built on first use, kept with the app)."""
+        if getattr(a.state, "gateway", None) is None:
+            u = usage_of(a)
+            a.state.gateway = gateway.Gateway(u.store, a.state.decision_log)
+        return a.state.gateway
 
     @app.middleware("http")
     async def read_only_after_expiry(request: Request, call_next):
@@ -1274,7 +1289,7 @@ def create_app(
                 status_code=403, detail="Answers and overrides are made by people, not services."
             )
         pid, roles = person_for(s, c, who, body.person)
-        return followup.override(
+        out = followup.override(
             dl,
             d,
             person=pid,
@@ -1285,6 +1300,13 @@ def create_app(
             role=body.role,
             note=body.note,
         )
+        if out["status"]["mayAct"]:
+            try:  # a tool call the gateway held for this decision goes through now
+                if gateway_of(app).release(d["id"]):
+                    out["status"] = followup.status_of(d, followup.followups(dl, d["id"]))
+            except Exception:  # noqa: BLE001 — the sweep sends it later; the answer stands
+                log.exception("gateway: the held call for %s was not sent", d["id"])
+        return out
 
     @app.post(
         "/api/v1/decisions/{entry_id}/outcome",
@@ -1410,6 +1432,26 @@ def create_app(
             return notifier_of(app).put_settings(body, by=who.subject)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/api/v1/gateway/settings", dependencies=need(auth.ADMIN), tags=["gateway"])
+    def gateway_settings_get() -> dict:
+        """The MCP gateway's upstream servers: for each, its URL, the header and the environment
+        variable holding its secret, which tools take which VeroMesh action (and which
+        arguments carry the amount, currency, person or note), and which tools only read."""
+        return gateway_of(app).settings()
+
+    @app.put("/api/v1/gateway/settings", dependencies=need(auth.ADMIN), tags=["gateway"])
+    def gateway_settings_put(who: Who, body: Annotated[dict, Body()]) -> dict:
+        try:
+            return gateway_of(app).put_settings(body, by=who.subject)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.post("/api/v1/gateway/run", dependencies=need(auth.ADMIN), tags=["gateway"])
+    def gateway_run() -> dict:
+        """Send every held call whose owners have approved (otherwise done after each answer
+        and every minute)."""
+        return gateway_of(app).run()
 
     @app.post("/api/v1/notify/run", dependencies=need(auth.ADMIN), tags=["governance"])
     def notify_run() -> dict:
@@ -1611,6 +1653,48 @@ def create_app(
             endpoint=McpEndpoint(StreamableHTTPASGIApp(mcp.session_manager)),
             methods=["GET", "POST", "DELETE"],
         )
+    )
+
+    # The MCP gateway (gap G3, option C): the agent's tools, each call checked first.
+    gw_server = gateway.build_server(lambda: gateway_of(app))
+    gw_sessions = StreamableHTTPSessionManager(
+        app=gw_server,
+        stateless=True,
+        json_response=True,
+        security_settings=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
+    app.state.gateway_mcp = gw_sessions
+
+    class GatewayEndpoint:
+        """/gateway/mcp: signed in as an agent (or a person through their agent); every call to a
+        mapped tool is checked as that agent."""
+
+        async def __call__(self, scope, receive, send) -> None:
+            request = Request(scope, receive)
+            try:
+                c = cfg(request)
+                who = auth.current_caller(request, await auth.bearer(request), c)
+                auth.forbid(who, *auth.READ)
+                s, dl = svc(request), dlog(request, c)
+                # With sign-in off (development), the agent is named in a header.
+                named = request.headers.get("x-veromesh-agent") if c.auth_disabled else None
+                if c.auth_disabled and not named:
+                    raise HTTPException(status_code=422, detail="Name the agent (X-VeroMesh-Agent).")
+
+                def check(body: dict) -> dict:
+                    return decisions_check(s, c, dl, who, CheckIn(**body, agent=named))
+
+                state = {"check": check, "subject": who.client_id or who.subject}
+            except HTTPException as exc:
+                await JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)(
+                    scope, receive, send
+                )
+                return
+            scope.setdefault("state", {})["veromesh"] = state
+            await gw_sessions.handle_request(scope, receive, send)
+
+    app.router.routes.append(
+        Route("/gateway/mcp", endpoint=GatewayEndpoint(), methods=["GET", "POST", "DELETE"])
     )
     return app
 

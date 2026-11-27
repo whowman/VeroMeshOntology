@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     # the background after each recording and every hour (reminders, retries).
     notify_job: bool = True
     notify_interval_s: float = 3600.0
+    # The MCP gateway (gateway.py, gap G3): held tool calls whose owners approved are sent
+    # right after the answer, and by a sweep this often (answers given in Teams, restarts).
+    gateway_job: bool = True
+    gateway_interval_s: float = 60.0
     # The Teams channel (teams.py): the VeroMesh bot's Entra application ID and client
     # secret, and the customer's tenant. Unset: no Teams channel.
     teams_app_id: str | None = None
