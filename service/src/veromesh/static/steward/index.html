@@ -25,6 +25,7 @@
 <nav class="tabs" role="tablist">
   <button role="tab" data-tab="inbox" aria-selected="true">Waiting for you <span id="inbox-count" class="count"></span></button>
   <button role="tab" data-tab="facts" data-steward>Facts to confirm <span id="facts-count" class="count"></span></button>
+  <button role="tab" data-tab="meetings" data-steward>Meetings</button>
   <button role="tab" data-tab="log" data-steward>Decisions</button>
   <button role="tab" data-tab="measures" data-steward>Measures</button>
   <button role="tab" data-tab="sources" data-steward>Sources</button>
@@ -38,6 +39,9 @@
   <section id="tab-inbox" class="tab">
     <p class="lead">Decisions agents have asked about that need your answer, escalations above an agent's limit, and allowed actions you can still stop.</p>
     <div id="inbox"></div>
+    <h2 class="section" id="recorded-head" hidden>Recorded for you in meetings</h2>
+    <p class="lead" id="recorded-lead" hidden>A steward recorded these attestations for you in a meeting. They count now. Confirm them, or object within the window and they are disputed.</p>
+    <div id="recorded"></div>
   </section>
 
   <section id="tab-facts" class="tab" hidden>
@@ -47,6 +51,30 @@
       <label>Type <select id="facts-type"><option value="">All</option></select></label>
     </div>
     <div id="facts"></div>
+  </section>
+
+  <section id="tab-meetings" class="tab" hidden>
+    <p class="lead">Owners confirm facts in meetings they already hold. Choose who attends to get the pre-read, then tick what each owner confirmed in the meeting. Each attestation counts at once, and its owner can object for five business days.</p>
+    <div class="toolbar">
+      <label>Meeting <select id="mtg-pick"><option value="">New meeting…</option></select></label>
+    </div>
+    <form id="mtg-new" class="toolbar">
+      <label>Name <input id="mtg-name" type="text" required placeholder="AP monthly review"></label>
+      <label>Held on <input id="mtg-date" type="date" required></label>
+      <label>Link <input id="mtg-link" type="url" placeholder="Minutes or recording (optional)"></label>
+      <button type="submit" class="primary">Create</button>
+    </form>
+    <div id="mtg-body" hidden>
+      <p class="meta" id="mtg-meta"></p>
+      <div class="toolbar">
+        <label>Attending <select id="mtg-people" multiple size="5"></select></label>
+        <button type="button" id="mtg-preread">Pre-read</button>
+      </div>
+      <div id="mtg-waiting"></div>
+      <div class="toolbar"><button type="button" class="primary" id="mtg-record" hidden>Record what was confirmed</button></div>
+      <h2 class="section">Recorded in this meeting</h2>
+      <div id="mtg-recorded"></div>
+    </div>
   </section>
 
   <section id="tab-log" class="tab" hidden>

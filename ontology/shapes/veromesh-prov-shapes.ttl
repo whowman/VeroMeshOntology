@@ -41,11 +41,22 @@ vmps:AttestationShape a sh:NodeShape ;
                   sh:message "An attestation names the person who made it." ] ;
     sh:property [ sh:path vmp:inRole ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
                   sh:message "An attestation names the role the person acted in." ] ;
-    sh:property [ sh:path vmp:expiresAt ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] .
+    sh:property [ sh:path vmp:expiresAt ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path vmp:recordedBy ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:meeting ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path vmp:objectionUntil ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:sparql [
+        sh:message "An attestation recorded for someone in a meeting names the meeting and the last day to object." ;
+        sh:select """
+            PREFIX vmp: <https://veromesh.ai/ontology/provenance#>
+            SELECT $this WHERE {
+                $this vmp:recordedBy ?r .
+                FILTER NOT EXISTS { $this vmp:meeting ?m ; vmp:objectionUntil ?o }
+            }""" ] .
 
 vmps:SourceShape a sh:NodeShape ;
     sh:targetClass vmp:Source ;
     sh:property [ sh:path vmp:name ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path vmp:category ; sh:minCount 1 ; sh:maxCount 1 ;
-                  sh:in ( "hr" "iam" "cmdb" "erp" "catalog" "spreadsheet" "steward" ) ;
+                  sh:in ( "hr" "iam" "cmdb" "erp" "catalog" "governance" "ea" "spreadsheet" "steward" "ended" ) ;
                   sh:message "Unknown source category." ] .

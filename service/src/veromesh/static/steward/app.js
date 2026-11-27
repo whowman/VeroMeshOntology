@@ -29,9 +29,49 @@ async function showInbox() {
   box.replaceChildren(el("p", "lead", "Loading…"));
   let items;
   try { items = await api(withPerson("/api/v1/decisions/inbox")); } catch (e) { box.replaceChildren(el("div", "empty", e.message)); return; }
-  $("#inbox-count").textContent = items.filter((i) => i.ask !== "stop").length || "";
-  if (!items.length) { box.replaceChildren(el("div", "empty", "Nothing is waiting for you.")); return; }
+  const rec = await api(withPerson("/api/v1/meetings/recorded")).catch(() => []);
+  const open = rec.filter((r) => r.standing === "open");
+  $("#inbox-count").textContent = items.filter((i) => i.ask !== "stop").length + open.length || "";
+  $("#recorded-head").hidden = $("#recorded-lead").hidden = !open.length;
+  $("#recorded").replaceChildren(...open.map(recordedCard));
+  if (!items.length) { box.replaceChildren(el("div", "empty", open.length ? "No decisions are waiting for you." : "Nothing is waiting for you.")); return; }
   box.replaceChildren(...items.map(card));
+}
+
+// An attestation a steward recorded for you in a meeting: confirm it, or object (dispute).
+function recordedCard(r) {
+  const node = el("article", "card");
+  const head = el("header");
+  head.append(el("span", "kind pending", r.type), el("h3", null, r.name || r.id));
+  node.append(head);
+  node.append(el("p", "meta", `as ${nameOf("roles", r.role)} · recorded by ${nameOf("people", r.recordedBy)} on ${when(r.at)} · you may object until ${r.objectionUntil}`));
+  const chips = el("div", "fields");
+  for (const f of r.fields) chips.append(el("span", "chip", f));
+  node.append(chips);
+  const answer = el("div", "answer");
+  const note = el("input", "note");
+  note.type = "text";
+  note.placeholder = "Note (optional; say what is wrong if you object)";
+  note.setAttribute("aria-label", "Note");
+  const buttons = el("div", "buttons");
+  for (const [label, verdict, style] of [["Confirm", "attested", "primary"], ["Object", "disputed", "danger"]]) {
+    const b = el("button", style, label);
+    b.type = "button";
+    b.addEventListener("click", async () => {
+      node.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+      try {
+        const body = { verdict, role: r.role, fields: r.fields, note: note.value || null };
+        if (dev()) body.attester = state.person;
+        await api(`/api/v1/${r.type}/${encodeURIComponent(r.id)}/attestations`, { method: "POST", body });
+        say(`${verdict === "attested" ? "Confirmed" : "Objected to"}: ${r.name || r.id}.`, "ok");
+        showInbox();
+      } catch (e) { say(e.message, "error"); node.querySelectorAll("button").forEach((x) => { x.disabled = false; }); }
+    });
+    buttons.append(b);
+  }
+  answer.append(note, buttons);
+  node.append(answer);
+  return node;
 }
 
 function card(item) {
@@ -131,6 +171,121 @@ function factCard(row) {
   answer.append(note, buttons);
   node.append(answer);
   return node;
+}
+
+// ------------------------------------------------------------------ meetings
+
+const STANDING = { open: "pending", confirmed: "approved", disputed: "rejected", stands: "approved" };
+
+async function showMeetings() {
+  const pick = $("#mtg-pick");
+  const list = await api("/api/v1/meetings").catch((e) => { say(e.message, "error"); return []; });
+  const keep = pick.value;
+  pick.replaceChildren(new Option("New meeting…", ""), ...list.slice().reverse().map((m) => new Option(`${m.heldOn} · ${m.name}`, m.id)));
+  pick.value = list.some((m) => m.id === keep) ? keep : "";
+  const people = $("#mtg-people");
+  if (!people.options.length) {
+    const ids = Object.keys(state.names).filter((k) => k.startsWith("people:")).map((k) => k.slice(7));
+    people.replaceChildren(...ids.map((p) => new Option(nameOf("people", p), p)));
+  }
+  if (!$("#mtg-date").value) $("#mtg-date").value = new Date().toISOString().slice(0, 10);
+  await showMeeting();
+}
+
+async function showMeeting() {
+  const id = $("#mtg-pick").value;
+  $("#mtg-new").hidden = !!id;
+  $("#mtg-body").hidden = !id;
+  if (!id) return;
+  const box = $("#mtg-recorded");
+  box.replaceChildren(el("p", "lead", "Loading…"));
+  let m;
+  try { m = await api(`/api/v1/meetings/${encodeURIComponent(id)}`); } catch (e) { box.replaceChildren(el("div", "empty", e.message)); return; }
+  $("#mtg-meta").textContent = `${m.name} · held ${m.heldOn} · created by ${nameOf("people", m.createdBy)}` + (m.link ? ` · ${m.link}` : "");
+  if (!m.recorded.length) { box.replaceChildren(el("div", "empty", "Nothing recorded in this meeting yet.")); return; }
+  const table = el("table");
+  const hr = el("tr");
+  for (const h of ["Fact", "Owner", "As", "Fields", "Objection until", "Now"]) hr.append(el("th", null, h));
+  table.append(hr);
+  for (const r of m.recorded) {
+    const tr = el("tr");
+    tr.append(el("td", null, `${r.name || r.id} (${r.type})`), el("td", null, nameOf("people", r.person)), el("td", null, nameOf("roles", r.role)));
+    tr.append(el("td", null, r.fields.join(", ")), el("td", null, r.objectionUntil));
+    const c = el("td"); c.append(el("span", "kind " + (STANDING[r.standing] || ""), r.standing)); tr.append(c);
+    table.append(tr);
+  }
+  box.replaceChildren(table);
+}
+
+async function createMeeting(ev) {
+  ev.preventDefault();
+  const body = { name: $("#mtg-name").value.trim(), heldOn: $("#mtg-date").value, link: $("#mtg-link").value.trim() || null };
+  if (dev()) body.createdBy = state.person;
+  try {
+    const m = await api("/api/v1/meetings", { method: "POST", body });
+    $("#mtg-name").value = ""; $("#mtg-link").value = "";
+    $("#mtg-pick").append(new Option(`${m.heldOn} · ${m.name}`, m.id));
+    $("#mtg-pick").value = m.id;
+    say(`Meeting created: ${m.name}.`, "ok");
+    showMeeting();
+  } catch (e) { say(e.message, "error"); }
+}
+
+async function preread() {
+  const people = [...$("#mtg-people").selectedOptions].map((o) => o.value);
+  const box = $("#mtg-waiting");
+  if (!people.length) { say("Choose who is attending.", "error"); return; }
+  box.replaceChildren(el("p", "lead", "Loading…"));
+  let r;
+  try { r = await api("/api/v1/meetings/preread", { method: "POST", body: { people } }); } catch (e) { box.replaceChildren(el("div", "empty", e.message)); return; }
+  const blocks = [];
+  for (const p of r.people) {
+    const sec = el("article", "card");
+    const head = el("header");
+    head.append(el("h3", null, p.name || p.person), el("span", "amount", `${p.waiting.length} waiting`));
+    sec.append(head);
+    if (!p.waiting.length) { sec.append(el("p", "meta", "Nothing waits for this person.")); blocks.push(sec); continue; }
+    // One row per fact and role; a fact with unconfirmed and expired fields appears once.
+    const rows = new Map();
+    for (const w of p.waiting) {
+      const k = `${w.type}|${w.id}|${w.role}`;
+      const row = rows.get(k) || { ...w, fields: {} };
+      Object.assign(row.fields, w.fields);
+      rows.set(k, row);
+    }
+    const list = el("ul", "reasons");
+    for (const w of rows.values()) {
+      const li = el("li");
+      const label = el("label");
+      const box2 = el("input");
+      box2.type = "checkbox";
+      box2.className = "mtg-item";
+      box2.dataset.item = JSON.stringify({ type: w.type, id: w.id, owner: p.person, role: w.role, fields: Object.keys(w.fields) });
+      label.append(box2, document.createTextNode(` ${w.name || w.id} (${w.type}) as ${nameOf("roles", w.role)}: ` + Object.entries(w.fields).map(([f, s]) => `${f} ${s}`).join(", ")));
+      li.append(label);
+      list.append(li);
+    }
+    sec.append(list);
+    blocks.push(sec);
+  }
+  box.replaceChildren(...blocks);
+  $("#mtg-record").hidden = !r.total;
+}
+
+async function recordMeeting() {
+  const items = [...document.querySelectorAll(".mtg-item:checked")].map((b) => JSON.parse(b.dataset.item));
+  if (!items.length) { say("Tick what the owners confirmed.", "error"); return; }
+  const body = { items };
+  if (dev()) body.recordedBy = state.person;
+  const btn = $("#mtg-record");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/v1/meetings/${encodeURIComponent($("#mtg-pick").value)}/attestations`, { method: "POST", body });
+    say(`Recorded ${r.recorded.length} for their owners. They may object until ${r.objectionUntil}.`, "ok");
+    await preread();
+    showMeeting();
+  } catch (e) { say(e.message, "error"); }
+  btn.disabled = false;
 }
 
 // ------------------------------------------------------------------ decisions
@@ -313,7 +468,7 @@ function suggestionCard(s) {
 
 // ------------------------------------------------------------------ tabs and start
 
-const SHOW = { inbox: showInbox, facts: showFacts, log: showLog, measures: showMeasures, sources: showSources, coverage: showCoverage };
+const SHOW = { inbox: showInbox, facts: showFacts, meetings: showMeetings, log: showLog, measures: showMeasures, sources: showSources, coverage: showCoverage };
 
 function openTab(name) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
@@ -376,6 +531,10 @@ async function start() {
     $("#facts-type").addEventListener("change", showFacts);
     $("#cov-product").addEventListener("change", showCoverage);
     $("#cov-critical").addEventListener("change", showCoverage);
+    $("#mtg-pick").addEventListener("change", () => { $("#mtg-waiting").replaceChildren(); $("#mtg-record").hidden = true; showMeeting(); });
+    $("#mtg-new").addEventListener("submit", createMeeting);
+    $("#mtg-preread").addEventListener("click", preread);
+    $("#mtg-record").addEventListener("click", recordMeeting);
     openTab("inbox");
     if (state.steward) api("/api/v1/attestations?limit=500").then((r) => { $("#facts-count").textContent = r.length || ""; }).catch(() => {});
   } catch (e) {

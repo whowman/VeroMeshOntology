@@ -40,7 +40,7 @@ from urllib.parse import unquote, urlparse
 log = logging.getLogger("veromesh.decisions")
 
 GENESIS = "0" * 64
-KINDS = ("decision", "override", "outcome", "attestation", "configuration", "query", "publish")
+KINDS = ("decision", "override", "outcome", "attestation", "configuration", "query", "publish", "meeting")
 ATTESTATION_VERDICTS = ("attested", "disputed")
 DECISION_OUTCOMES = ("allow", "consult", "refuse")
 # Fields an entry may carry, beyond those the log assigns (id, seq, recordedAt, prevHash, hash).
@@ -68,6 +68,13 @@ FIELDS = (
     "fieldHashes",
     "attestedAt",
     "expiresAt",
+    # an attestation recorded for its attester in a meeting: who recorded it, the meeting,
+    # and the last day the attester may object
+    "recordedBy",
+    "meeting",
+    "objectionUntil",
+    # meeting entries: the meeting that is the evidence for attestations recorded in it
+    "meetingRecord",
     # query entries: what a caller read (path or MCP tool) and the purpose it gave
     "query",
     "purpose",
@@ -117,6 +124,12 @@ def check(fields: dict) -> dict:
             isinstance(k, str) and isinstance(v, str) for k, v in h.items()
         ):
             raise InvalidEntry("fieldHashes must map each field attested to its value's hash.")
+    elif kind == "meeting":
+        m = fields.get("meetingRecord")
+        if fields.get("refersTo") or not isinstance(m, dict) or not m.get("id"):
+            raise InvalidEntry(
+                "A meeting entry needs meetingRecord (the meeting, with its id) and refers to nothing."
+            )
     elif kind == "configuration":
         if fields.get("refersTo"):
             raise InvalidEntry("A configuration change refers to no decision.")

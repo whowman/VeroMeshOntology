@@ -628,6 +628,11 @@
       "closed": "false",
       "properties": [
         {
+          "datatype": "xsd:date",
+          "maxCount": "1",
+          "path": "vmp:objectionUntil"
+        },
+        {
           "datatype": "xsd:dateTime",
           "maxCount": "1",
           "minCount": "1",
@@ -675,13 +680,23 @@
           "path": "vmp:source"
         },
         {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmp:meeting"
+        },
+        {
+          "datatype": "xsd:string",
+          "maxCount": "1",
+          "path": "vmp:recordedBy"
+        },
+        {
           "maxCount": "1",
           "minCount": "1",
           "path": "vmp:verdict"
         }
       ],
       "severity": "",
-      "sparqlRules": 0,
+      "sparqlRules": 1,
       "target": [
         "vmp:Attestation"
       ]
@@ -1638,6 +1653,15 @@
           "xsd:string"
         ]
       },
+      "vmp:meeting": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
       "vmp:name": {
         "domain": [
           "vmp:Source"
@@ -1654,6 +1678,15 @@
           "xsd:string"
         ]
       },
+      "vmp:objectionUntil": {
+        "domain": [
+          "vmp:Attestation"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:date"
+        ]
+      },
       "vmp:observedAt": {
         "domain": [
           "vmp:Claim"
@@ -1666,6 +1699,15 @@
       "vmp:ownerRole": {
         "domain": [
           "vmp:Source"
+        ],
+        "kind": "owl:DatatypeProperty",
+        "range": [
+          "xsd:string"
+        ]
+      },
+      "vmp:recordedBy": {
+        "domain": [
+          "vmp:Attestation"
         ],
         "kind": "owl:DatatypeProperty",
         "range": [
