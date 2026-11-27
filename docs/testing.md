@@ -48,9 +48,9 @@ CI runs exactly these commands (`.github/workflows/ci.yml`), so a green run on y
 | M1 context question accuracy (the harness scenarios stand in for the SME question set) | 14 of 34 (41%) | 0 of 34 |
 | M5 cross-team impacts flagged and routed to the right owner | 3 of 5 | 0 of 5 |
 | M2 facts sourced automatically | 94% | |
-| M6 change latency | not yet measurable | |
+| M6 change latency | measured from changes (not yet in this table's run) | |
 
-M1 counts every scenario askable that day, including those waiting for a connector, so it rises as connectors arrive. M6 needs each source's own record timestamp. The connectors stamp the load time today, so latency reads as zero. Workday's change report has the moment each change was entered, and passing it through is the next step.
+M1 counts every scenario askable that day, including those waiting for a connector, so it rises as connectors arrive. M6 times each change from the moment the source says it happened to the moment VeroMesh recorded it, leaving out a source's first load: Workday's change report gives the moment each change was entered, ServiceNow `sys_updated_on`, LeanIX `updatedAt`, Databricks `updated_at` and dbt its build time. Entra ID, HaloITSM and the Oracle ERP give no record timestamp, so their changes read as about zero.
 
 With an `ATTESTED=0` run the service's clock follows the simulation's, so hire dates ahead of the real date still count.
 

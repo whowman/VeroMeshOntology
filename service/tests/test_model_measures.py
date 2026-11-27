@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import test_decide
 from test_decide import API, DANA, LEE
 
@@ -25,5 +27,23 @@ def test_share_sourced_automatically_and_latency(ctx):
     assert wd["automatic"] and wd["category"] == "hr" and wd["entities"] == 2 and wd["fields"] >= 4
     assert 0 < got["M2"]["value"] < 1
     assert got["M2"]["automaticFields"] == wd["fields"]
-    lat = got["M6"]["bySource"]["workday"]
-    assert lat["claims"] == 2 and lat["p90"] >= lat["median"] >= 0
+    assert "workday" not in got["M6"]["bySource"]  # a first load is not a change: no latency yet
+
+
+def test_latency_counts_changes_from_the_record_s_own_time(ctx):
+    from datetime import UTC, datetime, timedelta
+
+    client, _, _ = ctx
+    client.put(f"{API}/sources/workday", json={"category": "hr"})
+
+    def load(*items):
+        cs = client.post(f"{API}/changesets", json={"source": "workday", "mode": "merge"}).json()["id"]
+        client.post(f"{API}/changesets/{cs}/items", json={"items": list(items)})
+        assert client.post(f"{API}/changesets/{cs}/commit").status_code == 200
+
+    load({"type": "people", "entity": DANA}, {"type": "people", "entity": LEE})
+    time.sleep(1.1)  # records are stamped to the second
+    changed = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
+    load({"type": "people", "entity": {**DANA, "name": "Dana Renamed"}, "observedAt": changed})
+    lat = client.get(f"{API}/measures/model").json()["M6"]["bySource"]["workday"]
+    assert lat["claims"] == 1 and 2.9 < lat["median"] < 3.2  # Lee did not change: not counted
