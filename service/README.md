@@ -28,6 +28,7 @@ VEROMESH_RDF_STORE=memory uvicorn veromesh.api:app --reload --port 8700   # http
 | `VEROMESH_OIDC_UI_SCOPE` | `openid profile email` | The scope the steward screen asks for; Entra ID: `api://<the API's ID URI>/access_as_user` |
 | `VEROMESH_OIDC_JWKS_URL` | from discovery | Signing keys, when the issuer's discovery document is not reachable |
 | `VEROMESH_OIDC_PERSON_CLAIMS` | `email,preferred_username,upn` | Token claims that identify the signed-in person, first present wins |
+| `VEROMESH_PERSONAL_FIELDS` / `VEROMESH_AGENT_PERSONAL_FIELDS` | `email,employeeId,reportsTo` / the same | Need to know: the People fields readers (and agents, when the second is set) do not see; add `name` to withhold names |
 | `VEROMESH_PERSON_MATCH_FIELD` | `email` | People field those claims are matched against: `email` (ignoring case) or `employeeId` |
 | `VEROMESH_DECISION_LOG` | `memory` | The decision log: `memory` (development; lost on restart) or `postgresql://user:password@host:5432/database[?sslmode=require]`, its own database |
 | `VEROMESH_DECISION_REQUIRES_ATTESTED` | `true` | The check refuses when the facts behind the agent's authority are not all attested and current. `false` only to demonstrate on unreviewed data |

@@ -78,6 +78,14 @@
         },
         "timeZone": {"type": "string", "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$"},
         "publicUrl": {"type": "string", "pattern": "^(|https?://[^/]+(/.*)?)$"},
+        "needToKnow": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "personalFields": {"type": "string", "pattern": "^[A-Za-z, ]*$"},
+            "agentPersonalFields": {"type": "string", "pattern": "^[A-Za-z, ]*$"}
+          }
+        },
         "teams": {
           "type": "object",
           "additionalProperties": false,

@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # the first of these token claims that is present, matched against the
     # People field below (case-insensitively for email).
     oidc_person_claims: str = "email,preferred_username,upn"
+    # Need to know (issue #11): the People fields readers and agents do not see, comma-
+    # separated. Unset: email, employeeId and reportsTo (they see names and roles filled).
+    # Add "name" to withhold names too. agent_personal_fields, when set, applies to agents
+    # instead (for example names for readers, but not for agents).
+    personal_fields: str | None = None
+    agent_personal_fields: str | None = None
     person_match_field: str = "email"  # or "employeeId" (with a claim that carries it)
 
     # The decision log (decisions.py): "memory" (development and tests; lost on
