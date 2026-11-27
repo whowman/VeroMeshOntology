@@ -11,6 +11,7 @@
 #   ./setup.sh on         turn it back on (about 5-10 minutes until it answers)
 #   ./setup.sh status     on or off, its nodes and pods
 #   (the same three from GitHub: Actions > Ontology on/off, no approval needed)
+#   ./setup.sh power-identity   (re)create the on/off identity and its rights only
 #   ./setup.sh reset [--decision-log]   remove the install from the cluster (releases, namespace,
 #                         volumes; with --decision-log its database too) for a clean redeploy; asks first
 #
@@ -342,6 +343,11 @@ step_power_identity() {
   assign "Azure Kubernetes Service Cluster User Role" "$cluster_id" "$principal" ServicePrincipal
   assign "Azure Kubernetes Service Contributor Role" "$cluster_id/agentPools/$POOL" "$principal" ServicePrincipal
   assign "Azure Kubernetes Service RBAC Reader" "$cluster_id/namespaces/$NAMESPACE" "$principal" ServicePrincipal
+  # Scaling a pool that sits in our own virtual network also checks the right to join its
+  # subnet (LinkedAuthorizationFailed without it): Network Contributor on that one subnet.
+  local subnet
+  subnet=$(az aks nodepool show -g "$RESOURCE_GROUP" --cluster-name "$AKS" -n "$POOL" --query vnetSubnetId -o tsv)
+  [[ -z $subnet ]] || assign "Network Contributor" "$subnet" "$principal" ServicePrincipal
   if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
     # No reviewer (turning it on or off is yours to do at any time), from main only.
     gh api -X PUT "repos/$GITHUB_REPO/environments/$POWER_ENVIRONMENT" --input - >/dev/null <<JSON
@@ -469,6 +475,7 @@ case "${1:-}" in
     ;;
   tls) [[ $# -eq 3 ]] || { echo "usage: $0 tls <cert.pem> <key.pem>" >&2; exit 2; }; az account set --subscription "$SUBSCRIPTION"; step_tls "$2" "$3" ;;
   gateway) az account set --subscription "$SUBSCRIPTION"; step_gateway ;;
+  power-identity) az account set --subscription "$SUBSCRIPTION"; step_power_identity ;;
   show) az account set --subscription "$SUBSCRIPTION"; step_show ;;
   off | on | status) step_power "$1" ;;
   reset) step_reset "${2:-}" ;;
