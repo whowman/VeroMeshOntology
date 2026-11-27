@@ -34,6 +34,26 @@ class Record:
     type: str | None = None  # the model type, when the source already says (a sheet or file per type)
 
 
+def source_time(value) -> str:
+    """When the source says a record last changed, as ISO 8601 in UTC (``observedAt``, which
+    the M6 change-latency measure reads); the time now when the source does not say.
+
+    Accepts ISO 8601, ServiceNow's ``YYYY-MM-DD HH:MM:SS`` (UTC through its API) and epoch
+    milliseconds (Databricks)."""
+    from datetime import UTC, datetime
+
+    if value in (None, ""):
+        return datetime.now(UTC).isoformat(timespec="seconds")
+    try:
+        if isinstance(value, int | float) or str(value).isdigit():
+            return datetime.fromtimestamp(int(value) / 1000, UTC).isoformat(timespec="seconds")
+        v = str(value).strip().replace(" ", "T", 1).replace("Z", "+00:00")
+        t = datetime.fromisoformat(v)
+        return (t if t.tzinfo else t.replace(tzinfo=UTC)).astimezone(UTC).isoformat(timespec="seconds")
+    except (ValueError, OverflowError, OSError):
+        return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 @dataclass
 class Item:
     """One change for VeroMesh, produced by ``map``."""

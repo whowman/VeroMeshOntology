@@ -44,7 +44,7 @@ import re
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 
-from ..core import BatchConnector, Item, MappingError, Record
+from ..core import BatchConnector, Item, MappingError, Record, source_time
 from ..core.source import SourceApi
 from .oracle_erp import local_id
 
@@ -202,10 +202,15 @@ class ServiceNowCmdbConnector(BatchConnector):
                             type="roles",
                             entity={"id": rid, "name": f"{label} of {name}"},
                             ref=record.ref,
-                            observed_at=_now(),
+                            observed_at=source_time(a.get("sys_updated_on")),
                         )
                     )
-            return [*items, Item(type="systems", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="systems", entity=e, ref=record.ref, observed_at=source_time(a.get("sys_updated_on"))
+                ),
+            ]
         if record.type == "people":
             u, roles = record.data["user"], record.data["roles"]
             pid = self._pid(u)
@@ -215,7 +220,11 @@ class ServiceNowCmdbConnector(BatchConnector):
                 e["email"] = u["email"]
             if roles:
                 e["rolesFilled"] = sorted(set(roles)) if len(set(roles)) > 1 else roles[0]
-            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                Item(
+                    type="people", entity=e, ref=record.ref, observed_at=source_time(u.get("sys_updated_on"))
+                )
+            ]
         raise MappingError(f"unexpected record type {record.type}", record.ref)
 
 
@@ -437,10 +446,18 @@ class ServiceNowEaConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["ownerRole"], "name": f"Owner of {name}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(c.get("sys_updated_on")),
                     )
                 )
-            return [*items, Item(type="capabilities", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="capabilities",
+                    entity=e,
+                    ref=record.ref,
+                    observed_at=source_time(c.get("sys_updated_on")),
+                ),
+            ]
         if record.type == "people":
             u, roles = record.data["user"], sorted(set(record.data["roles"]))
             pid = self._pid(u)
@@ -449,5 +466,9 @@ class ServiceNowEaConnector(BatchConnector):
             if u.get("email"):
                 e["email"] = u["email"]
             e["rolesFilled"] = roles if len(roles) > 1 else roles[0]
-            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                Item(
+                    type="people", entity=e, ref=record.ref, observed_at=source_time(u.get("sys_updated_on"))
+                )
+            ]
         raise MappingError(f"unexpected record type {record.type}", record.ref)

@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from datetime import UTC, date, datetime
+from datetime import date
 
-from ..core import BatchConnector, Event, EventConnector, Item, MappingError, Record
+from ..core import BatchConnector, Event, EventConnector, Item, MappingError, Record, source_time
 from ..core.source import SourceApi
 
 #: Columns the workers report must have (Workday report field aliases).
@@ -184,7 +184,9 @@ class _WorkerMapping:
                 type="people",
                 entity=person,
                 ref=record.ref,
-                observed_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                observed_at=source_time(
+                    w.get("_enteredOn")
+                ),  # the change's entry moment, from the change report
                 valid_from=(w.get("hireDate") or "")[:10] or None,
                 valid_until=end[:10] if end else None,
             ),
@@ -323,6 +325,7 @@ class WorkdayChangesConnector(_WorkerMapping, EventConnector):
             if self.gone(w):
                 yield Event(id=eid, deletes=[("people", emp)])
                 continue
+            w["_enteredOn"] = row.get("Entered_On")  # when the change was entered in Workday (M6)
             yield Event(
                 id=eid, records=[Record(ref=f"Workday worker {emp} ({process})", data=w, type="people")]
             )

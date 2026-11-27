@@ -39,9 +39,9 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..core import BatchConnector, Item, MappingError, Record
+from ..core import BatchConnector, Item, MappingError, Record, source_time
 from ..core.source import SourceApi
-from .servicenow import _now, pascal
+from .servicenow import pascal
 
 #: classification in a column's meta -> VeroMesh sensitivity, lowest first.
 LEVELS = ("Public", "Internal", "Confidential", "Restricted")
@@ -98,6 +98,7 @@ class DbtConnector(BatchConnector):
         self.ids: dict[str, str] = {}  # unique_id -> data product ID
         self.feeds: dict[str, set[str]] = {}
         self.platform = "dbt"
+        self.built_at: str | None = None
         self.failed: list[str] = []
         self.skipped: list[str] = []
         self.unmatched: set[str] = set()
@@ -153,6 +154,7 @@ class DbtConnector(BatchConnector):
             self.problems.append(str(exc))
             return
         self.platform = (manifest.get("metadata") or {}).get("adapter_type") or "dbt"
+        self.built_at = (manifest.get("metadata") or {}).get("generated_at")  # when dbt last built them
         nodes = {**(manifest.get("sources") or {}), **(manifest.get("nodes") or {})}
         self.tables = {uid: n for uid, n in nodes.items() if n.get("resource_type") in TABLES}
         for uid, n in self.tables.items():
@@ -215,10 +217,13 @@ class DbtConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["ownerRole"], "name": f"Owner of {dp}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(self.built_at),
                     )
                 )
-            return [*items, Item(type="data-products", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(type="data-products", entity=e, ref=record.ref, observed_at=source_time(self.built_at)),
+            ]
         if record.type == "people":
             p, roles = record.data["person"], sorted(set(record.data["roles"]))
             e = {
@@ -226,7 +231,7 @@ class DbtConnector(BatchConnector):
                 "name": p.get("name") or p["id"],
                 "rolesFilled": roles if len(roles) > 1 else roles[0],
             }
-            return [Item(type="people", entity=e, ref=record.ref, observed_at=_now())]
+            return [Item(type="people", entity=e, ref=record.ref, observed_at=source_time(self.built_at))]
         if record.type == "kpis":
             m = record.data
             kid = m["_kpi"]
@@ -240,5 +245,5 @@ class DbtConnector(BatchConnector):
                 "name": self.kpis[kid],
                 "computedFromDataProducts": built if len(built) > 1 else built[0],
             }
-            return [Item(type="kpis", entity=e, ref=record.ref, observed_at=_now())]
+            return [Item(type="kpis", entity=e, ref=record.ref, observed_at=source_time(self.built_at))]
         raise MappingError(f"unexpected record type {record.type}", record.ref)

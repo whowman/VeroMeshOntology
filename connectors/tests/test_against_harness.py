@@ -92,6 +92,9 @@ def test_a_month_of_changes_through_both_feeds(http, company, tmp_path):
     waiting = {p["inForce"] for p in http.get("/api/v1/proposals", params={"type": "people"}).json()}
     assert (left & people) <= waiting
     assert hired and hired <= people
+    # M6: each change is timed from the moment it was entered in Workday, not from the load.
+    m6 = http.get("/api/v1/measures/model").json()["M6"]["bySource"].get("workday")
+    assert m6 and m6["claims"] > 0
 
 
 def test_misbehaving_systems_give_the_same_result(http, company):

@@ -34,7 +34,7 @@ import base64
 import time
 from collections.abc import Iterable
 
-from ..core import BatchConnector, Item, MappingError, Record
+from ..core import BatchConnector, Item, MappingError, Record, source_time
 from ..core.session import ApiError
 from ..core.source import SourceApi
 from .servicenow import SystemMatcher, _now, _slug, pascal
@@ -46,7 +46,7 @@ QUERY = """query Capabilities($after: String) {
   allFactSheets(factSheetType: BusinessCapability, first: PAGE_SIZE, after: $after) {
     pageInfo { hasNextPage endCursor }
     edges { node {
-      id name description status
+      id name description status updatedAt
       ... on BusinessCapability {
         externalId { externalId }
         relToParent { edges { node { factSheet { id } } } }
@@ -219,10 +219,15 @@ class LeanixConnector(BatchConnector):
                         type="roles",
                         entity={"id": e["ownerRole"], "name": f"Owner of {name}"},
                         ref=record.ref,
-                        observed_at=_now(),
+                        observed_at=source_time(c.get("updatedAt")),
                     )
                 )
-            return [*items, Item(type="capabilities", entity=e, ref=record.ref, observed_at=_now())]
+            return [
+                *items,
+                Item(
+                    type="capabilities", entity=e, ref=record.ref, observed_at=source_time(c.get("updatedAt"))
+                ),
+            ]
         if record.type == "people":
             p, roles = record.data["person"], sorted(set(record.data["roles"]))
             e = {

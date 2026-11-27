@@ -5,11 +5,12 @@
   CMDB, catalog) rather than typed by hand (a spreadsheet, the governance workbook, a
   steward's correction). It shows the model is built from systems that already exist, not
   re-keyed.
-- **M6, change latency:** per source, the time from when the source last stated a fact
-  (the record's own timestamp, where the source gives one) to when VeroMesh recorded it.
-  Median and 90th percentile, in hours. A connector that has no record timestamp stamps the
-  load time, so its latency reads as about zero: the measure is meaningful for change feeds
-  and timestamped records.
+- **M6, change latency:** per source, the time from when a fact changed in the source (the
+  record's own timestamp: ServiceNow's ``sys_updated_on``, LeanIX's ``updatedAt``, Databricks'
+  ``updated_at``, dbt's build time) to when VeroMesh recorded the change. Median and 90th
+  percentile, in hours. Only changes count: the source's first load is left out, because a
+  record's age when VeroMesh first sees it is not a delay. A connector whose source gives no
+  record timestamp stamps the load time, so its latency reads as about zero.
 
 Both are counted over current claims (one per entity per source), each field once per source.
 """
@@ -57,7 +58,10 @@ def model_measures(store: RDFStore) -> dict:
                 seen = seen.replace(tzinfo=rec.tzinfo)
             if rec.tzinfo is None and seen.tzinfo is not None:
                 rec = rec.replace(tzinfo=seen.tzinfo)
-            s["lags"].append(max(0.0, (rec - seen).total_seconds() / 3600))
+            s["lags"].append((rec, max(0.0, (rec - seen).total_seconds() / 3600)))
+    for s in sources.values():  # changes only: leave out what the source's first load recorded
+        first = min((r for r, _ in s["lags"]), default=None)
+        s["lags"] = [lag for r, lag in s["lags"] if r != first]
     auto = sum(s["fields"] for s in sources.values() if s["category"] in SYSTEM_CATEGORIES)
     manual = sum(s["fields"] for s in sources.values() if s["category"] not in SYSTEM_CATEGORIES)
     total = auto + manual
