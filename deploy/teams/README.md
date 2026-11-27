@@ -25,6 +25,13 @@ No Microsoft Graph permission is needed. When the app is installed for someone, 
 the bot. VeroMesh asks Teams for that person's email (or user principal name) and matches
 it to one person in the model, the way sign-in does (`VEROMESH_PERSON_MATCH_FIELD`).
 
+## On VeroMesh's Azure dev install
+
+One command in Cloud Shell does steps 1 and 2 for dev-ontology.veromesh.ai: `./deploy/azure/setup.sh teams`.
+It asks before creating anything, keeps the bot's secret in the dev Key Vault and the namespace,
+and sets `TEAMS_APP_ID` for the deploy workflow, which then turns the Teams channel on. Deploy
+again, then do steps 3 to 5.
+
 ## Steps
 
 1. **Register the bot** (someone who can create app registrations, with a subscription to

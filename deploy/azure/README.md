@@ -97,7 +97,7 @@ These steps are outside what `setup.sh` and the workflows can do, or need a pers
 | Origin certificate for the name | Scott, then Rich | First install, if `setup.sh` says it is not covered | Scott issues it; `setup.sh tls <cert.pem> <key.pem>` installs it; delete the files |
 | Approve each deploy | Rich | Every deploy | Actions > Deploy to Azure (dev) waits for the `azure-dev` environment's reviewer |
 | Give the on/off identity its subnet right | Rich | Once, on installs made before 27 November | `./deploy/azure/setup.sh power-identity` (PR #111) |
-| Teams for notices (optional) | Rich, a Teams administrator, Scott | When notices should go to Teams | [deploy/teams/README.md](../teams/README.md): `register-bot.sh` (asks before creating; free tier), upload the app, a setup policy, and a Cloudflare rule that lets `POST /api/v1/teams/messages` through without a challenge |
+| Teams for notices (optional) | Rich, a Teams administrator, Scott | When notices should go to Teams | `./deploy/azure/setup.sh teams` (asks before creating; free tier; keeps the secret and tells the deploy workflow), deploy again, then upload the app, a setup policy, and a Cloudflare rule that lets `POST /api/v1/teams/messages` through without a challenge ([deploy/teams/README.md](../teams/README.md)) |
 | Mail for notices | Rich | When notices should go by email | Administration > Usage: the mail adapter (SMTP, sendmail or Microsoft 365); Administration > Notices: the channel |
 
 ## Problems met on the first install

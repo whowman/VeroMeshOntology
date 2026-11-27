@@ -98,6 +98,7 @@ jobs:
       - name: VeroMesh
         run: |
           tenant="${{ vars.AZURE_TENANT_ID }}" api="${{ vars.API_CLIENT_ID }}"
+          TEAMS_APP_ID="${{ vars.TEAMS_APP_ID }}"  # set by setup.sh teams; empty: notices by email only
           helm upgrade --install veromesh deploy/helm/veromesh -n "$NAMESPACE" \
             -f deploy/azure/values-veromesh.yaml \
             --set "api.image.repository=$REGISTRY/veromesh/service" --set "api.image.tag=$TAG" \
@@ -109,6 +110,7 @@ jobs:
             --set "api.auth.uiScope=openid profile email api://$api/access_as_user" \
             --set "backup.encryption.recipients={${{ vars.BACKUP_RECIPIENT }}}" \
             --set "api.publicUrl=https://$HOST" \
+            ${TEAMS_APP_ID:+--set "api.teams.appId=$TEAMS_APP_ID" --set "api.teams.tenantId=$tenant" --set "api.teams.existingSecret=veromesh-teams"} \
             --wait --timeout 15m
           export NAMESPACE HOST
           envsubst '${NAMESPACE} ${HOST}' < deploy/azure/route.yaml | kubectl apply -f -

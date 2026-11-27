@@ -12,6 +12,9 @@
 #   ./setup.sh status     on or off, its nodes and pods
 #   (the same three from GitHub: Actions > Ontology on/off, no approval needed)
 #   ./setup.sh power-identity   (re)create the on/off identity and its rights only
+#   ./setup.sh teams      register the Teams bot for notices (free Azure Bot and an Entra app,
+#                         deploy/teams/register-bot.sh), keep its secret in the Key Vault and the
+#                         namespace, and tell the deploy workflow; asks first. Then deploy again.
 #   ./setup.sh reset [--decision-log]   remove the install from the cluster (releases, namespace,
 #                         volumes; with --decision-log its database too) for a clean redeploy; asks first
 #
@@ -393,6 +396,33 @@ step_power() { # off | on | status
   esac
 }
 
+step_teams() {
+  say "Teams bot for notices to owners (deploy/teams/README.md)"
+  local here result
+  here=$(cd "$(dirname "$0")/../teams" && pwd)
+  result=$(mktemp)
+  trap 'rm -f "$result"' RETURN
+  HOST=$HOST RESOURCE_GROUP=$RESOURCE_GROUP OUT=${OUT:-$PWD/veromesh-teams.zip} RESULT_FILE=$result \
+    "$here/register-bot.sh" || { echo "  Nothing changed."; return 1; }
+  # shellcheck disable=SC1090
+  source "$result"
+  az keyvault secret set --vault-name "$KV" -n teams-app-password --value "$SECRET" -o none
+  kubectl -n "$NAMESPACE" create secret generic veromesh-teams --from-literal=app-password="$SECRET" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  echo "  The bot's secret is in the Key Vault ($KV, teams-app-password) and the Secret veromesh-teams."
+  if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+    gh variable set TEAMS_APP_ID --repo "$GITHUB_REPO" --env "$ENVIRONMENT" --body "$APP_ID"
+    echo "  TEAMS_APP_ID set on the $ENVIRONMENT environment: the next deploy turns the Teams channel on."
+  else
+    echo "  Add TEAMS_APP_ID=$APP_ID to the $ENVIRONMENT environment's variables, then deploy."
+  fi
+  cat <<MSG
+  Next: run Actions > Deploy to Azure (dev). A Teams administrator uploads ${OUT:-$PWD/veromesh-teams.zip}
+  and installs it with a setup policy; Scott lets POST https://$HOST/api/v1/teams/messages through
+  Cloudflare without a challenge; on Administration > Notices choose "Teams, or email".
+MSG
+}
+
 step_reset() {
   # Removes the ontology tool's install from the cluster, so the next deploy starts from
   # nothing: the helm releases (VeroMesh, DataHub, its prerequisites) and the namespace with
@@ -476,6 +506,7 @@ case "${1:-}" in
   tls) [[ $# -eq 3 ]] || { echo "usage: $0 tls <cert.pem> <key.pem>" >&2; exit 2; }; az account set --subscription "$SUBSCRIPTION"; step_tls "$2" "$3" ;;
   gateway) az account set --subscription "$SUBSCRIPTION"; step_gateway ;;
   power-identity) az account set --subscription "$SUBSCRIPTION"; step_power_identity ;;
+  teams) az account set --subscription "$SUBSCRIPTION"; kube; step_teams ;;
   show) az account set --subscription "$SUBSCRIPTION"; step_show ;;
   off | on | status) step_power "$1" ;;
   reset) step_reset "${2:-}" ;;
