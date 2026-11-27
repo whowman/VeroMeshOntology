@@ -43,6 +43,17 @@ Every fact comes from a **source** (Workday, Entra ID, the CMDB, a workbook, a s
 
 Owners confirm (**attest**) that what the model says about their entities is right, or **dispute** it with a correction. Attestations expire and must be renewed. Each one is recorded on the decision log's hash chain, so it cannot be changed afterwards without it showing.
 
+## Attesting in meetings
+
+Owners do not have to visit a screen. In a meeting they already hold (a monthly review, a governance board), a **steward** records what each owner confirmed:
+
+1. **Before the meeting**, on the steward screen's **Meetings** tab: create the meeting (name, date, a link to its minutes or recording), choose who attends, and press **Pre-read**: for each person, the facts waiting for them in the roles they fill.
+2. **In the meeting**, tick what each owner confirmed and press **Record what was confirmed**. Each attestation is the owner's, with who recorded it and the meeting beside it. It counts at once.
+3. **Afterwards**, the owner is told by email or by a card in Teams: what was recorded, by whom, in which meeting, and until when they may object (five business days). One reminder follows after three business days if they have not answered.
+4. **The owner confirms or objects**, in Teams, or on the steward screen under *Waiting for you*, *Recorded for you in meetings*. Objecting is an ordinary dispute. When the window closes, what was not objected to **stands**.
+
+The Meetings tab shows, for each recorded fact, how its owner was told and where it stands now: open, confirmed, disputed or stands.
+
 # Signing in
 
 Sign in with your organization account. What you can do depends on your role: `reader`, `steward`, `connector`, `agent` or `admin` (see the Administrator Guide).

@@ -97,7 +97,7 @@ To write: installing the licence file (`VEROMESH_LICENCE`), what the usage repor
 
 ## Sources and precedence
 
-Every fact comes from a named **source**. Register each source once with a category (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `spreadsheet`), an owner role and a description:
+Every fact comes from a named **source**. Register each source once with a category (`hr`, `iam`, `cmdb`, `erp`, `catalog`, `governance`, `ea`, `spreadsheet`), an owner role and a description:
 
 ```bash
 curl -X PUT https://veromesh.example.com/api/v1/sources/workday \
@@ -115,8 +115,25 @@ When two sources disagree, the category decides which value wins in the effectiv
 | CSV | Exports, one file per type or with a mapping file | any |
 | Workday | Workers, positions and managers (Reports as a Service or REST), and worker changes | `hr` |
 | Microsoft Entra ID | Users and managers, role groups and AI agents' service principals (Microsoft Graph), and user changes (delta) | `iam` |
+| Workday Goals | Organization goals as objectives, with their owners and cascade | `hr` |
+| Oracle ERP Cloud | Approval limits and user accounts | `erp` |
+| ServiceNow CMDB | Applications, their owners and users | `cmdb` |
+| ServiceNow Enterprise Architecture, SAP LeanIX | The business capability map and its owners | `ea` |
+| HaloITSM | Assets, their owners and agents | `cmdb` |
+| dbt | Models as data products, owners, sensitivity, lineage, the KPIs its metrics compute, and every column with its tags | `catalog` |
+| Databricks Unity Catalog | Tables as data products, owners and stewards, sensitivity, lineage, and every column with its tags | `catalog` |
 
 To write: credentials each connector needs in the source system (Workday API client and integration system user; Entra ID application permissions `User.Read.All`, `GroupMember.Read.All`, `Application.Read.All`), running them as CronJobs, and what to do when a run reports problems. See `docs/connectors.md`.
+
+# Notices to owners
+
+When a steward records in a meeting what owners confirmed (User Guide, *Attesting in meetings*), each owner is told what was recorded and until when they may object, with one reminder. Set it up on **Administration > Notices**:
+
+- **Tell owners by:** email; Teams, or email when Teams cannot reach them; Teams only; or nobody (the steward screen only).
+- **Notices show:** the values recorded, or only which facts. Personal details (an email, an employee ID, a reporting line) are never shown.
+- **Reminder:** none, or after one to four business days (default three).
+
+Email goes through the mail adapter set on Administration > Usage, to each person's email in the model. Links in notices go to `VEROMESH_PUBLIC_URL` (Helm `api.publicUrl`). Teams needs a bot registered in your Microsoft tenant (a free Azure Bot registration, whatever cloud VeroMesh runs on) and the VeroMesh app installed for owners by a Teams administrator: see `deploy/teams/README.md`. Every notice sent is on the decision log; a notice that cannot be sent is retried every hour, and the Meetings tab says why.
 
 # Replicas and failover
 
@@ -147,7 +164,17 @@ To write: version policy, reading the release notes, the upgrade with Helm, migr
 
 ## Common problems
 
-To write: a table of symptoms, causes and fixes (sign-in refused, a connector run refused with 409, validation violations after a load, slow first decision, a replica behind).
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Every call answers 401 after an upgrade | The API's audience or issuer changed, or a list of audiences was split by `helm --set` at its comma | Check `api.auth`; escape commas in `--set` (`\,`) or use a values file |
+| A connector run is refused with 409 | Another run of the same source is still committing | Wait for it, then run again |
+| Validation violations after a load | Rows that break the model's rules | The run lists each one with its sheet or record; fix at the source and load again |
+| The first decision after a start is slow | The planner state is still being built | `/health` shows `planner: warming` until `ready` |
+| A replica is behind | It is rebuilding after a large load | It follows within seconds once the load commits; see Replicas and failover |
+| Owners are not told of recorded attestations | No channel reaches them: no mail adapter, no email in the model, or the Teams app not installed for them | The Meetings tab says why for each; fix it and the hourly run sends it |
+| A pod stays in `ImagePullBackOff` after its image was fixed | A StatefulSet does not replace a pod stuck pulling | Delete the pod; it is recreated with the fixed image |
+
+The dev install on Azure lists every problem met on its first install and where each is now handled: `deploy/azure/README.md`.
 
 # Configuration reference
 

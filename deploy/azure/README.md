@@ -2,7 +2,7 @@
 
 The dev install of VeroMesh, running beside the assessment on the assessment's AKS cluster in West US 2 (issue #19). It gives Copilot Studio an HTTPS address to reach and Entra ID sign-in, for the end-to-end test in [docs/copilot-studio-test.md](../../docs/copilot-studio-test.md).
 
-Status, 26 November 2026: **running**. First installed on 25 November; rebuilt from nothing on 26 November (`reset`, `all`, then a deploy) with no manual steps.
+Status, 27 November 2026: **running**, with the meetings attestation and notices (G9) deployed on 26 November. First installed on 25 November; rebuilt from nothing on 26 November (`reset`, `all`, then a deploy) with no manual steps beyond the ones this install still needs by design ([What is still done by hand](#what-is-still-done-by-hand)). Every problem met on the first install is now handled by the scripts: [Problems met on the first install](#problems-met-on-the-first-install). **One step is due on this install:** `./deploy/azure/setup.sh power-identity`, so the nightly off works (PR #111).
 
 | | |
 | --- | --- |
@@ -84,6 +84,40 @@ The ontology tool runs on its own node pool (`veromesh`), so it can be turned of
 - **A deploy** needs the tool on: the deploy workflow stops with a message if it is off.
 - **Never stop the whole cluster** (`az aks stop`): that would take the assessment's live site down too.
 - Every part of the ontology tool, DataHub's one-off set-up jobs included, is pinned to the `veromesh` pool (`nodeSelector: workload: veromesh`). None of it runs on the assessment's nodes, and all of it stops when the pool is off.
+
+## What is still done by hand
+
+These steps are outside what `setup.sh` and the workflows can do, or need a person on purpose.
+
+| Step | Who | When | How |
+| --- | --- | --- | --- |
+| Raise the B-series vCPU quota | Rich | First install, if `setup.sh` says "Not enough quota" | Azure portal > Quotas > Compute, West US 2, "Standard BSv2 Family vCPUs": ask for the number it prints (10 here: the assessment's 4 and this pool's 6). Usually granted in minutes. Then run `setup.sh all` again |
+| The Entra role Application Developer | Entra administrator | First install | Needed to register the two Entra apps |
+| DNS record `dev-ontology.veromesh.ai` | Scott (Cloudflare) | First install | Proxied, to the assessment's IP (`setup.sh show` prints it) |
+| Origin certificate for the name | Scott, then Rich | First install, if `setup.sh` says it is not covered | Scott issues it; `setup.sh tls <cert.pem> <key.pem>` installs it; delete the files |
+| Approve each deploy | Rich | Every deploy | Actions > Deploy to Azure (dev) waits for the `azure-dev` environment's reviewer |
+| Give the on/off identity its subnet right | Rich | Once, on installs made before 27 November | `./deploy/azure/setup.sh power-identity` (PR #111) |
+| Teams for notices (optional) | Rich, a Teams administrator, Scott | When notices should go to Teams | [deploy/teams/README.md](../teams/README.md): `register-bot.sh` (asks before creating; free tier), upload the app, a setup policy, and a Cloudflare rule that lets `POST /api/v1/teams/messages` through without a challenge |
+| Mail for notices | Rich | When notices should go by email | Administration > Usage: the mail adapter (SMTP, sendmail or Microsoft 365); Administration > Notices: the channel |
+
+## Problems met on the first install
+
+Each problem below stopped the first install on 25 November and was then fixed in the scripts or values, so a new install does not meet it: the rebuild on 26 November ran with none of these steps. The last column is only for an install that is still in the broken state.
+
+| What you saw | Why | Fixed in | On an install already in that state |
+| --- | --- | --- | --- |
+| `setup.sh` said there was not enough quota when there was, or failed reading it | The quota query printed one value per line | #86; the check is skipped once the pool exists (#88) | Run `setup.sh all` again |
+| `az postgres flexible-server db create`: unrecognized argument `-d` | Azure CLI 2.86 renamed it `--name` | #87 | Run `setup.sh all` again |
+| GitHub deploy: `AADSTS700213` (no matching federated identity) | GitHub now sends an ID-based OIDC subject; only the name-based one was trusted | #89: each identity trusts both | `setup.sh all` adds the missing credential |
+| DataHub's PostgreSQL pod: `ErrImagePull` / `ImagePullBackOff` | Bitnami removed its images from Docker Hub | #91, #93: a pinned archive build, copied into the registry by `setup.sh all` | A StatefulSet does not replace a pod stuck pulling an image: after the fixed deploy, `kubectl -n veromesh-dev delete pod prerequisites-postgresql-0` |
+| DataHub's setup job: database `datahub` does not exist | The database was not created when PostgreSQL first started | #94: `auth.database` creates it | Only made on first start, so an existing volume needs it by hand: `kubectl -n veromesh-dev exec prerequisites-postgresql-0 -- bash -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -c "CREATE DATABASE datahub"'` |
+| DataHub's system update and GMS failed authenticating | With token sign-in off, DataHub 1.8 still needs `DATAHUB_SYSTEM_CLIENT_SECRET` | #95, #96 | Deploy again |
+| DataHub's UI image: pulled from `docker.io/...acrveromesh...` | The chart prefixes the registry unless `image.registry` is set | #96 | Deploy again |
+| The API rejected every token after a deploy | `helm --set` split the audience list at its comma | #98: escaped | Deploy again |
+| The steward screen showed the yellow development bar with sign-in on | A CSS rule overrode `hidden` | #100 | Deploy again |
+| Actions > Ontology on/off did nothing for `on` or `off` | YAML read the unquoted choices as true and false | #101 | Nothing: run it again |
+| The nightly off failed: `LinkedAuthorizationFailed` on `subnets/join/action` | Scaling a pool in our own virtual network needs the right to join its subnet | #111 | `./deploy/azure/setup.sh power-identity` |
+| The nightly off started nine hours late, or not at all | GitHub delays scheduled runs at busy times, worst on the hour | #111: 04:07 UTC, and again at 06:37 UTC | Nothing |
 
 ## Notes
 
