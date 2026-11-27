@@ -53,6 +53,13 @@ cp "$HERE/color.png" "$HERE/outline.png" "$work/"
 (cd "$work" && zip -q -X "$OLDPWD/$OUT" manifest.json color.png outline.png)
 rm -rf "$work"
 
+if [ -n "${RESULT_FILE:-}" ]; then  # setup.sh teams reads these (the secret never reaches the screen)
+  umask 077
+  printf 'APP_ID=%s\nTENANT=%s\nSECRET=%s\n' "$APP_ID" "$TENANT" "$SECRET" > "$RESULT_FILE"
+  echo "Registered; $OUT written for the Teams administrator."
+  exit 0
+fi
+
 cat <<MSG
 
 Done. Give the VeroMesh install these (Helm):
