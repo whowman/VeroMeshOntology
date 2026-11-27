@@ -221,6 +221,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         s = settings or get_settings()
+        auth.personal_fields("people", s)  # a need-to-know setting naming no People field stops the start
+        if s.agent_personal_fields is not None:
+            auth._field_list(s.agent_personal_fields)
         # Refuse to serve with sign-in neither configured nor explicitly turned off.
         auth.check_config(s)
         if s.decision_log == "memory" and not s.auth_disabled:
@@ -518,9 +521,19 @@ def create_app(
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @app.get("/api/v1/schema", dependencies=need(auth.READ), tags=["model"])
-    def model_schema() -> list[dict]:
-        """Every entity type: its fields, kinds, required fields, reference targets and help text."""
-        return entities.schema()
+    def model_schema(c: Cfg, who: Who) -> list[dict]:
+        """Every entity type: its fields, kinds, required fields, reference targets and help text.
+        ``personal`` marks the fields withheld from you unless you have the need to know (People:
+        this install's need-to-know setting)."""
+        out = entities.schema()
+        withheld = auth.personal_fields("people", c, who)
+        for t in out:
+            if t["type"] == "people":
+                for f in t["fields"]:
+                    f.pop("personal", None)
+                    if f["key"] in withheld:
+                        f["personal"] = True
+        return out
 
     @app.get("/api/v1/sources", dependencies=need(auth.READ), tags=["model"])
     def model_sources(s: Svc) -> list[dict]:
@@ -993,7 +1006,9 @@ def create_app(
             return out
 
         def entity(type_: str, rid: str) -> dict:
-            return auth.need_to_know(who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base))
+            return auth.need_to_know(
+                who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base), c
+            )
 
         if who.kind == "user":
             value = auth.person_claim(who, c)
@@ -1477,13 +1492,13 @@ def create_app(
     def entity_list(s: Svc, c: Cfg, who: Who, type_: str, source: str | None = None) -> list[dict]:
         """All entities of a type across the model, or in one source. Personal details only to those who need them."""
         rows = changesets.list_entities(s.store, type_, c.instance_base, source)
-        return [auth.need_to_know(who, type_, r) for r in rows]
+        return [auth.need_to_know(who, type_, r, c) for r in rows]
 
     @app.get("/api/v1/{type_}/{rid}", dependencies=need(auth.READ), tags=["entities"])
     def entity_get(s: Svc, c: Cfg, who: Who, type_: str, rid: str, asOf: str | None = None) -> dict:
         """The entity as VeroMesh believes it now, or as of a date (YYYY-MM-DD) or time. Personal details only to those who need them."""
         return auth.need_to_know(
-            who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf)
+            who, type_, changesets.get_entity(s.store, type_, rid, c.instance_base, as_of=asOf), c
         )
 
     @app.post("/api/v1/{type_}", dependencies=need(auth.CONNECTOR), tags=["entities"])
@@ -1538,7 +1553,7 @@ def create_app(
     def mcp_entity(st: dict, type_: str, rid: str) -> dict:
         entities.check_type(type_)
         e = changesets.get_entity(st["service"].store, type_, rid, st["settings"].instance_base)
-        return auth.need_to_know(st["caller"], type_, e)
+        return auth.need_to_know(st["caller"], type_, e, st["settings"])
 
     mcp = mcp_server.build(
         {

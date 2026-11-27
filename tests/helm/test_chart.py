@@ -919,3 +919,16 @@ def test_public_url_and_teams():
     assert ref == {"name": "veromesh-teams", "key": "app-password"}
     bad = helm("template", "veromesh", str(CHART), *WITH_KEY, "--set", "api.teams.appId=app-1", check=False)
     assert bad.returncode != 0 and "api.teams.tenantId is needed" in bad.stderr
+
+
+def test_need_to_know_setting():
+    def env(*sets):
+        return env_of(one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+
+    assert "VEROMESH_PERSONAL_FIELDS" not in env()
+    e = env(
+        "api.needToKnow.personalFields=email\\,employeeId\\,reportsTo\\,name",
+        "api.needToKnow.agentPersonalFields=email",
+    )
+    assert e["VEROMESH_PERSONAL_FIELDS"]["value"] == "email,employeeId,reportsTo,name"
+    assert e["VEROMESH_AGENT_PERSONAL_FIELDS"]["value"] == "email"
