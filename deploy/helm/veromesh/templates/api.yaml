@@ -159,6 +159,16 @@ spec:
             - name: VEROMESH_PUBLIC_URL
               value: {{ $public | quote }}
             {{- end }}
+            {{- with .Values.api.needToKnow }}
+            {{- if .personalFields }}
+            - name: VEROMESH_PERSONAL_FIELDS
+              value: {{ .personalFields | quote }}
+            {{- end }}
+            {{- if .agentPersonalFields }}
+            - name: VEROMESH_AGENT_PERSONAL_FIELDS
+              value: {{ .agentPersonalFields | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.api.teams }}
             {{- if .appId }}
             - name: VEROMESH_TEAMS_APP_ID

@@ -82,6 +82,13 @@ api:
   # notices to owners. Unset: https://<ingress host> when the ingress is on, else no link.
   publicUrl: ""
 
+  # Need to know: the People fields readers and agents do not see, comma-separated.
+  # Empty: email, employeeId and reportsTo (they see names and roles filled); add "name"
+  # to withhold names too. agentPersonalFields, when set, applies to agents instead.
+  needToKnow:
+    personalFields: ""
+    agentPersonalFields: ""
+
   # The Teams channel for notices to owners (deploy/teams/README.md): the bot's Entra
   # application ID, the customer's tenant, and a Secret holding the bot's client secret
   # (key app-password). Unset: owners are told by email only.

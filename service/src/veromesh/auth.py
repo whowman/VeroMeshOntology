@@ -249,9 +249,35 @@ def person_claim(caller: Caller, s: Settings) -> str | None:
     return None
 
 
-def need_to_know(caller: Caller, type_: str, entity: dict) -> dict:
+def _field_list(raw: str) -> frozenset[str]:
+    from .entities import FIELDS
+
+    got = frozenset(x.strip() for x in raw.split(",") if x.strip())
+    unknown = sorted(got - set(FIELDS["people"]) - {"id"})
+    if unknown or "id" in got:
+        raise ValueError(
+            f"Need-to-know fields must be People fields other than id; not {', '.join(unknown or ['id'])}. "
+            f"People fields: {', '.join(k for k in FIELDS['people'] if k != 'id')}."
+        )
+    return got
+
+
+def personal_fields(type_: str, settings=None, caller: Caller | None = None) -> frozenset[str]:
+    """The fields of ``type_`` this caller does not see without the need to know: the schema's
+    personal fields, or for People the install's setting (``personal_fields``, and
+    ``agent_personal_fields`` for agents)."""
+    base = PERSONAL_FIELDS.get(type_, frozenset())
+    if type_ != "people" or settings is None:
+        return base
+    agent = caller is not None and "agent" in caller.roles and not caller.has("reader")
+    raw = settings.agent_personal_fields if agent and settings.agent_personal_fields is not None else None
+    raw = raw if raw is not None else settings.personal_fields
+    return base if raw is None else _field_list(raw)
+
+
+def need_to_know(caller: Caller, type_: str, entity: dict, settings=None) -> dict:
     """The entity as this caller may see it: personal fields removed, and named, for those without the need."""
-    fields = PERSONAL_FIELDS.get(type_)
+    fields = personal_fields(type_, settings, caller)
     if not fields or caller.has(*PERSONAL):
         return entity
     withheld = sorted(k for k in fields if k in entity)

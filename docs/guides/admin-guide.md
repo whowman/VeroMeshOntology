@@ -85,6 +85,15 @@ To write: Entra ID app registrations step by step (API app with app roles, UI ap
 
 Roles come from the token's roles claim (`VEROMESH_OIDC_ROLES_CLAIM`, with an optional prefix `VEROMESH_OIDC_ROLE_PREFIX`). The signed-in person is matched to a person in the model by `VEROMESH_PERSON_MATCH_FIELD` (email by default).
 
+## Need to know
+
+Readers and agents see who fills which role, but not people's personal details: by default a person's email, employee ID and reporting line are withheld from them and named under `withheld`. Stewards, connectors and administrators see everything. Each organization decides what else is withheld:
+
+- `VEROMESH_PERSONAL_FIELDS` (Helm `api.needToKnow.personalFields`): the People fields withheld from readers and agents, comma-separated. Add `name` to withhold names too: `email,employeeId,reportsTo,name`.
+- `VEROMESH_AGENT_PERSONAL_FIELDS` (Helm `api.needToKnow.agentPersonalFields`): a different list for agents, for example names shown to readers but not to agents.
+
+Roles filled always stay answerable, so the decision check and the steward screen work either way. `GET /api/v1/schema` marks the fields withheld from the caller as `personal`. A setting that names no People field stops the service at start.
+
 ## AI agents
 
 Each agent signs in with its own client ID, recorded on the agent in the model (`signInClientId`). An agent can only act within the use cases approved for it and the authority of the person it acts for.

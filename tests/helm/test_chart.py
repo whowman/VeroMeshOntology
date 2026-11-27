@@ -928,3 +928,16 @@ def test_gateway_tokens_come_from_a_secret():
     assert "envFrom" not in container()
     c = container("api.gateway.existingSecret=veromesh-gateway")
     assert c["envFrom"] == [{"secretRef": {"name": "veromesh-gateway"}}]
+
+
+def test_need_to_know_setting():
+    def env(*sets):
+        return env_of(one(render(sets=sets), "Deployment")["spec"]["template"]["spec"]["containers"][0])
+
+    assert "VEROMESH_PERSONAL_FIELDS" not in env()
+    e = env(
+        "api.needToKnow.personalFields=email\\,employeeId\\,reportsTo\\,name",
+        "api.needToKnow.agentPersonalFields=email",
+    )
+    assert e["VEROMESH_PERSONAL_FIELDS"]["value"] == "email,employeeId,reportsTo,name"
+    assert e["VEROMESH_AGENT_PERSONAL_FIELDS"]["value"] == "email"
