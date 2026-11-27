@@ -28,6 +28,7 @@ flowchart LR
   Capability -- serves --> Objective
   Objective -- "measured by" --> KPI
   Capability -- "realized by" --> Process
+  Capability -- "supported by" --> System
   Person -- fills --> Role
   Role -- holds --> Authority
   Role -- owns --> KPI
@@ -59,7 +60,7 @@ The two thick arrows make the model organizational rather than semantic: **acts 
 | Objective | An outcome the organization intends | name, KPIs measuring it, owner role, level (enterprise, function, capability, process), parent objective, priority, objectives it supports and conflicts with | Strategy / OKR tools, goal-setting in the HR suite |
 | KPI | A measure of progress toward objectives; used for routing, not as a target | definition, unit, one owning role, data products it is computed from; as a health measure: capabilities it shows the health of, health threshold, better when higher or lower, current value and date | Metrics layer, performance tools |
 | Policy, Regulation | An internal rule or external law | name, jurisdiction, what it bounds | GRC / policy library |
-| Business capability | What the organization can do | owner, objectives served, parent capability, processes, data produced and consumed | Enterprise architecture tools |
+| Business capability | What the organization can do | owner, objectives served, parent capability, processes, the applications that support it, data produced and consumed | Enterprise architecture tools |
 | Process | A business process realizing a capability | owner, systems it runs on | Process repository |
 | Person | A human filling roles; principal for agents | name, employee ID, email, roles, reporting line, nothing else | HR, identity |
 | Role | A job role or position; ownership attaches here | name, who fills it, authority held | HR |

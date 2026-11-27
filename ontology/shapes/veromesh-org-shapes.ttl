@@ -92,7 +92,17 @@ vms:CapabilityShape
                   sh:message "Capability has no owner." ] ;
     sh:property [ sh:path vmo:serves ; sh:class vmo:Objective ; sh:minCount 1 ; sh:severity sh:Warning ;
                   sh:message "Capability does not serve any objective." ] ;
-    sh:property [ sh:path vmo:parentCapability ; sh:class vmo:BusinessCapability ; sh:maxCount 1 ] .
+    sh:property [ sh:path vmo:parentCapability ; sh:class vmo:BusinessCapability ; sh:maxCount 1 ] ;
+    sh:property [ sh:path vmo:supportedBy ; sh:class vmo:System ] ;
+    sh:sparql [
+        a sh:SPARQLConstraint ;
+        sh:severity sh:Warning ;
+        sh:message "Capability is supported by a retired system: map it to the system that replaced it." ;
+        sh:prefixes vms: ;
+        sh:select """
+            SELECT $this ?value WHERE { $this vmo:supportedBy ?value . ?value vmo:lifecycleStatus "retired" . }
+        """ ;
+    ] .
 
 vms:ProcessShape
     a sh:NodeShape ;

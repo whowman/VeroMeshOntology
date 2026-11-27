@@ -259,6 +259,15 @@ SHEETS: tuple[Sheet, ...] = (
                 help="IDs of the processes that carry out this capability. Separate several with ';'.",
             ),
             Col(
+                "Supported by systems",
+                "ref",
+                VMO.supportedBy,
+                ("Systems",),
+                multi=True,
+                help="IDs of the applications that support this capability, as the enterprise architecture "
+                "tool maps them. Separate several with ';'.",
+            ),
+            Col(
                 "Produces data products",
                 "ref",
                 VMO.produces,

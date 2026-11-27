@@ -17,6 +17,10 @@ both is one entity with one owner role:
   definition (the description), parent capability, and the owner **role**
   (``AccountsPayable.Owner``, "Owner of Accounts payable"). Archived fact sheets are left out.
 * **roles**: one per owned capability.
+* **supported by systems**: the applications related to each capability (its
+  ``relBusinessCapabilityToApplication``), as the systems VeroMesh holds: the Application fact
+  sheet's ``externalId`` when it is a system's ID or CMDB ID (as when LeanIX is synced with the
+  CMDB), else its name. An application that matches no system is left out and reported.
 * **people**: the owner (a RESPONSIBLE subscription, with the role named ``owner_role``,
   default "Business Owner"; else the first RESPONSIBLE subscriber), matched by email to the
   people VeroMesh holds. An owner who matches no one is reported.
@@ -33,7 +37,7 @@ from collections.abc import Iterable
 from ..core import BatchConnector, Item, MappingError, Record
 from ..core.session import ApiError
 from ..core.source import SourceApi
-from .servicenow import _now, _slug, pascal
+from .servicenow import SystemMatcher, _now, _slug, pascal
 
 GRAPHQL = "/services/pathfinder/v1/graphql"
 TOKEN = "/services/mtm/v1/oauth2/token"
@@ -46,6 +50,9 @@ QUERY = """query Capabilities($after: String) {
       ... on BusinessCapability {
         externalId { externalId }
         relToParent { edges { node { factSheet { id } } } }
+        relBusinessCapabilityToApplication { edges { node { factSheet {
+          id name ... on Application { externalId { externalId } }
+        } } } }
       }
       subscriptions { edges { node { type user { email displayName } roles { name } } } }
     } }
@@ -114,6 +121,7 @@ class LeanixConnector(BatchConnector):
         people: list[dict] | None = None,
         id_from: str = "name",
         owner_role: str = "Business Owner",
+        systems: list[dict] | None = None,
     ) -> None:
         super().__init__()
         if id_from not in ("name", "externalId"):
@@ -123,10 +131,30 @@ class LeanixConnector(BatchConnector):
         self.caps: list[dict] = []
         self.ids: dict[str, str] = {}
         self.unmatched: list[str] = []
+        self.systems = SystemMatcher(systems)
+        self.unlinked: list[str] = []
+        self.support: dict[str, list[str]] = {}
 
     def describe(self) -> str:
         note = f"; {len(self.unmatched)} owners match no one in VeroMesh" if self.unmatched else ""
+        if self.unlinked:
+            note += (
+                f"; {len(self.unlinked)} applications match no system VeroMesh holds "
+                f"({', '.join(sorted(set(self.unlinked))[:5])})"
+            )
         return f"SAP LeanIX: {len(self.caps)} business capabilities{note}"
+
+    def _support(self, fs: dict) -> list[str]:
+        out: list[str] = []
+        for n in _edges(fs.get("relBusinessCapabilityToApplication")):
+            app = n.get("factSheet") or {}
+            ext = (app.get("externalId") or {}).get("externalId")
+            sid = self.systems.find(ext, name=app.get("name"))
+            if sid is None:
+                self.unlinked.append(str(app.get("name") or app.get("id")))
+            elif sid not in out:
+                out.append(sid)
+        return sorted(out)
 
     def fingerprint(self) -> str | None:
         return "leanix"
@@ -155,6 +183,7 @@ class LeanixConnector(BatchConnector):
                 )
             taken[cid] = c["id"]
             self.ids[c["id"]] = cid
+        self.support = {c["id"]: self._support(c) for c in self.caps}  # before describe() is read
         owners: dict[str, list[str]] = {}
         for c in self.caps:
             yield Record(ref=f"LeanIX business capability {c.get('name')}", data=c, type="capabilities")
@@ -180,6 +209,8 @@ class LeanixConnector(BatchConnector):
             parents = [n["factSheet"]["id"] for n in _edges(c.get("relToParent")) if n.get("factSheet")]
             if parents and parents[0] in self.ids:  # an archived or missing parent: top level
                 e["parentCapability"] = self.ids[parents[0]]
+            if sup := self.support.get(c["id"]):
+                e["supportedBySystems"] = sup
             items = []
             if self._owner(c) is not None:
                 e["ownerRole"] = f"{cid}.Owner"

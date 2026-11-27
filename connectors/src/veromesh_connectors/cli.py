@@ -295,6 +295,7 @@ def servicenow_ea(api: ApiSession, args) -> int:
         people=api.entities("people"),
         id_field=args.id_field,
         parent_field=args.parent_field,
+        systems=api.entities("systems"),
     )
     opts = RunOptions(source=args.source or "servicenow-ea", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
@@ -312,6 +313,7 @@ def leanix_import(api: ApiSession, args) -> int:
         people=api.entities("people"),
         id_from=args.id_from,
         owner_role=args.owner_role,
+        systems=api.entities("systems"),
     )
     opts = RunOptions(source=args.source or "leanix", mode=args.mode, dry_run=args.dry_run)
     return 0 if Runner(api, _out).run(conn, opts).ok else 1
