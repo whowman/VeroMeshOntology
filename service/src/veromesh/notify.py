@@ -304,7 +304,10 @@ class Notifier:
             days = cfg["reminderBusinessDays"]
             if not days or (mid, pid, "reminder") in sent:
                 continue
-            on = meetings.add_business_days(date.fromisoformat(min(r["at"] for r in rows)[:10]), days)
+            # Counted back from the end of the window, which was set on the day of recording in
+            # the install's time zone (the timestamps are UTC, a day off in the evening).
+            until = date.fromisoformat(min(r["objectionUntil"] for r in rows))
+            on = meetings.add_business_days(until, days - meetings.OBJECTION_DAYS)
             if today >= on:
                 out.append(("reminder", mid, pid, rows))
         return out

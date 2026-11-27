@@ -58,6 +58,8 @@ def item(**more) -> dict:
 def test_business_days_skip_the_weekend():
     assert M.add_business_days(date(2026, 11, 26), 5) == date(2026, 12, 3)  # Thursday -> next Thursday
     assert M.add_business_days(date(2026, 11, 28), 1) == date(2026, 11, 30)  # Saturday -> Monday
+    assert M.add_business_days(date(2026, 12, 3), -2) == date(2026, 12, 1)  # back from Thursday
+    assert M.add_business_days(date(2026, 11, 30), -1) == date(2026, 11, 27)  # Monday -> Friday
 
 
 def test_the_meeting_is_evidence_on_the_chain(mtg):

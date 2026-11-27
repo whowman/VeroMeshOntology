@@ -36,10 +36,13 @@ OBJECTION_DAYS = 5  # business days
 
 
 def add_business_days(start: date, days: int) -> date:
-    """``days`` working days after ``start`` (Monday to Friday; public holidays are not known)."""
+    """``days`` working days after ``start`` (before it when negative; Monday to Friday;
+    public holidays are not known)."""
     d = start
+    step = timedelta(days=1 if days >= 0 else -1)
+    days = abs(days)
     while days > 0:
-        d += timedelta(days=1)
+        d += step
         if d.weekday() < 5:
             days -= 1
     return d
