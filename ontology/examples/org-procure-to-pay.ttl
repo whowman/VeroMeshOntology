@@ -39,6 +39,7 @@ ex:AccountsPayable
     vmo:serves ex:PaySuppliersCorrectly ;
     vmo:ownedBy ex:ApManager ;
     vmo:realizedBy ex:InvoiceApproval ;
+    vmo:supportedBy ex:Erp ;
     vmo:produces ex:SupplierInvoices , ex:SupplierPayments .
 
 ex:InvoiceApproval

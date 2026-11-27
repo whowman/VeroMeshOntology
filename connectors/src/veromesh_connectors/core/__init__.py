@@ -1,12 +1,22 @@
 """The connector SDK core: everything a connector does NOT have to implement."""
 
-from .contract import BatchConnector, Connector, Event, EventConnector, Item, MappingError, Record
+from .contract import (
+    BatchConnector,
+    Connector,
+    Event,
+    EventConnector,
+    Item,
+    MappingError,
+    Record,
+    source_time,
+)
 from .mapping import DeclarativeMapper, TabularMapper, find_type, split_multi
 from .runner import Runner, RunOptions, RunResult
 from .session import ApiError, ApiSession, ClientCredentials, StaticToken
 from .transport import Transport, TransportError
 
 __all__ = [
+    "source_time",
     "ApiError",
     "ApiSession",
     "BatchConnector",
