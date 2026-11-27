@@ -7,11 +7,14 @@
 name: Ontology on/off
 
 on:
-  # Every night at 11 PM Eastern (04:00 UTC; midnight during daylight saving time), turn it
-  # off, so a day of testing never runs on overnight. Off when already off changes nothing.
-  # To change the time, edit the cron line (UTC; https://crontab.guru).
+  # Every night at about 11 PM Eastern (04:07 UTC; about midnight during daylight saving
+  # time), turn it off, so a day of testing never runs on overnight. GitHub starts scheduled
+  # runs late when it is busy, worst on the hour, so the minute is off the hour and a second
+  # run follows; off when already off changes nothing. To change the time, edit the cron
+  # lines (UTC; https://crontab.guru).
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "7 4 * * *"
+    - cron: "37 6 * * *"
   workflow_dispatch:
     inputs:
       action:
