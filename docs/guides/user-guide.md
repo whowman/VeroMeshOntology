@@ -90,7 +90,7 @@ A workbook may cover only some sheets. Each workbook is loaded as its own **sour
 
 ## Filling it in
 
-1. **Get the template.** `veromesh-connect spreadsheet template -o model.xlsx` writes an empty workbook built from your installation's own rules, with a "How to use" sheet; `--example` fills it with a worked procure-to-pay example to copy from. To change a source that is already loaded, start from its export: `veromesh-connect spreadsheet export --source governance -o governance.xlsx`.
+1. **Get the template.** `veromesh-connect spreadsheet template -o model.xlsx` writes an empty workbook built from your installation's own rules, with a "How to use" sheet; `--example` fills it with a worked procure-to-pay example to copy from. Both are also in the repository, ready to download: [docs/guides/examples](examples/). To change a source that is already loaded, start from its export: `veromesh-connect spreadsheet export --source governance -o governance.xlsx`.
 2. **Fill the sheets in order.** Rows refer to each other by ID, so fill the things referred to first:
     1. Roles (only those HR does not hold), Objectives, KPIs, Capabilities, Processes;
     2. Policies, then Actions, then Impacts (which KPI or capability each action moves, and from what amount it is material);
