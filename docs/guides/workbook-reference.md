@@ -68,6 +68,7 @@ What the organization is able to do; the spine of the model.
 | Serves objectives |  | ID of Objectives (several, separated by `;`) | IDs of the objectives this capability contributes to. |
 | Parent capability |  | ID of Capabilities | ID of the broader capability this one is part of. Empty for a top-level capability. |
 | Realized by processes |  | ID of Processes (several, separated by `;`) | IDs of the processes that carry out this capability. |
+| Supported by systems |  | ID of Systems (several, separated by `;`) | IDs of the applications that support this capability, as the enterprise architecture tool maps them. |
 | Produces data products |  | ID of Data products (several, separated by `;`) | IDs of the data products this capability creates and answers for. |
 | Consumes data products |  | ID of Data products (several, separated by `;`) | IDs of the data products this capability depends on. |
 

@@ -396,3 +396,60 @@ def test_dbt_and_databricks_describe_one_table(http, company, monkeypatch):
     assert main([*API, *DATABRICKS], http=http, source_http=h) == 0
     assert main([*API, "dbt", "import", "--url", "http://testserver/dbt"], http=http, source_http=h) == 0
     assert {d["id"] for d in http.get("/api/v1/data-products").json()} == set(truth.assets)
+
+
+def _ea_support(http, h, truth, monkeypatch, tool: list[str], source: str) -> tuple[dict, dict]:
+    """Load the CMDB, then an EA tool; the supporting systems it linked, and what the truth says."""
+    prof = __import__(f"harness.profiles.{truth.profile}", fromlist=["EA_SUPPORT"])
+    if not getattr(prof, "EA_SUPPORT", None):
+        pytest.skip("this harness maps no applications to capabilities")
+    monkeypatch.setenv("SERVICENOW_USER", "admin")
+    monkeypatch.setenv("SERVICENOW_PASSWORD", "harness")
+    load(http, h)
+    snow = ["servicenow", "import", "--url", "http://testserver/servicenow"]
+    assert main([*API, *snow], http=http, source_http=h) == 0
+    assert main([*API, *tool], http=http, source_http=h) == 0
+    by_name = {
+        s["name"]: s["id"] for s in http.get("/api/v1/systems", params={"source": "servicenow"}).json()
+    }
+    want: dict[str, set] = {}
+    for cap, sid in prof.EA_SUPPORT:
+        want.setdefault(cap, set()).add(by_name[truth.systems[sid].name])
+    caps = http.get("/api/v1/capabilities", params={"source": source}).json()
+    got = {
+        c["id"]: set(v if isinstance(v, list) else [v]) for c in caps if (v := c.get("supportedBySystems"))
+    }
+    return got, want
+
+
+def test_servicenow_ea_links_capabilities_to_the_applications_that_provide_them(http, company, monkeypatch):
+    truth, h = company
+    got, want = _ea_support(
+        http,
+        h,
+        truth,
+        monkeypatch,
+        ["servicenow", "ea", "--url", "http://testserver/servicenow"],
+        "servicenow-ea",
+    )
+    assert got == want
+
+
+def test_leanix_links_the_same_applications_except_one_entered_by_hand(http, company, monkeypatch):
+    truth, h = company
+    if "leanix" not in h.get("/harness/status").json()["systems"]:
+        pytest.skip("this harness has no LeanIX")
+    monkeypatch.setenv("LEANIX_API_TOKEN", "harness-leanix-api-token")
+    got, want = _ea_support(
+        http, h, truth, monkeypatch, ["leanix", "import", "--url", "http://testserver/leanix"], "leanix"
+    )
+    unsynced = [
+        d["about"]
+        for d in h.get("/harness/answer-key").json()["defects"]
+        if d["kind"] == "application-unsynced"
+    ]
+    # The application entered by hand matches no system by external ID or name: left out (and
+    # reported); every other link is the same as ServiceNow's.
+    missing = {c for c in want if want[c] - got.get(c, set())}
+    assert missing == {d["capability"] for d in unsynced}
+    assert all(got.get(c, set()) <= want[c] for c in want)

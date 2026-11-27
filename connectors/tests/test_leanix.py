@@ -22,8 +22,15 @@ def sub(email, *roles, kind="RESPONSIBLE"):
     return {"node": {"type": kind, "user": {"email": email}, "roles": [{"name": r} for r in roles]}}
 
 
-def cap(fid, name, parent=None, subs=(), status="ACTIVE", ext=None, desc=None):
+def app(fid, name, ext=None):
     return {
+        "node": {"factSheet": {"id": fid, "name": name, "externalId": {"externalId": ext} if ext else None}}
+    }
+
+
+def cap(fid, name, parent=None, subs=(), status="ACTIVE", ext=None, desc=None, apps=()):
+    return {
+        "relBusinessCapabilityToApplication": {"edges": list(apps)},
         "id": fid,
         "name": name,
         "description": desc,
@@ -168,3 +175,28 @@ def test_leanix_and_servicenow_ea_describe_one_capability(http, monkeypatch):
     both = {c["id"] for c in http.get("/api/v1/capabilities").json()}
     assert {"Finance", "AccountsPayable", "SupplierOnboarding"} <= both
     assert len([c for c in both if c.lower() == "accountspayable"]) == 1
+
+
+def test_capabilities_link_to_their_applications_by_external_id_or_name(http, capsys):
+    from test_servicenow_ea import systems
+
+    people(http)
+    systems(
+        http,
+        {"id": "APM0001000", "name": "Oracle Fusion ERP", "cmdbId": "a-erp"},
+        {"id": "APM0003000", "name": "Coupa", "cmdbId": "a-coupa"},
+    )
+    caps = [
+        *CAPS[:1],
+        cap(
+            "f2",
+            "Accounts payable",
+            "f1",
+            [sub("lee@example.com", "Business Owner")],
+            apps=[app("x1", "Oracle ERP Cloud", ext="a-erp"), app("x2", "coupa"), app("x3", "Bank portal")],
+        ),
+    ]
+    assert main([*API, *LX], http=http, source_http=leanix(caps)) == 0
+    got = capabilities(http)["AccountsPayable"]["supportedBySystems"]
+    assert sorted(got if isinstance(got, list) else [got]) == ["APM0001000", "APM0003000"]
+    assert "1 applications match no system VeroMesh holds (Bank portal)" in capsys.readouterr().out

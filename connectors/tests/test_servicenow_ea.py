@@ -21,14 +21,23 @@ def ref(sid):
     return {"link": f"/api/now/table/x/{sid}", "value": sid} if sid else ""
 
 
-def servicenow(caps: list[dict], users: dict[str, dict]) -> TestClient:
+def servicenow(caps: list[dict], users: dict[str, dict], apps=(), rels=()) -> TestClient:
     app = FastAPI()
+    tables = {
+        "cmdb_ci_business_capability": caps,
+        "cmdb_ci_business_app": list(apps),
+        "cmdb_rel_ci": list(rels),
+    }
 
-    @app.get("/servicenow/api/now/table/cmdb_ci_business_capability")
-    def capabilities(request: Request):
+    @app.get("/servicenow/api/now/table/{table}")
+    def rows(table: str, request: Request):
+        got = tables[table]
+        q = request.query_params.get("sysparm_query", "")
+        if q.startswith("type.name="):  # the only query the connector sends
+            got = [r for r in got if r["type"]["display_value"] == q[len("type.name=") :]]
         off = int(request.query_params.get("sysparm_offset", 0))
         lim = int(request.query_params.get("sysparm_limit", 1000))
-        return {"result": caps[off : off + lim]}
+        return {"result": got[off : off + lim]}
 
     @app.get("/servicenow/api/now/table/sys_user/{sid}")
     def user(sid: str):
@@ -161,3 +170,44 @@ def test_ea_decides_the_owner_until_the_organization_says_otherwise(http):
     assert capabilities(http)["AccountsPayable"]["ownerRole"] == "ApManager"
     assert http.delete("/api/v1/domains/capabilities").status_code == 200  # back to the default
     assert capabilities(http)["AccountsPayable"]["ownerRole"] == "AccountsPayable.Owner"
+
+
+APPS = [
+    {"sys_id": "a-erp", "number": "APM0001000", "name": "Oracle Fusion ERP", "install_status": "1"},
+    {"sys_id": "a-bank", "number": "APM0002000", "name": "Bank portal", "install_status": "1"},
+]
+PROVIDES = {"value": "rt1", "display_value": "Provided by::Provides"}
+RELS = [
+    {"sys_id": "r1", "parent": ref("c2"), "child": ref("a-erp"), "type": PROVIDES},
+    {"sys_id": "r2", "parent": ref("c2"), "child": ref("a-bank"), "type": PROVIDES},
+    {"sys_id": "r3", "parent": ref("c4"), "child": ref("a-erp"), "type": PROVIDES},  # retired capability
+    {
+        "sys_id": "r4",
+        "parent": ref("a-erp"),
+        "child": ref("srv1"),
+        "type": {"value": "rt2", "display_value": "Runs on::Runs"},
+    },
+]
+
+
+def systems(http, *rows) -> None:
+    items = [{"type": "systems", "op": "upsert", "entity": e} for e in rows]
+    cs = http.post("/api/v1/changesets", json={"source": "servicenow"}).json()["id"]
+    http.post(f"/api/v1/changesets/{cs}/items", json={"items": items})
+    assert http.post(f"/api/v1/changesets/{cs}/commit").status_code in (200, 201)
+
+
+def test_capabilities_link_to_the_applications_that_provide_them(http, capsys):
+    systems(http, {"id": "APM0001000", "name": "Oracle Fusion ERP", "cmdbId": "a-erp"})
+    assert main([*API, *EA], http=http, source_http=servicenow(CAPS, USERS, APPS, RELS)) == 0
+    caps = capabilities(http, "servicenow-ea")
+    assert caps["AccountsPayable"]["supportedBySystems"] in ("APM0001000", ["APM0001000"])
+    assert not caps["Finance"].get("supportedBySystems")
+    out = capsys.readouterr().out
+    assert "1 links to supporting systems" in out and "Bank portal" in out and "load the CMDB first" in out
+
+
+def test_without_the_cmdb_loaded_nothing_is_linked_and_the_load_still_works(http, capsys):
+    assert main([*API, *EA], http=http, source_http=servicenow(CAPS, USERS, APPS, RELS)) == 0
+    assert not capabilities(http, "servicenow-ea")["AccountsPayable"].get("supportedBySystems")
+    assert "2 supporting applications VeroMesh does not hold yet" in capsys.readouterr().out

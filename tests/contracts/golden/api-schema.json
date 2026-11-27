@@ -288,6 +288,17 @@
         ]
       },
       {
+        "help": "IDs of the applications that support this capability, as the enterprise architecture tool maps them. Separate several with ';'.",
+        "key": "supportedBySystems",
+        "kind": "ref",
+        "label": "Supported by systems",
+        "multi": true,
+        "required": false,
+        "targets": [
+          "systems"
+        ]
+      },
+      {
         "help": "IDs of the data products this capability creates and answers for. Separate several with ';'.",
         "key": "producesDataProducts",
         "kind": "ref",
